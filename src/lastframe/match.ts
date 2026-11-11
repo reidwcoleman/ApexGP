@@ -239,7 +239,18 @@ export class Match {
       const side = d.alongX ? Math.sign(c.z - n.z) : Math.sign(c.x - n.x);
       this.emit({ t: 'door', i: d.id, open: 1, dir: side || 1, blast: 1 - dist / 5.2 });
     }
-    if (n.kind !== 'frag') return;
+    if (n.kind !== 'frag') {
+      // a flash works on them as it does on you: full in the face it's seconds of nothing, from behind hardly at all
+      for (const b of this.bots.values()) {
+        const o = this.bodies[b.slot];
+        if (!this.players.find((p) => p.slot === b.slot)?.alive) continue;
+        const dx = n.x - o.x, dz = n.z - o.z, d = Math.hypot(dx, dz, n.y - o.y - 1.5);
+        if (d > 14 || !this.world.sees({ x: n.x, y: n.y + 0.2, z: n.z }, { x: o.x, y: o.y + 1.6, z: o.z })) continue;
+        const off = Math.abs(Math.atan2(Math.sin(Math.atan2(-dx, -dz) - b.yaw), Math.cos(Math.atan2(-dx, -dz) - b.yaw)));
+        b.flashed((1 - d / 14) * (off < 1.3 ? 1 : 0.3));
+      }
+      return;
+    }
     for (const p of this.players) {
       if (!p.alive) continue;
       const b = this.bodies[p.slot];
@@ -588,6 +599,70 @@ export class Match {
     }
   }
 
+  /** the radio: one of them says something to its own side. One voice at a time, and not all the time */
+  private saidAt = [-9, -9];
+  say(slot: number, text: string, chance = 1) {
+    if (solo(this.cfg.mode) || Math.random() > chance) return;
+    const p = this.players.find((q) => q.slot === slot);
+    if (!p || p.team > 1 || !this.players.some((q) => !q.bot && q.team === p.team)) return;
+    const now = performance.now() / 1000;
+    if (now - this.saidAt[p.team] < 3.2) return;
+    this.saidAt[p.team] = now;
+    this.emit({ t: 'chat', from: p.name, text, team: p.team });
+  }
+
+  /** who a bot keeps company with: on a side with people playing, two in five of its bots go where their person goes */
+  buddyFor(slot: number): number {
+    if (this.cfg.mode !== 'tdm' && this.cfg.mode !== 'rounds') return -1;
+    const me = this.players.find((q) => q.slot === slot);
+    if (!me) return -1;
+    const humans = this.players.filter((q) => !q.bot && q.team === me.team);
+    const bots = this.players.filter((q) => q.bot && q.team === me.team);
+    const i = bots.indexOf(me);
+    if (!humans.length || i < 0 || i >= Math.max(1, Math.round(bots.length * 0.4))) return -1;
+    return humans[i % humans.length].slot;
+  }
+
+  /** a bot throws one at where it last saw someone: only with a clear line there, and never onto its own side */
+  botNade(b: Bot, kind: NadeKind, at: { x: number; y: number; z: number }) {
+    const m = b.m;
+    const dx = at.x - m.x, dz = at.z - m.z, d = Math.hypot(dx, dz) || 1;
+    const o: [number, number, number] = [m.x + (dx / d) * 0.45, m.y + 1.5, m.z + (dz / d) * 0.45];
+    if (!this.world.sees({ x: o[0], y: o[1], z: o[2] }, { x: at.x, y: at.y + 0.8, z: at.z })) return false;
+    for (const p of this.players) {
+      if (!p.alive || p.slot === b.slot || this.foes(b.slot, p.slot)) continue;
+      const q = this.bodies[p.slot];
+      if (Math.hypot(q.x - at.x, q.z - at.z) < (kind === 'frag' ? 7.5 : 4)) return false;
+    }
+    if (kind === 'frag' && d < 9) return false;
+    const sp = 13;
+    const th = 0.5 * Math.asin(Math.min(0.98, (9.8 * d) / (sp * sp))) - 0.03 + (Math.random() - 0.5) * (0.1 - b.skill * 0.06);
+    const yaw = Math.atan2(dx, dz) + (Math.random() - 0.5) * (0.16 - b.skill * 0.1);
+    const v: [number, number, number] = [Math.sin(yaw) * Math.cos(th) * sp, Math.sin(th) * sp, Math.cos(yaw) * Math.cos(th) * sp];
+    const fuse = kind === 'frag' ? 2.4 : 1.7;
+    const id = this.nadeId++;
+    this.nades.push({ id, s: b.slot, kind, x: o[0], y: o[1], z: o[2], vx: v[0], vy: v[1], vz: v[2], fuse, rest: false });
+    this.emit({ t: 'nade', s: b.slot, kind, o, v, fuse, id });
+    this.say(b.slot, kind === 'frag' ? pick(['Frag out!', 'Grenade!']) : pick(['Flash out!', 'Flashing!', 'Bang going in!']));
+    return true;
+  }
+
+  /** a bot of this side near enough to have seen it */
+  private witness(team: number, at: { x: number; y: number; z: number }, not: number) {
+    let best = -1, bd = 22;
+    for (const b of this.bots.values()) {
+      const p = this.players.find((q) => q.slot === b.slot);
+      if (!p?.alive || p.team !== team || b.slot === not) continue;
+      const o = this.bodies[b.slot];
+      const d = Math.hypot(o.x - at.x, o.z - at.z);
+      if (d < bd) {
+        bd = d;
+        best = b.slot;
+      }
+    }
+    return best;
+  }
+
   botFire(b: Bot, w: number) {
     const id = WEAPON_LIST[w];
     const spec = WEAPONS[id];
@@ -655,6 +730,17 @@ export class Match {
       killer.score += zone === 0 ? 150 : 100;
     }
     this.emit({ t: 'die', s: to, by, zone, w, dir: d, dist });
+    if (killer && killer !== p && killer.team < 2 && p.team < 2) {
+      // the radio after a kill: the one who did it, or someone who watched a person do it; and the side that lost one
+      const kb = this.bodies[by];
+      if (killer.bot) this.say(by, pick(["He's down.", 'Got one.', 'Target down.', 'One less.', zone === 0 ? 'Headshot.' : 'Dropped him.']), 0.45);
+      else {
+        const w2 = this.witness(killer.team, kb, by);
+        if (w2 >= 0) this.say(w2, pick(['Nice shot.', 'Good kill.', `Good hit, ${killer.name}.`, 'Keep it up.', zone === 0 ? 'Clean. Right in the head.' : "That's one."]), 0.5);
+      }
+      const w3 = this.witness(p.team, this.bodies[to], to);
+      if (w3 >= 0) this.say(w3, pick(['Man down!', `${p.name} is down!`, `We lost ${p.name}.`, "They got one of ours."]), 0.6);
+    }
     const mode = this.cfg.mode;
     if (mode === 'tdm' && killer && killer !== p && killer.team < 2) {
       this.score[killer.team]++;
@@ -683,6 +769,10 @@ export class Match {
 function rollPrimary(prev?: WeaponId): WeaponId {
   const r = Math.random();
   return prev && r < 0.7 ? prev : r < 0.62 ? 'carbine' : r < 0.86 ? 'shotgun' : 'rifle';
+}
+
+function pick<T>(a: T[]): T {
+  return a[Math.floor(Math.random() * a.length)];
 }
 
 function gauss() {

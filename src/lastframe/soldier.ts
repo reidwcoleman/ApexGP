@@ -422,6 +422,12 @@ export class Soldier {
     col *= ( 0.7 + 0.46 * fold ) * mix( 1.0, 0.86 + 0.28 * fine, seen );
     // dust and wear lighten what sticks out
     col += vec3( 0.02, 0.019, 0.017 ) * smoothstep( 0.55, 0.9, fold );
+    // lived in: darker where it has been sweated through and leant on, plaster dust up the shins and on the knees and cuffs
+    float grime = apNoise( vRest * 6.5 ) * 0.6 + apNoise( vRest * 17.0 + 3.0 ) * 0.4;
+    col *= 0.74 + 0.4 * smoothstep( 0.25, 0.75, grime );
+    float low = smoothstep( 0.62, 0.08, vRest.y ) * ( 0.35 + 0.65 * apNoise( vRest * 23.0 ) );
+    float dusty = clamp( low * 0.55 + smoothstep( 0.6, 0.9, apNoise( vRest * 11.0 + 9.0 ) ) * 0.2, 0.0, 1.0 );
+    col = mix( col, vec3( 0.2, 0.185, 0.16 ) * ( 0.7 + 0.5 * fine ), dusty * 0.6 );
     gBump = fold * 0.006 + fine * 0.00022 * seen;
     gRough = min( 1.0, gRough + 0.1 );
     gSheen *= 0.3;
@@ -454,7 +460,7 @@ export class Soldier {
 }
 #include <lights_physical_fragment>`);
     };
-    bm.customProgramCacheKey = () => key + 'fp7';
+    bm.customProgramCacheKey = () => key + 'fp8';
     this.person.play('idle');
     this.root.traverse((o) => o.layers.enable(MOVER));
   }

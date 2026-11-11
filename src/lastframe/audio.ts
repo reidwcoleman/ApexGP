@@ -605,6 +605,13 @@ export class Sound {
   }
 
   /** cloth and tape */
+  /** someone keys their radio: the squelch in your earpiece */
+  radio() {
+    if (!this.ctx) return;
+    const d = this.src(null, 0.22, false);
+    this.burst(d, 0.045, 0.4, 1700, 3400);
+  }
+
   cloth() {
     if (!this.ctx) return;
     const d = this.src(null, 0.3, false);

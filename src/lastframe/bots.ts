@@ -1,5 +1,5 @@
 import type { Match } from './match.ts';
-import { F, WEAPONS, WEAPON_LIST, type WeaponId } from './shared.ts';
+import { F, WEAPONS, WEAPON_LIST, type NadeKind, type WeaponId } from './shared.ts';
 import { move, type Mover } from './collide.ts';
 import type { Node } from './nav.ts';
 import { angleDiff } from './soldier.ts';
@@ -58,6 +58,19 @@ export class Bot {
   private lamp: Vec | null = null;
   private lampShots = 0;
   private lampAt = 4 + Math.random() * 20;
+  /** temperament: near 0 it sits and waits for you to come round the corner, near 1 it comes for you, and by another way */
+  readonly nerve = Math.random();
+  /** a flash went off in its face: until then it sees nothing */
+  private blindT = 0;
+  private nades: Record<NadeKind, number> = { frag: 1, flash: 1 };
+  private nadeAt = 6 + Math.random() * 10;
+  /** the person on its side it stays with (-1: nobody, it hunts on its own) */
+  private buddy = -1;
+  private hurry = false;
+  /** with nothing to do beside its person: which way it watches, and until when */
+  private watch = 0;
+  private watchT = 0;
+  private greeted = false;
 
   constructor(private match: Match, readonly slot: number, readonly skill: number) {}
 
@@ -82,6 +95,20 @@ export class Bot {
     this.goalAt = 0;
     this.seenAt = -9;
     this.coverT = 0;
+    this.blindT = 0;
+    this.nades = { frag: 1, flash: 1 };
+    this.hurry = false;
+    this.buddy = this.match.buddyFor(this.slot);
+  }
+
+  /** a flash, k from 0 (far off, or behind it) to 1 (in its face) */
+  flashed(k: number) {
+    this.blindT = this.t + 1.2 + 3 * k;
+    this.err = 9;
+    this.react = 0.4 + 0.5 * k;
+    this.errYaw = (Math.random() - 0.5) * 2;
+    this.errPitch = (Math.random() - 0.5) * 2;
+    if (k > 0.4) this.match.say(this.slot, pick(["Can't see!", "I'm blind!", 'Flashed!']), 0.7);
   }
 
   /** a shot or a footfall somewhere */
@@ -95,6 +122,15 @@ export class Bot {
 
   hurt(from: Vec) {
     this.coverT = this.t + 1.6 + Math.random();
+    // a round in the body throws the aim off: whoever lands the first one has the fight
+    this.err = Math.min(8, this.err + 2.4);
+    this.react = Math.max(this.react, 0.14);
+    this.errYaw = (Math.random() - 0.5) * 2;
+    this.errPitch = (Math.random() - 0.5) * 2;
+    const hp = this.match.players.find((p) => p.slot === this.slot)?.hp ?? 100;
+    // badly hit, all but the boldest break off and go to ground somewhere out of sight
+    if (hp < 40 && this.nerve < 0.72) this.coverT = this.t + 3.5 + Math.random() * 2.5;
+    if (hp < 60) this.match.say(this.slot, pick(["I'm hit!", 'Taking fire!', "Hit, I'm hit!", 'They got me, still up.']), 0.5);
     if (this.target < 0) {
       this.heard = { x: from.x, y: from.y, z: from.z };
       this.heardAt = this.t;
@@ -142,7 +178,7 @@ export class Bot {
             wz = ox * this.nudgeS * 0.9 - wz * 0.3;
           }
           const indoors = n.indoors;
-          speed = engaged ? 2.4 : this.t < this.coverT ? 5 : indoors ? 2.5 + this.skill * 0.6 : 4.2;
+          speed = engaged ? 2.4 : this.t < this.coverT || this.hurry ? 5 : indoors ? 2.5 + this.skill * 0.6 : 4.2;
           M.openDoorsNear(m.x, m.y, m.z, wx, wz);
         }
       } else if (engaged) {
@@ -173,6 +209,7 @@ export class Bot {
     let best = -1, bd = 1e9;
     const eye = { x: m.x, y: m.y + (this.crouch ? 1.05 : 1.6), z: m.z };
     for (const p of M.players) {
+      if (this.t < this.blindT) break;
       if (p.slot === this.slot || !p.alive || !M.foes(this.slot, p.slot)) continue;
       const b = M.bodies[p.slot];
       const dx = b.x - m.x, dz = b.z - m.z, d = Math.hypot(dx, dz);
@@ -208,6 +245,9 @@ export class Bot {
           this.calledAt = this.t;
           const b = M.bodies[best];
           M.callout(this.slot, { x: b.x, y: b.y, z: b.z });
+          const up = b.y - m.y;
+          M.say(this.slot, bd < 7 ? pick(['Contact, close!', 'Right here!', "He's on top of me!"]) : up > 2 ? pick(['Contact, above us!', 'Movement upstairs.']) : up < -2 ? pick(['Contact, below!', "They're under us."])
+            : (b.flags & F.light) ? pick(['I see a light.', 'Torch, straight ahead.']) : pick(['Contact!', 'Got eyes on one.', 'Movement, ahead.', 'Contact front!']), 0.8);
         }
         this.react = 0.68 - this.skill * 0.5 + Math.random() * 0.22 + (bd > 25 ? 0.15 : 0);
         this.err = (5.5 - this.skill * 4.2) * (0.7 + Math.random() * 0.6);
@@ -246,8 +286,15 @@ export class Bot {
         M.openDoorsNear(m.x, m.y, m.z, 0, 0);
       }
     } else this.stuck = 0;
-    if (this.ammo <= 0 && this.reload <= 0) this.reload = WEAPONS[this.weapon].reload;
-    else if (this.target < 0 && this.ammo < WEAPONS[this.weapon].mag * 0.4 && this.reload <= 0) this.reload = WEAPONS[this.weapon].reload;
+    if (this.ammo <= 0 && this.reload <= 0) {
+      this.reload = WEAPONS[this.weapon].reload;
+      if (this.target >= 0) {
+        // empty with someone in front of it: off the line to change the magazine
+        this.coverT = Math.max(this.coverT, this.t + 1.8);
+        this.goalAt = 0;
+        M.say(this.slot, pick(['Reloading!', 'Changing mag!', "I'm out, cover me!"]), 0.7);
+      }
+    } else if (this.target < 0 && this.ammo < WEAPONS[this.weapon].mag * 0.4 && this.reload <= 0) this.reload = WEAPONS[this.weapon].reload;
     const node = M.nav.nearest(m.x, m.y, m.z);
     // in the dark map everyone needs one; in a fight half of them still keep it on
     this.light = Bot.night ? this.likesLight || this.target < 0 : this.likesLight && !!node?.indoors && this.target < 0;
@@ -282,13 +329,61 @@ export class Bot {
         }
       }
     }
-    if (!goal && this.target >= 0 && this.t - this.seenAt > 0.5) goal = M.nav.nearest(this.seenPos.x, this.seenPos.y, this.seenPos.z);
-    if (!goal && this.t - this.heardAt < 7) goal = M.nav.nearest(this.heard.x, this.heard.y, this.heard.z);
+    const lost = this.target >= 0 ? this.t - this.seenAt : 0;
+    let wander = 0.4, soon = 0;
+    this.hurry = false;
+    // they went round a corner: something through after them first, from the ones who carry it
+    if (this.target >= 0 && lost > 1 && lost < 4 && this.t > this.nadeAt && this.reload <= 0 && this.t >= this.blindT) {
+      this.nadeAt = this.t + 9 + Math.random() * 14;
+      const d = Math.hypot(this.seenPos.x - m.x, this.seenPos.z - m.z);
+      const kind: NadeKind = this.nades.flash > 0 && (Math.random() < 0.55 || this.nades.frag <= 0) ? 'flash' : 'frag';
+      if (d > 6 && d < 20 && this.nades[kind] > 0 && Math.random() < 0.2 + this.skill * 0.45 && M.botNade(this, kind, this.seenPos)) this.nades[kind]--;
+    }
+    if (!goal && this.target >= 0 && lost > 0.5) {
+      if (this.nerve > 0.45 || lost > 2.6 || this.weapon === 'shotgun') {
+        goal = M.nav.nearest(this.seenPos.x, this.seenPos.y, this.seenPos.z);
+        // the bold ones don't come through the door you're watching
+        if (this.nerve > 0.75) wander = 2.4;
+      } else {
+        // the careful ones get low and keep their sights on the corner
+        this.crouch = true;
+        this.path = [];
+        this.goalAt = this.t + 0.5;
+        return;
+      }
+    }
+    if (!goal && this.t - this.heardAt < 7) {
+      goal = M.nav.nearest(this.heard.x, this.heard.y, this.heard.z);
+      if (this.nerve > 0.75) wander = 1.6;
+    }
+    // nothing doing: the ones told off to it stay with their person, a few steps off, watching the way they aren't
+    if (!goal && this.buddy >= 0 && M.players.find((p) => p.slot === this.buddy)?.alive) {
+      const b = M.bodies[this.buddy];
+      const d = Math.hypot(b.x - m.x, b.z - m.z);
+      if (!this.greeted) {
+        this.greeted = true;
+        M.say(this.slot, pick(['On you.', "I'm with you.", 'Lead on, I got your back.', 'Right behind you.']), 0.8);
+      }
+      if (d > 4.2 || Math.abs(b.y - m.y) > 1.5) {
+        goal = M.nav.nearest(b.x + (Math.random() - 0.5) * 3.5, b.y, b.z + (Math.random() - 0.5) * 3.5);
+        this.hurry = d > 9;
+        soon = 0.7 + Math.random() * 0.6;
+      } else {
+        this.path = [];
+        this.goalAt = this.t + 0.7 + Math.random() * 0.8;
+        if (this.t > this.watchT) {
+          this.watch = b.yaw + Math.PI * (0.55 + Math.random() * 0.9);
+          this.watchT = this.t + 2 + Math.random() * 3;
+          if (Math.random() < 0.04) M.say(this.slot, pick(['Clear this side.', 'Nothing here.', 'Quiet. Too quiet.', 'Watching our back.', 'Which way?']));
+        }
+        return;
+      }
+    }
     if (!goal) goal = M.objective(this.slot);
     if (!goal) return;
-    this.path = M.nav.path(node, goal, 0.4);
+    this.path = M.nav.path(node, goal, wander);
     this.pi = 1;
-    this.goalAt = this.t + 3 + Math.random() * 5;
+    this.goalAt = this.t + (soon || 3 + Math.random() * 5);
   }
 
   private aimAndFire(dt: number, wx: number, wz: number, speed: number) {
@@ -303,7 +398,9 @@ export class Bot {
       const crouch = (b.flags & F.crouch) !== 0;
       const aimY = py + (this.headShot ? (crouch ? 1.08 : 1.62) : crouch ? 0.72 : 1.18);
       const dx = px - m.x, dz = pz - m.z, d = Math.hypot(dx, dz) || 1;
-      this.err = Math.max((1.4 - this.skill * 1.2) * 0.25, this.err - dt * (2 + this.skill * 5));
+      // someone running across the sights is harder to stay on than someone stood still
+      const quick = (b.flags & F.sprint) ? 1.7 : (b.flags & F.moving) ? 0.6 : 0;
+      this.err = Math.max((1.4 - this.skill * 1.2) * 0.25 + quick * (1.15 - this.skill * 0.6), this.err - dt * (2 + this.skill * 5));
       const e = (this.err * Math.PI) / 180;
       ty = Math.atan2(-dx, -dz) + this.errYaw * e;
       tp = Math.atan2(aimY - eyeY, d) + this.errPitch * e * 0.7;
@@ -320,7 +417,7 @@ export class Bot {
       tp = far && ahead ? clamp(Math.atan2(far.y - m.y, Math.hypot(fx, fz)), -0.5, 0.5) : 0;
     } else if (this.t - this.heardAt < 4) {
       ty = Math.atan2(-(this.heard.x - m.x), -(this.heard.z - m.z));
-    }
+    } else if (this.t < this.watchT) ty = this.watch;
     const rate = engaged ? 2.6 + this.skill * 7 : 3.4;
     const dy = angleDiff(ty, this.yaw);
     this.yaw += Math.sign(dy) * Math.min(Math.abs(dy), rate * dt);
@@ -362,6 +459,10 @@ export class Bot {
     }
     M.botFire(this, WEAPON_LIST.indexOf(this.weapon));
   }
+}
+
+function pick<T>(a: T[]): T {
+  return a[Math.floor(Math.random() * a.length)];
 }
 
 function clamp(v: number, a: number, b: number) {

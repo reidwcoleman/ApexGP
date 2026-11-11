@@ -101,6 +101,8 @@ MATS = {
     'conc_wet': M('concrete_floor_worn_001', 3.0, (0.42, 0.42, 0.42), rough=0.25, wet=1.0),
     'ambulance': M('metal_plate', 2.0, (0.72, 0.72, 0.7), rough=0.45, metal=0.3, wet=0.4),
     'paint_r': M('metal_plate', 2.0, (0.5, 0.05, 0.035), rough=0.5),
+    'paint_b': M('metal_plate', 2.0, (0.05, 0.14, 0.36), rough=0.5),
+    'paint_g': M('metal_plate', 2.0, (0.06, 0.26, 0.1), rough=0.5),
     'nightglass': M('metal_plate', 2.0, emit=(0.035, 0.05, 0.08)),
     'exitsign': M('metal_plate', 1.0, emit=(0.07, 0.8, 0.24)),
     'lightbox': M('metal_plate', 1.0, emit=(0.8, 0.95, 1.05)),

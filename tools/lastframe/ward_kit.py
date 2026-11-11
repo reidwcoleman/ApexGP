@@ -927,11 +927,258 @@ def lockers(b, rng):
     obox(b, (0, D / 2, 0.04), (1.2, D - 0.04, 0.08), 0, SOOT())
 
 
+# ---- what's fixed to a hospital's walls and stood along them. Wall pieces: origin on the floor at the wall's face, out along -y
+REDP = lambda: mat('lfredp', (0.5, 0.04, 0.03), 0.38)
+WHITEP = lambda: mat('lfwhitep', (0.66, 0.66, 0.63), 0.4)
+GREYP = lambda: mat('lfgreyp', (0.2, 0.21, 0.22), 0.5)
+BLUEP = lambda: mat('lfbluep', (0.1, 0.2, 0.36), 0.45)
+SEATP = lambda: mat('lfseatp', (0.16, 0.3, 0.34), 0.45)
+CORK = lambda: mat('lfcork', (0.36, 0.25, 0.14), 0.95)
+GLASSD = lambda: mat('lfglassd', (0.015, 0.018, 0.02), 0.06)
+GREENC = lambda: mat('lfgreenc', (0.08, 0.2, 0.1), 0.4, 0.5)
+YELLOWP = lambda: mat('lfyellowp', (0.6, 0.47, 0.06), 0.5)
+
+
+def extinguisher(b, rng):
+    """a fire point: the red bottle on its bracket, hose and horn, the sign over it"""
+    obox(b, (0, -0.006, 1.32), (0.1, 0.012, 0.5), 0, STEEL())
+    rod(b, (0, -0.085, 1.06), (0, -0.085, 1.5), 0.07, REDP(), 14)
+    rod(b, (0, -0.085, 1.5), (0, -0.085, 1.55), 0.045, REDP(), 10)
+    rod(b, (0, -0.085, 1.55), (0, -0.085, 1.6), 0.02, BLACKM(), 6)
+    rod(b, (-0.05, -0.085, 1.6), (0.07, -0.085, 1.62), 0.012, BLACKM(), 6)
+    rod(b, (0.02, -0.085, 1.58), (0.1, -0.1, 1.3), 0.011, RUBBER(), 6)
+    rod(b, (0.1, -0.1, 1.3), (0.1, -0.1, 1.14), 0.022, RUBBER(), 8)
+    obox(b, (0, -0.1, 1.3), (0.15, 0.004, 0.012), 0, STEEL())
+    obox(b, (0, -0.004, 1.9), (0.2, 0.008, 0.2), 0, REDP())
+    obox(b, (0, -0.009, 1.9), (0.1, 0.003, 0.12), 0, WHITEP())
+    if rng.random() < 0.35:
+        obox(b, (0.24, -0.004, 1.9), (0.2, 0.008, 0.2), 0, BLUEP())
+
+
+def sanitiser(b, rng):
+    """a hand-gel dispenser, its drip tray, and the notice telling you to use it, hanging by one corner"""
+    obox(b, (0, -0.045, 1.28), (0.11, 0.09, 0.22), 0, WHITEP())
+    obox(b, (0, -0.095, 1.24), (0.07, 0.014, 0.1), 0, GREYP())
+    obox(b, (0, -0.05, 1.14), (0.06, 0.07, 0.03), 0, GLASSD())
+    obox(b, (0, -0.06, 1.05), (0.12, 0.1, 0.012), 0, WHITEP())
+    a = rng.uniform(-0.5, 0.5)
+    obox(b, (0.02, -0.004, 1.62), (0.21, 0.004, 0.297), 0, PAPER(), tilt=(0, a if rng.random() < 0.4 else rng.uniform(-0.05, 0.05)))
+
+
+def notice(b, rng):
+    """a notice board: cork in an aluminium frame, rotas and warnings pinned over one another, some let go at a corner"""
+    W, H, z = 1.2, 0.9, 1.62
+    obox(b, (0, -0.012, z), (W, 0.024, H), 0, CORK())
+    for (x, zz, w, h) in ((0, z + H / 2, W + 0.03, 0.03), (0, z - H / 2, W + 0.03, 0.03), (-W / 2, z, 0.03, H), (W / 2, z, 0.03, H)):
+        obox(b, (x, -0.016, zz), (w, 0.034, h), 0, STEEL())
+    for k in range(rng.randint(6, 11)):
+        w, h = rng.choice(((0.21, 0.297), (0.21, 0.297), (0.148, 0.21), (0.297, 0.21)))
+        x = rng.uniform(-W / 2 + w / 2 + 0.03, W / 2 - w / 2 - 0.03)
+        zz = rng.uniform(z - H / 2 + h / 2 + 0.03, z + H / 2 - h / 2 - 0.03)
+        t = rng.uniform(-0.12, 0.12) if rng.random() < 0.8 else rng.uniform(-0.6, 0.6)
+        obox(b, (x, -0.027 - k * 0.0012, zz), (w, 0.001, h), 0, rng.choice((PAPER, PAPER, PAPER2, WHITEP))(), tilt=(rng.uniform(-0.04, 0.0), t))
+        obox(b, (x, -0.03 - k * 0.0012, zz + h / 2 - 0.02), (0.012, 0.006, 0.012), 0, rng.choice((REDP, BLUEP, YELLOWP))())
+
+
+def wallphone(b, rng):
+    """the ward telephone: the box on the wall, the handset off its hook on the end of its cord"""
+    obox(b, (0, -0.03, 1.42), (0.2, 0.06, 0.26), 0, CREAM())
+    for r in range(4):
+        for c in range(3):
+            obox(b, (-0.045 + c * 0.045, -0.062, 1.36 + r * 0.035), (0.028, 0.006, 0.02), 0, GREYP())
+    drop = rng.uniform(0.35, 0.8)
+    prev = (-0.07, -0.05, 1.3)
+    for k in range(1, 9):
+        t = k / 8
+        p = (-0.07 - 0.03 * math.sin(t * 9), -0.05 - 0.02 * t, 1.3 - drop * t)
+        rod(b, prev, p, 0.005, CABLE(), 5)
+        prev = p
+    obox(b, (prev[0], prev[1] - 0.02, prev[2] - 0.1), (0.05, 0.045, 0.21), 0, CREAM(), tilt=(0.1, rng.uniform(-0.3, 0.3)))
+
+
+def seats(b, rng):
+    """waiting-room seats: four shells on one beam, bolted down, backs to the wall; one shell cracked off its mounts"""
+    n = 4
+    rod(b, (-1.0, -0.3, 0.38), (1.0, -0.3, 0.38), 0.03, BLACKM(), 8)
+    for x in (-0.86, 0.86):
+        rod(b, (x, -0.3, 0.38), (x, -0.3, 0.02), 0.025, BLACKM(), 8)
+        obox(b, (x, -0.3, 0.012), (0.08, 0.5, 0.024), 0, BLACKM())
+    gone = rng.randrange(n) if rng.random() < 0.5 else -1
+    for k in range(n):
+        x = -0.78 + k * 0.52
+        if k == gone:
+            obox(b, (x, -0.3, 0.41), (0.3, 0.08, 0.02), 0, STEEL())
+            continue
+        tip = rng.uniform(-0.03, 0.03)
+        obox(b, (x, -0.3, 0.44), (0.46, 0.44, 0.035), 0, SEATP(), tilt=(-0.06, tip))
+        obox(b, (x, -0.08, 0.72), (0.46, 0.035, 0.42), 0, SEATP(), tilt=(-0.2, tip))
+        rod(b, (x - 0.15, -0.1, 0.44), (x - 0.15, -0.07, 0.6), 0.012, BLACKM(), 5)
+        rod(b, (x + 0.15, -0.1, 0.44), (x + 0.15, -0.07, 0.6), 0.012, BLACKM(), 5)
+
+
+def vending(b, rng):
+    """a drinks machine, 0.9 wide: the cabinet, a dark glass front with the shelves behind it, the slot, the tray.
+    Its lit panel is a box in the layout"""
+    W, D, H = 0.9, 0.78, 1.85
+    obox(b, (0, -D / 2, H / 2), (W, D, H), 0, GREYP())
+    obox(b, (-0.12, -D - 0.006, 1.12), (0.58, 0.012, 1.2), 0, GLASSD())
+    for z in (0.7, 0.95, 1.2, 1.45):
+        obox(b, (-0.12, -D + 0.02, z), (0.56, 0.02, 0.012), 0, STEEL())
+        for k in range(rng.randint(0, 5)):
+            rod(b, (-0.36 + k * 0.1, -D + 0.03, z + 0.01), (-0.36 + k * 0.1, -D + 0.03, z + 0.13), 0.03, rng.choice((REDP, BLUEP, GREENC, YELLOWP))(), 8)
+    obox(b, (0.32, -D - 0.008, 1.2), (0.16, 0.016, 0.34), 0, BLACKM())
+    obox(b, (0.32, -D - 0.018, 1.05), (0.07, 0.01, 0.02), 0, CHROME())
+    obox(b, (-0.12, -D - 0.01, 0.3), (0.5, 0.02, 0.2), 0, BLACKM())
+    obox(b, (0, -D / 2, 0.03), (W - 0.06, D - 0.06, 0.06), 0, SOOT())
+
+
+def monitor(b, rng):
+    """a patient monitor on a roll stand: five feet, a pole, a basket, the box with its dark screen, leads hanging"""
+    S = CHROME()
+    for k in range(5):
+        a = k * 2 * math.pi / 5 + 0.3
+        rod(b, (0, 0, 0.1), (math.cos(a) * 0.26, math.sin(a) * 0.26, 0.05), 0.012, S, 6)
+        rod(b, (math.cos(a) * 0.26, math.sin(a) * 0.26 - 0.02, 0.03), (math.cos(a) * 0.26, math.sin(a) * 0.26 + 0.02, 0.03), 0.03, RUBBER(), 8)
+    rod(b, (0, 0, 0.1), (0, 0, 1.2), 0.016, S)
+    obox(b, (0, -0.02, 0.8), (0.3, 0.2, 0.14), 0, STEEL())
+    obox(b, (0, -0.03, 1.36), (0.36, 0.17, 0.3), 0, CREAM())
+    obox(b, (-0.03, -0.117, 1.37), (0.25, 0.006, 0.2), 0, GLASSD())
+    for k in range(4):
+        obox(b, (0.14, -0.118, 1.28 + k * 0.055), (0.03, 0.008, 0.03), 0, GREYP())
+    for k in range(rng.randint(2, 3)):
+        x0 = -0.12 + k * 0.1
+        prev = (x0, -0.1, 1.22)
+        for j in range(1, 8):
+            t = j / 7
+            p = (x0 + 0.25 * t + 0.04 * math.sin(t * 7 + k), -0.1 - 0.25 * t, 1.22 - 1.2 * t * t if t < 1 else 0.012)
+            p = (p[0], p[1], max(0.012, p[2]))
+            rod(b, prev, p, 0.004, CABLE(), 4)
+            prev = p
+
+
+def cylinders(b, rng):
+    """oxygen: a wheeled rack against the wall with three or four bottles chained in, black with white shoulders"""
+    n = rng.randint(3, 4)
+    obox(b, (0, -0.2, 0.05), (0.9, 0.36, 0.04), 0, STEEL())
+    for x in (-0.44, 0.44):
+        rod(b, (x, -0.04, 0.05), (x, -0.04, 1.15), 0.014, STEEL(), 6)
+        rod(b, (x, -0.36, 0.05), (x, -0.36, 0.7), 0.014, STEEL(), 6)
+    rod(b, (-0.44, -0.04, 1.15), (0.44, -0.04, 1.15), 0.014, STEEL(), 6)
+    rod(b, (-0.44, -0.37, 0.72), (0.44, -0.37, 0.72 - rng.uniform(0, 0.08)), 0.006, CHROME(), 5)
+    for k in range(n):
+        x = -0.33 + k * 0.22
+        if k == n - 1 and rng.random() < 0.4:
+            # one has gone over
+            rod(b, (0.7, -0.5, 0.08), (0.7 + 0.9, -0.5 - 0.5, 0.08), 0.08, BLACKM(), 12)
+            continue
+        rod(b, (x, -0.2, 0.07), (x, -0.2, 1.1), 0.085, BLACKM(), 12)
+        rod(b, (x, -0.2, 1.1), (x, -0.2, 1.2), 0.06, WHITEP(), 12)
+        rod(b, (x, -0.2, 1.2), (x, -0.2, 1.3), 0.022, CHROME(), 8)
+        rod(b, (x - 0.05, -0.2, 1.28), (x + 0.05, -0.2, 1.28), 0.014, CHROME(), 6)
+        if rng.random() < 0.5:
+            rod(b, (x, -0.2, 1.3), (x, -0.25, 1.36), 0.03, GREENC(), 8)
+
+
+def crashcart(b, rng):
+    """a resus trolley: red drawers, one pulled out, a board on the back, the paddles' box on top, castors"""
+    W, D, H = 0.7, 0.48, 0.95
+    for (x, y) in ((-0.3, -0.06), (0.3, -0.06), (-0.3, -0.42), (0.3, -0.42)):
+        rod(b, (x - 0.02, y, 0.05), (x + 0.02, y, 0.05), 0.05, RUBBER(), 8)
+    obox(b, (0, -D / 2, 0.1 + (H - 0.1) / 2), (W, D, H - 0.1), 0, REDP())
+    out = rng.randrange(5)
+    for k in range(5):
+        z = 0.2 + k * 0.15
+        pull = rng.uniform(0.12, 0.3) if k == out else 0.0
+        obox(b, (0, -D - 0.008 - pull / 2, z + 0.06), (W - 0.05, 0.016 + pull, 0.13), 0, REDP() if not pull else STEEL())
+        obox(b, (0, -D - 0.02 - pull, z + 0.09), (0.2, 0.012, 0.016), 0, CHROME())
+    obox(b, (0, -D / 2, H + 0.01), (W + 0.04, D + 0.04, 0.02), 0, STEEL())
+    obox(b, (-0.1, -D / 2, H + 0.11), (0.36, 0.3, 0.18), 0, CREAM())
+    obox(b, (-0.1, -D / 2 - 0.152, H + 0.12), (0.2, 0.004, 0.11), 0, GLASSD())
+    rod(b, (0.28, -0.04, H), (0.28, -0.04, H + 0.75), 0.012, CHROME(), 6)
+    rod(b, (0.28, -0.04, H + 0.75), (0.2, -0.04, H + 0.75), 0.008, CHROME(), 5)
+
+
+def sink(b, rng):
+    """a clinical basin: no plug, elbow taps, the towel box over it and the bin under"""
+    obox(b, (0, -0.2, 0.86), (0.5, 0.4, 0.05), 0, WHITEP())
+    obox(b, (0, -0.2, 0.78), (0.4, 0.3, 0.14), 0, WHITEP())
+    obox(b, (0, -0.2, 0.885), (0.38, 0.27, 0.004), 0, GREYP())
+    rod(b, (0, -0.16, 0.74), (0, -0.16, 0.45), 0.02, CHROME(), 8)
+    rod(b, (0, -0.16, 0.45), (0, 0.0, 0.45), 0.02, CHROME(), 8)
+    rod(b, (0, -0.04, 0.88), (0, -0.04, 1.06), 0.014, CHROME(), 6)
+    rod(b, (0, -0.04, 1.06), (0, -0.2, 1.04), 0.012, CHROME(), 6)
+    for x in (-0.12, 0.12):
+        rod(b, (x, -0.04, 0.9), (x * 1.9, -0.14, 0.94), 0.008, CHROME(), 5)
+    obox(b, (0, -0.006, 1.2), (0.6, 0.012, 0.5), 0, WHITEP())
+    obox(b, (0.02, -0.06, 1.62), (0.28, 0.12, 0.34), 0, WHITEP())
+    quad(b, [(-0.08, -0.07, 1.45), (0.1, -0.07, 1.45), (0.09, -0.08, 1.36), (-0.07, -0.09, 1.38)], PAPER())
+    rod(b, (0.42, -0.18, 0.0), (0.42, -0.18, 0.42), 0.15, YELLOWP(), 12)
+    rod(b, (0.42, -0.18, 0.42), (0.42, -0.18, 0.44), 0.16, WHITEP(), 12)
+
+
+def sprinkler(b, rng):
+    """three metres of sprinkler main under a ceiling, along x from the origin: the red pipe on its hangers, a coupling,
+    one head on a short drop. Origin at the ceiling"""
+    z = -0.13
+    rod(b, (0, 0, z), (3.0, 0, z), 0.027, REDP(), 8)
+    for x in (0.4, 2.2):
+        rod(b, (x, 0, 0), (x, 0, z + 0.03), 0.004, STEEL(), 4)
+        obox(b, (x, 0, z), (0.03, 0.07, 0.07), 0, STEEL())
+    rod(b, (1.46, 0, z), (1.54, 0, z), 0.034, REDP(), 8)
+    hx = rng.uniform(1.0, 2.0)
+    rod(b, (hx, 0, z), (hx, 0, z - 0.11), 0.012, REDP(), 6)
+    rod(b, (hx, 0, z - 0.11), (hx, 0, z - 0.15), 0.008, CHROME(), 6)
+    obox(b, (hx, 0, z - 0.155), (0.045, 0.045, 0.004), 0, CHROME())
+
+
+def doorplate(b, rng):
+    """beside a door: the room's plate, and under it the light switch. Wall piece, 4 cm proud so it shows on any wall"""
+    obox(b, (0, -0.02, 1.6), (0.3, 0.04, 0.1), 0, BLUEP())
+    obox(b, (-0.02, -0.041, 1.6), (0.2, 0.002, 0.03 if rng.random() < 0.6 else 0.05), 0, WHITEP())
+    if rng.random() < 0.75:
+        obox(b, (0, -0.02, 1.2), (0.085, 0.04, 0.085), 0, WHITEP())
+        obox(b, (0, -0.043, 1.2 + rng.choice((-0.008, 0.008))), (0.02, 0.006, 0.035), 0, WHITEP(), tilt=(rng.choice((-0.25, 0.25)), 0))
+
+
+def callpoint(b, rng):
+    """break glass: the red box at shoulder height, its bell up by the ceiling with the conduit between them"""
+    obox(b, (0, -0.025, 1.4), (0.09, 0.05, 0.09), 0, REDP())
+    obox(b, (0, -0.051, 1.4), (0.05, 0.002, 0.04), 0, WHITEP() if rng.random() < 0.7 else GLASSD())
+    rod(b, (0, -0.012, 1.45), (0, -0.012, 2.55), 0.008, STEEL(), 5)
+    rod(b, (0, 0, 2.62), (0, -0.07, 2.62), 0.075, REDP(), 12)
+    rod(b, (0, -0.07, 2.62), (0, -0.085, 2.62), 0.02, STEEL(), 6)
+
+
+def liftdoor(b, rng):
+    """a lift that stopped: the steel surround, two doors left a hand apart on the dark of the shaft, the call plate.
+    2 m wide, standing 0.1 proud of the wall. The floor indicator is a lit box in the layout"""
+    W, H = 2.0, 2.3
+    S = STEEL()
+    obox(b, (0, -0.05, H + 0.14), (W, 0.1, 0.28), 0, S)
+    for x in (-W / 2 + 0.13, W / 2 - 0.13):
+        obox(b, (x, -0.05, H / 2), (0.26, 0.1, H), 0, S)
+    obox(b, (0, -0.02, H / 2), (W - 0.5, 0.02, H), 0, SOOT())
+    gap = rng.uniform(0.1, 0.34)
+    wl = (W - 0.52) / 2 - gap / 2
+    for sgn in (-1, 1):
+        cx = sgn * (gap / 2 + wl / 2)
+        obox(b, (cx, -0.045, H / 2), (wl, 0.03, H), 0, CHROME())
+        obox(b, (cx, -0.062, 1.0), (wl - 0.1, 0.004, 0.012), 0, S)
+        obox(b, (sgn * (gap / 2 + 0.012), -0.05, H / 2), (0.024, 0.04, H), 0, RUBBER())
+    obox(b, (W / 2 + 0.22, -0.01, 1.15), (0.1, 0.02, 0.24), 0, S)
+    for z in (1.1, 1.2):
+        rod(b, (W / 2 + 0.22, -0.02, z), (W / 2 + 0.22, -0.03, z), 0.018, CHROME(), 8)
+    obox(b, (0, -0.105, H + 0.14), (0.34, 0.012, 0.14), 0, GLASSD())
+
+
+
 KINDS_EXTRA = dict(sbwall=sbwall, wattle=wattle, duck=duck, pool=pool, spoil=spoil, helmet=helmet, stretcher=stretcher, picket=picket, fieldgun=fieldgun, sandbag2=sandbag2, sandbag3=sandbag3, sandbag5=sandbag5, wire=wire, crater=crater_dish, tank=tank)
 
 KINDS = dict(bodybag=bodybag, candles=candles, plaster=plaster, blinds=blinds, hbed=hbed, iv=iv, curtain=curtain, screen=screen, tile=tile, litter=litter, sign=sign,
              radiator=radiator, board=board, debris=debris, bottles=bottles, shards=shards, cables=cables, pallet=pallet, conduit=conduit,
-             worklight=worklight, gurney=gurney, rubble=rubble, oplamp=oplamp, lockers=lockers)
+             worklight=worklight, gurney=gurney, rubble=rubble, oplamp=oplamp, lockers=lockers,
+             extinguisher=extinguisher, sanitiser=sanitiser, notice=notice, wallphone=wallphone, seats=seats, vending=vending, monitor=monitor,
+             cylinders=cylinders, crashcart=crashcart, sink=sink, liftdoor=liftdoor, sprinkler=sprinkler, doorplate=doorplate, callpoint=callpoint)
 
 
 def make(name):

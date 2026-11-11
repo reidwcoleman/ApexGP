@@ -1089,6 +1089,85 @@ def build():
                 continue
             a = x0 + i * (x1 - x0) / n
             box((a + 0.03, y - 0.2, TOP - 0.4), (a + (x1 - x0) / n - 0.03, y + 0.2, TOP - 0.08), 'tin_in', collide=False, density=0.2)
+    # ---- what a working hospital has on its walls, still there: fire points, gel, notice boards, telephones, and along
+    # the wider walls rows of seats, oxygen, a resus trolley. Each goes on a stretch of wall between the doors
+    def wall_free(axis, c, p0, p1, z):
+        out, cur = [], p0 + 0.35
+        for (a, b) in [q for q in spans(axis, c, z) if q[1] > p0 and q[0] < p1] + [(p1, p1)]:
+            if min(a, p1) - 0.4 - cur > 0.9:
+                out.append((cur, min(a, p1) - 0.4))
+            cur = max(cur, b + 0.4)
+        return out
+
+    def mount(kind, axis, c, p, z, side, t=INT_T, solid=None):
+        f = c + side * (t / 2 + 0.003)
+        if axis == 'x':
+            K(kind, p, f, z, r=math.pi if side > 0 else 0.0, solid=solid)
+        else:
+            K(kind, f, p, z, r=math.pi / 2 if side > 0 else -math.pi / 2, solid=solid)
+    SMALL = ['extinguisher_1', 'notice_1', 'sanitiser_1', 'callpoint_1', 'notice_2', 'wallphone_1', 'extinguisher_2', 'notice_3', 'sanitiser_2', 'callpoint_2', 'notice_4', 'wallphone_2']
+    BIG = [('seats_1', (1.05, 0.56, 0.9)), ('cylinders_1', (0.5, 0.4, 1.3)), ('seats_2', (1.05, 0.56, 0.9)), ('crashcart_1', (0.38, 0.5, 1.0)), ('seats_3', (1.05, 0.56, 0.9)), ('cylinders_2', (0.5, 0.4, 1.3))]
+    nth = [0, 0]
+    for z in (0.0, F2):
+        for (c, p0, p1, side) in ((SY0, X0 + 6.0, 18.0 if z == 0 else AX0, 1), (SY0, 34.0 if z == 0 else AX1, X1 - 6.0, 1), (SY1, X0, AX0, -1), (SY1, AX1, X1, -1),
+                                  (NY0, X0, AX0, 1), (NY0, AX1, X1, 1), (NY1, X0, 20.0, -1), (NY1, 32.0, X1, -1)):
+            for (a, b) in wall_free('x', c, p0, p1, z):
+                L_ = b - a
+                if L_ < 1.0:
+                    continue
+                if L_ > 3.4 and nth[1] % 2 == 0 and side * (1 if c in (SY0, NY0) else -1) > 0 and R.random() < 0.75:
+                    # something stood on the floor at one end, something hung at the other. Only on one side of a corridor
+                    kind, sol = BIG[(nth[1] // 2) % len(BIG)]
+                    mount(kind, 'x', c, a + sol[0] + 0.15, z, side, solid=sol)
+                    mount(SMALL[nth[0] % len(SMALL)], 'x', c, b - 0.5, z, side)
+                    nth[0] += 1
+                elif R.random() < 0.8:
+                    mount(SMALL[nth[0] % len(SMALL)], 'x', c, (a + b) / 2 + R.uniform(-0.15, 0.15) * min(1.0, L_ - 1.0), z, side)
+                    nth[0] += 1
+                if L_ > 3.4:
+                    nth[1] += 1
+    # the lift, stopped between floors with its doors a hand apart: the same shaft on both floors, the indicator still lit
+    for z in (0.0, F2):
+        mount('liftdoor_1' if z == 0 else 'liftdoor_2', 'y', AX0, 15.9, z, 1, t=0.2)
+        box((AX0 + 0.212, 15.82, z + 2.4), (AX0 + 0.222, 15.98, z + 2.48), 'emerg', collide=False, density=0.1)
+    # a drinks machine in the hall beside the lift, its panel the only thing there with power
+    fx_, vy = AX0 + 0.103, 13.75
+    K('vending_1', fx_, vy, 0.0, r=math.pi / 2, solid=(0.47, 0.8, 1.85))
+    box((fx_ + 0.786, vy - 0.12 - 0.28, 1.5), (fx_ + 0.792, vy - 0.12 + 0.28, 1.7), 'screenglow', collide=False, density=0.15)
+    light('point', (fx_ + 1.05, vy - 0.12, 1.6), (0.45, 0.65, 1.0), 1.6, radius=0.05, reach=3.5)
+    # two of the ward's monitors are still running on their batteries
+    for (bx, by) in ((7.6 - 1.15, 0.5), (7.6 + 2 * 2.8 - 1.15, 0.5)):
+        K('monitor_1' if bx < 8 else 'monitor_2', bx, by, 0.0, r=math.pi)
+        box((bx + 0.03 - 0.11, by + 0.119, 1.29), (bx + 0.03 + 0.11, by + 0.124, 1.45), 'screenglow', collide=False, density=0.1)
+    # sinks where hands were washed: the ward, triage, the lab
+    K('sink_1', 17.0, Y0 + EXT_T / 2 + 0.003, 0.0, r=math.pi)
+    K('sink_2', 35.0, Y0 + EXT_T / 2 + 0.003, 0.0, r=math.pi)
+    # the sprinkler main under both corridors' ceilings on both floors, and a plate and a switch beside every door on them
+    for (z, top) in ((0.0, H1), (F2, F2 + H2)):
+        for y in (SY0 + 0.42, NY1 - 0.42):
+            x = X0 + 0.5
+            while x + 3.0 < X1 - 0.3:
+                K(f'sprinkler_{int(x) % 5 + 1}', x, y, top - 0.01)
+                x += 3.0
+        for (c, side) in ((SY0, 1), (SY1, -1), (NY0, 1), (NY1, -1)):
+            for (a, b) in spans('x', c, z):
+                if b - a > 2.6 or not (X0 + 1 < a < X1 - 1):
+                    continue
+                mount(f'doorplate_{int(a * 3) % 7 + 1}', 'x', c, b + 0.3 if side > 0 else a - 0.3, z, side)
+    # ---- the lines on the floor that led people to departments, worn through where the trolleys turned
+    def floor_line(y, x0, x1, z, mat, w=0.07):
+        x = x0
+        while x < x1:
+            ln = R.uniform(1.4, 4.5)
+            if R.random() < 0.85:
+                box((x, y - w / 2, z), (min(x1, x + ln), y + w / 2, z + 0.003), mat, collide=False, density=0.2)
+            x += ln + R.uniform(0.03, 0.5)
+    for z in (0.0, F2):
+        floor_line(SY0 + 0.55, X0 + 0.4, X1 - 0.4, z, 'paint_r')
+        floor_line(SY0 + 0.68, X0 + 0.4, X1 - 0.4, z, 'paint_y')
+        floor_line(NY1 - 0.55, X0 + 0.4, X1 - 0.4, z, 'paint_b')
+        if z == 0:
+            floor_line(NY1 - 0.68, X0 + 0.4, 32.0, z, 'paint_g')
     # the fall dressed: heaps of what it was made of along both edges and across the treads, bar sticking out of it
     for i in range(9):
         f = (i + 0.5) / 9

@@ -154,7 +154,8 @@ export type Ev =
   | { t: 'hold'; zone: number; owner: number; prog: number; score: [number, number] }
   /** Gun Game: this one's next gun, and how far up the ladder that is */
   | { t: 'arm'; s: number; primary: WeaponId; step: number }
-  | { t: 'chat'; from: string; text: string };
+  /** team: a side's radio, heard by that side only */
+  | { t: 'chat'; from: string; text: string; team?: number };
 
 export type Phase = 'warmup' | 'live' | 'between' | 'over';
 

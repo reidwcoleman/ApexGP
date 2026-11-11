@@ -9,7 +9,7 @@ roof(m, rect, z, ...)  a ceiling over somewhere that was open, so it can be made
 import math
 
 # things that block, by kit piece: the rest (litter, tiles, papers, plaster, cables overhead) you walk over or under
-BLOCKING_UNITS = ('hbed', 'screen', 'iv', 'pallet', 'radiator', 'gurney', 'lockers')
+BLOCKING_UNITS = ('hbed', 'screen', 'iv', 'pallet', 'radiator', 'gurney', 'lockers', 'seats', 'cylinders', 'crashcart', 'vending')
 
 
 def inside_fn(m, extra=()):

@@ -14,6 +14,7 @@ import { Match, type BodyState } from './match.ts';
 import { Input, LocalPlayer, type PlayerCtx } from './player.ts';
 import { Soldier, angleDiff, loadGear, loadGuns, preparePeople } from './soldier.ts';
 import { stepNade, type NadeSim } from './nade.ts';
+import { Rats } from './vermin.ts';
 import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow } from './shared.ts';
 import { Guest_, Host, type Down } from './net.ts';
 import { Hud } from './ui.ts';
@@ -111,6 +112,12 @@ export class Game {
   private killYaw = 0;
   private killer = '';
   private frozen = false;
+  private rats: Rats | null = null;
+  /** rooms the rain has got into */
+  private soaked = new Set<string>();
+  private drips: { x: number; y: number; z: number; vy: number; floor: number }[] = [];
+  private dripAcc = 0;
+  private caBase = 0.014;
   private whiteout = 0;
   private hurt = 0;
   private lensBlood = 0;
@@ -304,7 +311,7 @@ export class Game {
       this.post.mFinal.uniforms.grainK.value = 1.5;
     }
     if (sunInfo) {
-      this.post.mFinal.uniforms.caK.value = 0.0085;
+      this.post.mFinal.uniforms.caK.value = this.caBase = 0.0085;
       this.post.mFinal.uniforms.satK.value = 0.97;
       this.sound.coast = true;
     }
@@ -342,6 +349,7 @@ export class Game {
       this.scene.add(gr.group);
       const seed = [...MAP_ID].reduce((h, ch) => h * 31 + ch.charCodeAt(0), 7);
       const out = markUp(L.map.rooms as never, L.world, this.fx, gr, seed);
+      this.soaked = new Set(out.soakedRooms);
       if (location.search.includes('dev=1')) console.log('[lf] graffiti', out.pieces, 'posters', out.posters, 'papers', out.papers, 'soaked rooms', out.soaked, out.soakedRooms.join(' '));
       (this as unknown as { graffiti: Graffiti }).graffiti = gr;
     }
@@ -355,6 +363,10 @@ export class Game {
     progress(0.95, 'Paths');
     const seeds = [...L.map.spawns.a, ...L.map.spawns.b, ...L.map.spawns.ffa];
     this.nav = new Nav(L.world, seeds, (x, y, z) => this.zone(x, y, z) !== 'street');
+    if (L.map.night && this.L.map.rooms?.length) {
+      this.rats = new Rats(this.nav.nodes);
+      this.scene.add(this.rats.group);
+    }
     addEventListener('resize', () => this.resize());
     this.resize();
     await this.warm();
@@ -684,6 +696,7 @@ export class Game {
         break;
       }
       case 'shot': {
+        this.rats?.startle();
         if (e.s === this.mySlot) {
           this.landShots(e, false);
           break;
@@ -869,9 +882,103 @@ export class Game {
         this.hud.hold(e);
         break;
       case 'chat':
+        if (e.team !== undefined && e.team !== this.actors.get(this.mySlot)?.info.team) break;
         this.hud.chat(e.from, e.text);
+        if (e.team !== undefined) this.sound.radio();
         break;
     }
+  }
+
+  /**
+   * What still moves in an empty building: moths round whatever is still lit, and water coming through the ceilings of
+   * the rooms the rain has got into, a drop at a time, each one landing
+   */
+  private stirring(dt: number) {
+    if (!this.L.map.night) return;
+    const c = this.cam.position, v = this.tmp, t = this.time;
+    let n = 0;
+    for (const f of this.L.flicks) {
+      if (f.dead || f.l.power <= 0 || (f.l.kind !== 'area' && f.l.kind !== 'point')) continue;
+      f.mesh.getWorldPosition(v);
+      const d = Math.hypot(v.x - c.x, v.y - c.y, v.z - c.z);
+      if (d > 11 || d < 0.4) continue;
+      const seed = v.x * 12.9 + v.z * 78.2;
+      const many = 1 + (Math.floor(Math.abs(seed)) % 3);
+      for (let k = 0; k < many; k++) {
+        // round and round, never the same way twice, now and then straight into the glass
+        const a = t * (2.6 + k * 0.9) + seed + k * 2.1 + Math.sin(t * 1.7 + k * 5 + seed) * 1.4;
+        const r = 0.1 + 0.16 * (0.5 + 0.5 * Math.sin(t * 2.3 + k * 3.3 + seed)) + 0.05 * Math.sin(t * 11 + k);
+        this.fx.mote(v.x + Math.cos(a) * r, v.y - 0.1 + Math.sin(t * 3.1 + k * 1.9) * 0.09, v.z + Math.sin(a) * r, 0.012, 0.5, 0.46, 0.38, 0.85);
+      }
+      if (++n >= 5) break;
+    }
+    // drips
+    this.dripAcc += dt * 2.2;
+    while (this.dripAcc > 1) {
+      this.dripAcc -= 1;
+      const a = Math.random() * 6.28, r = 1 + Math.random() * 7;
+      const x = c.x + Math.cos(a) * r, z = c.z + Math.sin(a) * r;
+      const room = this.zone(x, c.y, z);
+      if (room === 'street' || !(this.soaked.has(room) || /flood|tunnel|branch|boiler|cold|scrub|kitchen|plant/.test(room))) continue;
+      const floor = this.L.world.floorAt(x, c.y + 0.3, z, 0.05);
+      const up = this.L.world.ray(x, floor + 1.2, z, 0, 1, 0, 6);
+      if (!up || floor < c.y - 3 || this.drips.length > 24) continue;
+      this.drips.push({ x, y: floor + 1.2 + up.t - 0.02, z, vy: 0, floor });
+    }
+    for (let i = this.drips.length - 1; i >= 0; i--) {
+      const d = this.drips[i];
+      d.vy -= 9.8 * dt;
+      d.y += d.vy * dt;
+      if (d.y <= d.floor) {
+        this.fx.splash(d.x, d.floor, d.z, 0.5);
+        this.drips.splice(i, 1);
+      } else this.fx.mote(d.x, d.y, d.z, 0.009, 0.5, 0.56, 0.62, 0.7);
+    }
+  }
+
+  /** every head the camera can see, followed the way redaction software follows one: a beat behind, and generous */
+  private tracks = new Map<number, { x: number; y: number; r: number; w: number }>();
+  private redact(dt: number) {
+    const cam = this.cam, post = this.post, v = this.tmp;
+    const tan = Math.tan((cam.fov * Math.PI) / 360);
+    const found: [number, number][] = [];
+    for (const [s, a] of this.actors) {
+      const sol = a.soldier;
+      let tr = this.tracks.get(s);
+      let seen = false, x = 0, y = 0, r = 0, dist = 0;
+      if (sol && sol.root.visible && !(s === this.mySlot && this.me.alive) && a.y > -20 && (a.info.alive || sol.dead >= 0)) {
+        const h = sol.head;
+        dist = cam.position.distanceTo(h);
+        v.copy(h).project(cam);
+        if (v.z < 1 && dist > 0.25 && dist < 60 && Math.abs(v.x) < 1.25 && Math.abs(v.y) < 1.25) {
+          x = v.x * 0.5 + 0.5;
+          y = v.y * 0.5 + 0.5;
+          r = 0.19 / (2 * dist * tan);
+          seen = this.L.world.sees(cam.position, { x: h.x, y: h.y + 0.05, z: h.z });
+        }
+      }
+      if (!tr) {
+        if (!seen) continue;
+        this.tracks.set(s, (tr = { x, y, r, w: 0 }));
+      }
+      if (seen) {
+        const k = Math.min(1, dt * 16);
+        tr.x += (x - tr.x) * k;
+        tr.y += (y - tr.y) * k;
+        tr.r += (r - tr.r) * Math.min(1, dt * 10);
+      }
+      tr.w = Math.max(0, Math.min(1, tr.w + (seen ? dt * 7 : -dt * 4)));
+      if (tr.w <= 0) this.tracks.delete(s);
+      else found.push([dist || 99, s]);
+    }
+    found.sort((p, q) => p[0] - q[0]);
+    let n = 0;
+    for (const [, s] of found) {
+      if (n >= post.faces.length) break;
+      const tr = this.tracks.get(s)!;
+      post.faces[n++].set(tr.x, tr.y, Math.max(0.012, tr.r), tr.w);
+    }
+    post.mFinal.uniforms.faceN.value = n;
   }
 
   /** lightning, thunder, and the noises an empty building makes */
@@ -1161,9 +1268,12 @@ export class Game {
       }
     }
     post.capN = cap;
+    this.redact(dt);
     this.phys.step(dt);
     this.lights(dt);
     this.fxNades(dt);
+    this.stirring(dt);
+    this.rats?.update(dt, this.cam.position);
     this.fx.update(dt, this.time, this.cam, this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z) !== 'street');
     this.netT += dt;
     if (this.netT >= CAM_STEP && this.inMatch) {
@@ -1196,8 +1306,14 @@ export class Game {
     const fog = wx?.fog ?? 1;
     this.post.density += ((outside ? 0.0065 : 0.0095) * fog - this.post.density) * Math.min(1, dt * 2);
     if (this.dead >= 0) {
-      u.glitch.value = this.dead > 2.0 ? Math.min(1, (this.dead - 2.0) * 1.8) : 0;
-    } else u.glitch.value = 0;
+      // the feed tears at every knock, stutters now and then, and breaks up for good at the end
+      const d = this.dead, j = this.dc.jolt;
+      u.glitch.value = Math.min(1, j * j * 0.75 + (d > 3.75 ? (d - 3.75) * 1.9 : 0) + (Math.sin(d * 9.1) * Math.sin(d * 3.3) > 0.88 ? 0.3 : 0));
+      u.caK.value = this.caBase + j * 0.05 + Math.min(0.03, d * 0.007);
+    } else {
+      u.glitch.value = 0;
+      u.caK.value = this.caBase;
+    }
     if (this.L.map.night) this.night(dt, outside);
     {
       const e = new THREE.Euler().setFromQuaternion(this.cam.quaternion, 'YXZ');
@@ -1570,31 +1686,134 @@ export class Game {
     }
   }
 
-  /** dropped: the camera goes down with the body and keeps recording */
+  /**
+   * Dropped. The camera is still clipped to the vest, so it does what the chest does: it folds, twists and goes down with
+   * the body, the picture set by where the shoulders and the head are, not by any animation. Half the time the fall
+   * knocks it off its clip: it bounces, skids and comes to rest on its side on the floor, looking back along the
+   * boards at the man who was wearing it. It records for another four seconds, tearing at each knock, and then it stops.
+   */
+  private dc = { loose: false, will: false, hit: false, jolt: 0, side: 1, lt: 0, beat: 0, yaw: null as number | null, p: new THREE.Vector3(), v: new THREE.Vector3(), last: new THREE.Vector3() };
   private deadCam(dt: number, mine: Actor) {
     const was = this.dead;
     this.dead += dt;
     const t = this.dead;
-    const k = Math.min(1, t / 0.9);
-    const e = k * k * (3 - 2 * k);
-    const sol = mine.soldier;
-    if (sol) this.cam.position.lerp(this.tmp.copy(sol.head).setY(Math.max(sol.head.y, mine.y + 0.1)), Math.min(1, dt * 24));
-    const roll = e * 1.25 * (mine.info.slot % 2 ? 1 : -1);
-    // the lens ends up turned toward whoever did it
-    const face = mine.yaw + angleDiff(this.killYaw, mine.yaw) * e;
-    this.cam.rotation.set(THREE.MathUtils.lerp(mine.pitch, 0.1, e), face, roll, 'YXZ');
+    const sol = mine.soldier, dc = this.dc, cam = this.cam, W = this.L.world;
+    if (was === 0) {
+      Object.assign(dc, { loose: false, hit: false, will: Math.random() < 0.5, jolt: 1, side: Math.random() < 0.5 ? 1 : -1, lt: 0, beat: 0, yaw: null });
+      dc.last.copy(cam.position);
+      // the round that did it: a jerk the way it was going, and some of you on the glass
+      dc.v.set(Math.sin(this.killYaw), 0, Math.cos(this.killYaw));
+      this.lensBlood = Math.min(1.2, this.lensBlood + 0.4);
+      this.post.splat();
+      this.whiteout = Math.max(this.whiteout, 0.035);
+    }
+    dc.jolt = Math.max(0, dc.jolt - dt * 2.4);
+    const P = sol?.person;
+    if (!dc.loose && sol && P) {
+      const chest = P.worldOf('Bip01_Spine2', new THREE.Vector3());
+      const up = new THREE.Vector3().copy(sol.head).sub(chest);
+      if (up.lengthSq() < 1e-4) up.set(0, 1, 0);
+      up.normalize();
+      const side = P.worldOf('Bip01_R_UpperArm', new THREE.Vector3()).sub(P.worldOf('Bip01_L_UpperArm', new THREE.Vector3()));
+      const front = new THREE.Vector3().crossVectors(up, side);
+      if (front.lengthSq() < 1e-4) front.set(-Math.sin(mine.yaw), 0, -Math.cos(mine.yaw));
+      front.normalize();
+      const z = front.clone().negate();
+      const x = new THREE.Vector3().crossVectors(up, z).normalize();
+      const y = new THREE.Vector3().crossVectors(z, x);
+      const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+      const pos = chest.addScaledVector(front, 0.15).addScaledVector(up, 0.06);
+      const floor = W.floorAt(pos.x, pos.y + 0.3, pos.z, 0.05);
+      const low = pos.y < floor + 0.42;
+      pos.y = Math.max(pos.y, floor + 0.07);
+      const vel = new THREE.Vector3().copy(pos).sub(dc.last).divideScalar(Math.max(dt, 1e-3));
+      dc.last.copy(pos);
+      cam.position.lerp(pos, Math.min(1, dt * 30));
+      cam.quaternion.slerp(q, Math.min(1, dt * (6 + t * 14)));
+      if (!dc.hit && t > 0.25 && low) {
+        // the floor
+        dc.hit = true;
+        dc.jolt = 1;
+        this.sound.step(null, this.surfaceAt(pos.x, pos.y, pos.z), 6, 1.5);
+        if (dc.will) {
+          dc.loose = true;
+          dc.p.copy(cam.position);
+          dc.v.copy(vel).multiplyScalar(0.5).addScaledVector(front, 1.1 + Math.random() * 0.9).addScaledVector(x, (Math.random() - 0.5) * 1.6);
+          dc.v.y = 1.5 + Math.random();
+          this.sound.clack(null, 'mag_out');
+        }
+      }
+    } else if (dc.loose) {
+      dc.lt += dt;
+      const p = dc.p, v = dc.v;
+      v.y -= 9.8 * dt;
+      const hs = Math.hypot(v.x, v.z);
+      if (hs > 0.05) {
+        // a wall stops it dead
+        const h = W.ray(p.x, p.y + 0.03, p.z, v.x / hs, 0, v.z / hs, hs * dt + 0.08);
+        if (h) {
+          v.x *= -0.25;
+          v.z *= -0.25;
+          dc.jolt = Math.max(dc.jolt, 0.6);
+        }
+      }
+      p.addScaledVector(v, dt);
+      const floor = W.floorAt(p.x, p.y + 0.25, p.z, 0.04) + 0.045;
+      if (p.y < floor) {
+        p.y = floor;
+        if (v.y < -0.9) {
+          v.y *= -0.34;
+          dc.jolt = Math.max(dc.jolt, 0.75);
+          this.sound.clack(null, 'mag_in');
+        } else v.y = 0;
+        const f = Math.exp(-dt * 5);
+        v.x *= f;
+        v.z *= f;
+      }
+      cam.position.copy(p);
+      // end over end while it flies, then on its side, lens back toward the body
+      const body = sol ? sol.head : this.deadFrom;
+      if (dc.yaw === null && dc.lt > 0.35) {
+        // where it ends up pointing: back at the body if there's a clear look at it, else down the longest stretch of floor
+        const toBody = Math.atan2(-(body.x - p.x), -(body.z - p.z)) + dc.side * 0.32;
+        let best = toBody, bs = -1;
+        for (let k = 0; k < 9; k++) {
+          const a = k === 0 ? toBody : (k / 8) * Math.PI * 2;
+          const h = W.ray(p.x, p.y + 0.06, p.z, -Math.sin(a), 0.03, -Math.cos(a), 7);
+          const sc = (h ? h.t : 7) + (k === 0 ? 2.5 : 0);
+          if (sc > bs) {
+            bs = sc;
+            best = a;
+          }
+        }
+        dc.yaw = best;
+      }
+      const yaw = dc.yaw ?? Math.atan2(-(body.x - p.x), -(body.z - p.z));
+      const amp = Math.exp(-dc.lt * 2.4) * 1.3;
+      const rest = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.1 + Math.sin(dc.lt * 15) * amp, yaw + Math.sin(dc.lt * 9 + 1) * amp * 0.8, dc.side * 1.34 + Math.cos(dc.lt * 12) * amp * 1.6, 'YXZ'));
+      cam.quaternion.slerp(rest, Math.min(1, dt * (4 + dc.lt * 8)));
+    } else if (sol) cam.position.lerp(this.tmp.copy(sol.head).setY(Math.max(sol.head.y, mine.y + 0.1)), Math.min(1, dt * 24));
+    // every knock shakes the housing
+    if (dc.jolt > 0.02) {
+      const j = dc.jolt * dc.jolt * 0.11;
+      cam.rotateX((Math.random() - 0.5) * j);
+      cam.rotateZ((Math.random() - 0.5) * j * 1.6);
+    }
+    // the mic is against the chest: a heart that is stopping
+    const beats = [0.3, 0.95, 1.8, 2.95];
+    if (dc.beat < beats.length && t >= beats[dc.beat]) this.sound.heart(1 - dc.beat * 0.24), dc.beat++;
     if (this.cam.fov !== 92) {
       this.cam.fov = 92;
       this.cam.updateProjectionMatrix();
     }
     this.cam.updateMatrixWorld();
-    if (was < 2.45 && t >= 2.45) {
+    if (was < 4.3 && t >= 4.3) {
       this.sound.cut();
       this.hud.lost();
     }
-    if (t >= 2.6) {
+    if (t >= 4.45) {
       this.frozen = true;
-      if (this.cfg?.mode === 'rounds' && t > 5) this.spectate(dt);
+      if (this.cfg?.mode === 'rounds' && t > 6) this.spectate(dt);
     }
   }
 

@@ -1579,6 +1579,11 @@ vGore = vec3( aLife, step( 15.5, aCell ) * step( aCell, 17.5 ) );`);
     }
   }
 
+  /** something small in the air for a frame or two: a moth, a falling drop. Called every frame it's there */
+  mote(x: number, y: number, z: number, size: number, r: number, g: number, b: number, a: number) {
+    this.soft.emit(x, y, z, 0, 0, 0, size, 0, 0.05, r, g, b, a, 0, 0);
+  }
+
   /** a boot in a puddle */
   splash(x: number, y: number, z: number, k: number) {
     for (let i = 0; i < 7 * k; i++) {

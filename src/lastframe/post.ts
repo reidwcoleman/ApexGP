@@ -435,6 +435,8 @@ uniform float grainK;
 uniform float lensWet;
 uniform float lensBlood;
 uniform float cover;
+uniform vec4 faces[ 8 ];
+uniform int faceN;
 uniform vec3 bloodSeed;
 uniform vec2 shutter;
 uniform vec3 flare;
@@ -550,6 +552,24 @@ void main() {
   softer = min( softer, max( c, soft ) * 1.5 + 0.01 );
   c = max( c + ( c - soft ) * 1.05 * ( 1.0 - softK ), vec3( 0.0 ) );
   c = mix( c, mix( soft, softer, nearK * 0.5 ), softK );
+  // footage that has been through an office before anyone saw it: every head in it under an oval of blur that follows it
+  // about, a little late and a little too big
+  for ( int i = 0; i < 8; i++ ) {
+    if ( i >= faceN ) break;
+    vec4 f = faces[ i ];
+    vec2 fd = ( cg - f.xy ) * vec2( aspect, 1.15 ) / f.z;
+    float fm = smoothstep( 1.0, 0.72, length( fd ) ) * f.w;
+    if ( fm > 0.001 ) {
+      vec3 fb = texture2D( tBlock, cg ).rgb * 2.0;
+      float fa = hash( floor( gl_FragCoord.xy * 0.5 ) ) * 6.2831853;
+      for ( int k = 0; k < 8; k++ ) {
+        float an = fa + float( k ) * 0.7853982;
+        float rr = f.z * ( k - k / 2 * 2 == 0 ? 0.62 : 0.3 );
+        fb += texture2D( tBlock, cg + vec2( cos( an ), sin( an ) ) * rr / vec2( aspect, 1.0 ) ).rgb;
+      }
+      c = mix( c, fb * 0.1, fm );
+    }
+  }
   vec3 bloom = texture2D( tBloom, cg ).rgb;
   float expo = texture2D( tExp, vec2( 0.5 ) ).r;
   // grease and dust on the housing's window: nothing in the dark, a smeared glow round anything bright
@@ -661,6 +681,8 @@ export class Post {
   /** fog thickness, per metre */
   density = 0.007;
   /** x y z r per end of each body's capsule, written by the game */
+  /** heads to blur, in the picture before the lens bends it: x, y, radius (in picture heights), how much */
+  faces = Array.from({ length: 8 }, () => new THREE.Vector4());
   capA = Array.from({ length: AO_MAX }, () => new THREE.Vector4());
   capB = Array.from({ length: AO_MAX }, () => new THREE.Vector4());
   capN = 0;
@@ -703,7 +725,7 @@ export class Post {
   private mBlur = pass(BLUR, { tSrc: { value: null }, tDepth: { value: null }, reproj: { value: new THREE.Matrix4() }, amount: { value: 1 } });
   mFinal = pass(FINAL, {
     tSrc: { value: null }, tBloom: { value: null }, tHalf: { value: null }, tBlock: { value: null }, tExp: { value: null }, tDepthF: AIR.tDepth, nfF: AIR.nf, res: { value: new THREE.Vector2() }, time: { value: 0 },
-    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, wb: { value: new THREE.Vector3(1.03, 1, 0.88) }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 1 }, lensWet: { value: 0 }, lensBlood: { value: 0 }, cover: { value: 0 }, bloodSeed: { value: new THREE.Vector3() }, shutter: { value: new THREE.Vector2() }, flare: { value: new THREE.Vector3() }, caK: { value: 0.014 }, satK: { value: 0.82 },
+    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, wb: { value: new THREE.Vector3(1.03, 1, 0.88) }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 1 }, lensWet: { value: 0 }, lensBlood: { value: 0 }, cover: { value: 0 }, faces: { value: this.faces }, faceN: { value: 0 }, bloodSeed: { value: new THREE.Vector3() }, shutter: { value: new THREE.Vector2() }, flare: { value: new THREE.Vector3() }, caK: { value: 0.014 }, satK: { value: 0.82 },
   });
   private prevVP = new THREE.Matrix4();
   private curVP = new THREE.Matrix4();
