@@ -1251,6 +1251,91 @@ SHELF_CATS = dict(cans=('can', 'can', 'can', 'jar', 'can2'), dry=('box', 'box', 
 CAT_LIST = ('cans', 'dry', 'drinks', 'clean', 'jars', 'snacks', 'paper', 'dry', 'cans', 'drinks')
 
 
+# ---- printed packaging: one sheet (packtex.py), 8 x 8 cells and four 2 x 2 blocks along its foot
+PACK = lambda: mat('lfpack', (0.5, 0.48, 0.44), 0.75)
+
+
+def cellr(i):
+    """cell i of the sheet as (u0, v0, u1, v1), a hair inside its edges"""
+    c, r, e = i % 8, i // 8, 0.004
+    return (c / 8 + e, 1 - (r + 1) / 8 + e, (c + 1) / 8 - e, 1 - r / 8 - e)
+
+
+def blockr(k):
+    return (k * 0.25 + 0.004, 0.004, (k + 1) * 0.25 - 0.004, 0.246)
+
+
+def halfr(r):
+    """one of the two fronts on a label that goes twice round"""
+    return (r[0], r[1], (r[0] + r[2]) / 2, r[3])
+
+
+CASE_A, CASE_P, CASE_T = blockr(0), blockr(1), blockr(2)
+OFFER_R, OFFER_Y, CASE_D, BARE = cellr(54), cellr(55), cellr(62), cellr(63)
+
+
+def pbox(b, c, size, yaw, rect, tilt=(0.0, 0.0), top=(1.0, 1.0), side=None, topr=None, vr=(0.0, 1.0)):
+    """a printed box: rect on the two faces across y, a sliver of its margin down the sides and over the top unless they
+    are given their own (a case has four printed sides and a taped lid); vr: the part of rect's height this piece shows"""
+    i = b.idx(PACK())
+    uvl = b.bm.loops.layers.uv.verify()
+    sx, sy, sz = size[0] / 2, size[1] / 2, size[2] / 2
+    tx, ty = sx * top[0], sy * top[1]
+    R = Matrix.Rotation(yaw, 3, 'Z') @ Matrix.Rotation(tilt[0], 3, 'X') @ Matrix.Rotation(tilt[1], 3, 'Y')
+    C = Vector(c)
+    v = [b.bm.verts.new(C + R @ Vector(p)) for p in ((-sx, -sy, -sz), (sx, -sy, -sz), (sx, sy, -sz), (-sx, sy, -sz), (-tx, -ty, sz), (tx, -ty, sz), (tx, ty, sz), (-tx, ty, sz))]
+    u0, v0, u1, v1 = rect
+    f0, f1 = v0 + (v1 - v0) * vr[0], v0 + (v1 - v0) * vr[1]
+    front = (u0, f0, u1, f1)
+    sd = side or (u0, f0, u0 + (u1 - u0) * 0.07, f1)
+    tp = topr or (u0, v1 - (v1 - v0) * 0.06, u1, v1)
+    for f, r in (((0, 3, 2, 1), tp), ((4, 5, 6, 7), tp), ((0, 1, 5, 4), front), ((1, 2, 6, 5), sd), ((2, 3, 7, 6), front), ((3, 0, 4, 7), sd)):
+        face = b.bm.faces.new([v[k] for k in f])
+        face.material_index = i
+        for lp, uv in zip(face.loops, ((r[0], r[1]), (r[2], r[1]), (r[2], r[3]), (r[0], r[3]))):
+            lp[uvl].uv = uv
+
+
+def cbox(b, rng, c, size, yaw, tilt=(0.0, 0.0)):
+    """a cardboard case: the maker's print on two sides, a despatch label on the others, the lid taped"""
+    pbox(b, c, size, yaw, CASE_A if rng.random() < 0.6 else CASE_D, tilt=tilt, side=CASE_P if rng.random() < 0.7 else BARE, topr=CASE_T)
+
+
+def lrod(b, p0, p1, r, rect, n=7, cap=None, front=-math.pi / 2):
+    """a label round a tube from p0 to p1, its middle facing `front` (-pi/2: toward -y on an upright one); cap: the
+    material of its ends, or none for a band over something else"""
+    i = b.idx(PACK())
+    uvl = b.bm.loops.layers.uv.verify()
+    a, c = Vector(p0), Vector(p1)
+    d = c - a
+    L = d.length
+    if L < 1e-5: return
+    z = d / L
+    if abs(z.z) > 0.95:
+        x, y = Vector((1, 0, 0)), Vector((0, 1, 0))       # the corners where lathe() puts them
+    else:
+        x = z.cross(Vector((0, 0, 1))); x.normalize(); y = z.cross(x)
+    lo, hi = [], []
+    for k in range(n):
+        t = k * 2 * math.pi / n
+        o = x * (r * math.cos(t)) + y * (r * math.sin(t))
+        lo.append(b.bm.verts.new(a + o)); hi.append(b.bm.verts.new(c + o))
+    u0, v0, u1, v1 = rect
+    for k in range(n):
+        f = b.bm.faces.new((lo[k], lo[(k + 1) % n], hi[(k + 1) % n], hi[k]))
+        f.material_index = i
+        f.smooth = True
+        # the sheet has the front twice across it, so half of it goes once round
+        ua = (0.25 + (k * 2 * math.pi / n - front) / (2 * math.pi)) % 0.5
+        ub = ua + 1.0 / n
+        for lp, (uu, vv) in zip(f.loops, ((ua, 0), (ub, 0), (ub, 1), (ua, 1))):
+            lp[uvl].uv = (u0 + (u1 - u0) * uu, v0 + (v1 - v0) * vv)
+    if cap:
+        j = b.idx(cap)
+        b.bm.faces.new(list(reversed(lo))).material_index = j
+        b.bm.faces.new(hi).material_index = j
+
+
 def _stock(b, rng, x0, x1, y, z, depth, h, fill, sgn=-1, cat=None):
     """a shelf as a shop keeps it: each product in its own run of facings, a few deep, a ticket on the shelf edge under
     each; some facings sold through to the back, some empty, one or two things knocked over. sgn: which way y the shelf faces"""
@@ -1260,12 +1345,16 @@ def _stock(b, rng, x0, x1, y, z, depth, h, fill, sgn=-1, cat=None):
     x = x0 + rng.uniform(0.0, 0.05)
 
     def ring(xc, yc, z0, z1, r, M, n=7):
-        rod(b, (xc, yc, z0), (xc, yc, z1), r, M, n)
+        # turned the same way round as a lathe, always seven sides: a label over it has to lie on the same corners
+        lathe(b, xc, yc, ((z0, r), (z1, r)), M, 7)
 
     while x < x1 - 0.07:
         kind = rng.choice(kinds)
         C1, C2 = rng.choice(PAL)(), rng.choice(PAL)()
         Cw = LABEL_W() if rng.random() < 0.6 else LAB_C()
+        # one product, one print, for the whole run of facings
+        PB, PG, PC, PL, PF, PR, PT = cellr(rng.randrange(16)), cellr(16 + rng.randrange(8)), cellr(24 + rng.randrange(8)), cellr(32 + rng.randrange(8)), cellr(40 + rng.randrange(4)), cellr(44 + rng.randrange(2)), cellr(46 + rng.randrange(2))
+        fr = -math.pi / 2 if sgn < 0 else math.pi / 2
         if kind == 'can':
             w, dd, hh = rng.uniform(0.07, 0.085), 0.085, rng.uniform(0.1, 0.12)
         elif kind == 'can2':
@@ -1296,7 +1385,7 @@ def _stock(b, rng, x0, x1, y, z, depth, h, fill, sgn=-1, cat=None):
                 break
             xc = x + w / 2
             if rng.random() < 0.85:
-                obox(b, (xc, edge + sgn * 0.011, z - 0.02), (min(0.05, w * 0.6), 0.004, 0.028), 0, Cw)
+                pbox(b, (xc, edge + sgn * 0.011, z - 0.02), (min(0.052, w * 0.6), 0.004, 0.028), 0, PT)
             lost = 0 if rng.random() < 0.55 else rng.randint(1, fits)
             have = fits - lost if stocked else (1 if rng.random() < 0.12 else 0)
             x += w + 0.006
@@ -1310,40 +1399,34 @@ def _stock(b, rng, x0, x1, y, z, depth, h, fill, sgn=-1, cat=None):
                     # flat packs, stacked
                     nst = max(1, min(int(h / hh) - 1, rng.randint(2, 5)))
                     for k in range(nst):
-                        obox(b, (xc + rng.uniform(-0.008, 0.008), ymid, z + hh * (k + 0.5)), (w - 0.012, have * dd, hh - 0.004), rng.uniform(-0.03, 0.03), C1)
-                        obox(b, (xc, yf + sgn * dd / 2 * 1.0 + sgn * 0.002, z + hh * (k + 0.5)), ((w - 0.012) * 0.55, 0.003, hh * 0.6), 0, C2)
+                        pbox(b, (xc + rng.uniform(-0.008, 0.008), ymid, z + hh * (k + 0.5)), (w - 0.012, have * dd, hh - 0.004), rng.uniform(-0.03, 0.03), PF)
                 elif kind == 'bag':
                     for k in range(min(have, 3)):
                         yy = yf - sgn * k * dd
                         # a filled bag: fat in the belly, pinched flat where it is sealed
-                        obox(b, (xc, yy, z + hh * 0.3), (w - 0.02, dd * 0.62, hh * 0.6), 0, C1, tilt=(sgn * 0.1, 0), top=(1.0, 1.25))
-                        obox(b, (xc, yy - sgn * hh * 0.06, z + hh * 0.79), (w - 0.02, dd * 0.775, hh * 0.38), 0, C1, tilt=(sgn * 0.1, 0), top=(0.96, 0.08))
-                    obox(b, (xc, yf + sgn * dd * 0.37, z + hh * 0.5), ((w - 0.02) * 0.7, 0.003, hh * 0.34), 0, C2, tilt=(sgn * 0.1, 0))
-                    obox(b, (xc, yf + sgn * dd * 0.38, z + hh * 0.86), (w - 0.02, 0.004, hh * 0.05), 0, Cw, tilt=(sgn * 0.1, 0))
+                        pbox(b, (xc, yy, z + hh * 0.3), (w - 0.02, dd * 0.62, hh * 0.6), 0, PG, tilt=(sgn * 0.1, 0), top=(1.0, 1.25), vr=(0.0, 0.61))
+                        pbox(b, (xc, yy - sgn * hh * 0.06, z + hh * 0.79), (w - 0.02, dd * 0.775, hh * 0.38), 0, PG, tilt=(sgn * 0.1, 0), top=(0.96, 0.08), vr=(0.61, 1.0))
                 elif kind == 'rolls':
-                    obox(b, (xc, ymid, z + hh / 2), (w - 0.015, have * dd, hh), 0, Cw)
-                    obox(b, (xc, yf + sgn * dd / 2 + sgn * 0.002, z + hh * 0.5), ((w - 0.015) * 0.9, 0.003, hh * 0.38), 0, C1)
+                    pbox(b, (xc, ymid, z + hh / 2), (w - 0.015, have * dd, hh), 0, PR)
                 elif kind == 'jug':
                     obox(b, (xc, ymid, z + hh * 0.42), (w - 0.02, have * dd - 0.01, hh * 0.84), 0, C1)
                     obox(b, (xc - w * 0.12, yf, z + hh * 0.9), ((w - 0.02) * 0.5, dd * 0.6, hh * 0.14), 0, C1)
                     ring(xc - w * 0.12, yf, z + hh * 0.96, z + hh, 0.017, C2, 6)
                     obox(b, (xc + w * 0.3, yf, z + hh * 0.8), (0.022, dd * 0.4, hh * 0.3), 0, C1)
-                    obox(b, (xc - 0.01, yf + sgn * (dd / 2 - 0.003), z + hh * 0.4), ((w - 0.02) * 0.7, 0.003, hh * 0.4), 0, C2)
+                    pbox(b, (xc - 0.01, yf + sgn * (dd / 2 - 0.003), z + hh * 0.4), ((w - 0.02) * 0.8, 0.003, hh * 0.5), 0, halfr(PL))
                 elif kind == 'carton':
-                    obox(b, (xc, ymid, z + hh * 0.44), (w - 0.008, have * dd - 0.008, hh * 0.88), 0, Cw)
+                    pbox(b, (xc, ymid, z + hh * 0.44), (w - 0.008, have * dd - 0.008, hh * 0.88), 0, PB)
                     obox(b, (xc, yf, z + hh * 0.93), (w - 0.008, 0.01, hh * 0.12), 0, Cw)
-                    obox(b, (xc, yf + sgn * (dd / 2 - 0.002), z + hh * 0.42), ((w - 0.008) * 0.86, 0.003, hh * 0.5), 0, C1)
-                    obox(b, (xc, yf + sgn * (dd / 2 - 0.001), z + hh * 0.42), ((w - 0.008) * 0.5, 0.003, hh * 0.16), 0, C2)
                 else:
-                    obox(b, (xc, ymid, z + hh / 2), (w - 0.012, have * dd, hh), 0, C1)
-                    obox(b, (xc, yf + sgn * dd / 2 + sgn * 0.002, z + hh * 0.56), ((w - 0.012) * 0.84, 0.003, hh * 0.5), 0, C2)
-                    obox(b, (xc, yf + sgn * dd / 2 + sgn * 0.003, z + hh * 0.22), ((w - 0.012) * 0.84, 0.003, hh * 0.1), 0, Cw)
+                    # each one its own box, a hair apart, not one long block
+                    for k in range(have):
+                        pbox(b, (xc + rng.uniform(-0.003, 0.003), yf - sgn * k * dd, z + hh / 2), (w - 0.012, dd - 0.004, hh), rng.uniform(-0.02, 0.02) if k == 0 else 0, PB)
                 continue
             r = w / 2 - 0.004
             for k in range(min(have, 2)):
                 yy = yf - sgn * k * dd
                 if rng.random() < 0.035 and k == 0:
-                    rod(b, (xc - 0.02, yy, z + r), (xc + hh * 0.6, yy + sgn * 0.02, z + r), r, C1, 7)
+                    lrod(b, (xc - 0.02, yy, z + r), (xc + hh * 0.6, yy + sgn * 0.02, z + r), r, PC if kind in ('can', 'can2') else PL, 7, cap=TIN())
                     continue
                 near = k == 0
                 if kind in ('can', 'can2'):
@@ -1352,7 +1435,7 @@ def _stock(b, rng, x0, x1, y, z, depth, h, fill, sgn=-1, cat=None):
                             lathe(b, xc, yy, ((z0, r * 0.95), (z0 + 0.006, r), (z1 - 0.006, r), (z1, r * 0.95)), TIN())
                         else:
                             ring(xc, yy, z0, z1, r, TIN())
-                        ring(xc, yy, z0 + 0.011, z1 - 0.011, r + 0.0015, C1, 7 if near else 6)
+                        lrod(b, (xc, yy, z0 + 0.008), (xc, yy, z1 - 0.008), r + 0.0015, PC, 7, front=fr)
                     tin(z, z + hh)
                     if kind == 'can' and hh * 2 + 0.03 < h and rng.random() < 0.6:
                         tin(z + hh + 0.002, z + 2 * hh + 0.002)
@@ -1364,7 +1447,7 @@ def _stock(b, rng, x0, x1, y, z, depth, h, fill, sgn=-1, cat=None):
                     else:
                         ring(xc, yy, z, z + hh - 0.02, r, J)
                         ring(xc, yy, z + hh - 0.02, z + hh, r * 0.86, C2, 6)
-                    ring(xc, yy, z + 0.02, z + hh * 0.6, r + 0.0015, Cw, 7 if near else 6)
+                    lrod(b, (xc, yy, z + 0.02), (xc, yy, z + hh * 0.62), r + 0.0015, PL, 7, front=fr)
                 elif kind == 'spray':
                     if near:
                         lathe(b, xc, yy, ((z, r), (z + hh * 0.62, r), (z + hh * 0.72, r * 0.62), (z + hh * 0.78, r * 0.4), (z + hh * 0.88, r * 0.4)), C1)
@@ -1372,7 +1455,7 @@ def _stock(b, rng, x0, x1, y, z, depth, h, fill, sgn=-1, cat=None):
                         ring(xc, yy, z, z + hh * 0.7, r, C1)
                         ring(xc, yy, z + hh * 0.7, z + hh * 0.88, r * 0.4, C1, 6)
                     obox(b, (xc, yy + sgn * 0.015, z + hh * 0.94), (0.03, 0.07, 0.035), 0, C2)
-                    ring(xc, yy, z + hh * 0.2, z + hh * 0.55, r + 0.0015, Cw, 7 if near else 6)
+                    lrod(b, (xc, yy, z + hh * 0.16), (xc, yy, z + hh * 0.58), r + 0.0015, PL, 7, front=fr)
                 else:
                     lab = C2 if rng.random() < 0.5 else Cw
                     if near:
@@ -1381,7 +1464,7 @@ def _stock(b, rng, x0, x1, y, z, depth, h, fill, sgn=-1, cat=None):
                     else:
                         ring(xc, yy, z, z + hh * 0.66, r, C1, 6)
                         ring(xc, yy, z + hh * 0.66, z + hh, r * 0.4, C1, 5)
-                    ring(xc, yy, z + hh * 0.18, z + hh * 0.5, r + 0.0015, lab, 7 if near else 6)
+                    lrod(b, (xc, yy, z + hh * 0.14), (xc, yy, z + hh * 0.52), r + 0.0015, PL, 7, front=fr)
         x += rng.uniform(0.0, 0.03)
 
 
@@ -1399,7 +1482,7 @@ def gondola(b, rng):
     while x < L / 2 - 0.5:
         if rng.random() < 0.45:
             w, hh = rng.uniform(0.3, 0.5), rng.uniform(0.2, 0.34)
-            obox(b, (x + w / 2, rng.uniform(-0.1, 0.1), H + hh / 2), (w, rng.uniform(0.3, 0.42), hh), rng.uniform(-0.2, 0.2), rng.choice((CARDB, CARDB2))())
+            cbox(b, rng, (x + w / 2, rng.uniform(-0.1, 0.1), H + hh / 2), (w, rng.uniform(0.3, 0.42), hh), rng.uniform(-0.2, 0.2))
             x += w
         x += rng.uniform(0.1, 0.9)
     for sgn in (-1, 1):
@@ -1424,10 +1507,10 @@ def gondola(b, rng):
             r = rng.uniform(0.034, 0.05)
             a = rng.uniform(0, 3.1)
             x, y = rng.uniform(-1.3, 1.3), sgn * rng.uniform(0.6, 0.95)
-            rod(b, (x, y, r), (x + math.cos(a) * 0.12, y + math.sin(a) * 0.12, r), r, rng.choice(LABELS)(), 8)
+            lrod(b, (x, y, r), (x + math.cos(a) * 0.12, y + math.sin(a) * 0.12, r), r, cellr(24 + rng.randrange(8)), 8, cap=TIN())
         else:
             w = rng.uniform(0.1, 0.2)
-            obox(b, (rng.uniform(-1.3, 1.3), sgn * rng.uniform(0.6, 0.95), w * 0.35), (w, w * 1.5, w * 0.7), rng.uniform(0, 3), rng.choice(LABELS)())
+            pbox(b, (rng.uniform(-1.3, 1.3), sgn * rng.uniform(0.6, 0.95), w * 0.18), (w * 1.5, w * 0.36, w * 1.0), rng.uniform(0, 3), cellr(rng.randrange(16)), tilt=(1.5708, 0))
 
 
 def gondolax(b, rng):
@@ -1445,10 +1528,10 @@ def gondolax(b, rng):
         if rng.random() < 0.5:
             r = rng.uniform(0.034, 0.05)
             a = rng.uniform(0, 3.1)
-            rod(b, (x, y, r), (x + math.cos(a) * 0.13, y + math.sin(a) * 0.13, r), r, rng.choice(LABELS)(), 8)
+            lrod(b, (x, y, r), (x + math.cos(a) * 0.13, y + math.sin(a) * 0.13, r), r, cellr(24 + rng.randrange(8)), 8, cap=TIN())
         else:
             w = rng.uniform(0.1, 0.22)
-            obox(b, (x, y, w * 0.4), (w, w * 1.4, w * 0.8), rng.uniform(0, 3), rng.choice(LABELS)(), tilt=(rng.uniform(-0.3, 0.3), 0))
+            pbox(b, (x, y, w * 0.2), (w * 1.4, w * 0.36, w), rng.uniform(0, 3), cellr(rng.randrange(24)), tilt=(1.5708 + rng.uniform(-0.3, 0.3), 0))
 
 
 def endcap(b, rng):
@@ -1460,7 +1543,7 @@ def endcap(b, rng):
         z = 0.17 + k * 0.4
         obox(b, (0, -0.2, z), (W - 0.04, 0.42, 0.022), 0, SHELFM())
         _stock(b, rng, -W / 2 + 0.04, W / 2 - 0.04, -0.2, z + 0.011, 0.42, 0.36, rng.uniform(0.6, 0.98))
-    obox(b, (0, -0.01, H + 0.16), (W * 0.8, 0.012, 0.3), 0, rng.choice((LABEL_R, LABEL_Y))(), tilt=(rng.uniform(-0.1, 0.1), rng.uniform(-0.12, 0.12)))
+    pbox(b, (0, -0.01, H + 0.19), (W * 0.8, 0.012, 0.44), 0, rng.choice((OFFER_R, OFFER_Y)), tilt=(rng.uniform(-0.1, 0.1), rng.uniform(-0.12, 0.12)))
 
 
 def checkout(b, rng):
@@ -1654,7 +1737,7 @@ def rack(b, rng):
             else:
                 for j in range(rng.randint(3, 8)):
                     w = rng.uniform(0.3, 0.5)
-                    obox(b, (x + rng.uniform(-0.3, 0.3), rng.uniform(-0.25, 0.25), zz + 0.13 + w * 0.35 + (j // 3) * 0.3), (w, w * 1.2, w * 0.7), rng.uniform(-0.4, 0.4), rng.choice((CARDB, CARDB2))())
+                    cbox(b, rng, (x + rng.uniform(-0.3, 0.3), rng.uniform(-0.25, 0.25), zz + 0.13 + w * 0.35 + (j // 3) * 0.3), (w, w * 1.2, w * 0.7), rng.uniform(-0.4, 0.4))
 
 
 def strips(b, rng):
@@ -1762,7 +1845,7 @@ def trussbay(b, rng):
 def cardstack(b, rng):
     """flattened boxes, a roll cage with what never got put out, a stack of crates: the back-of-house heap, 1.6 x 1.2"""
     for k in range(rng.randint(4, 9)):
-        obox(b, (rng.uniform(-0.5, 0.0), rng.uniform(-0.3, 0.3), 0.012 + k * 0.022), (rng.uniform(0.7, 1.1), rng.uniform(0.5, 0.9), 0.02), rng.uniform(-0.3, 0.3), rng.choice((CARDB, CARDB2))())
+        pbox(b, (rng.uniform(-0.5, 0.0), rng.uniform(-0.3, 0.3), 0.012 + k * 0.022), (rng.uniform(0.7, 1.1), rng.uniform(0.5, 0.9), 0.02), rng.uniform(-0.3, 0.3), BARE, side=BARE, topr=rng.choice((CASE_A, CASE_P, BARE)))
     x = 0.5
     for (dx, dy) in ((-0.3, -0.35), (0.3, -0.35), (-0.3, 0.35), (0.3, 0.35)):
         rod(b, (x + dx, dy, 0.1), (x + dx, dy, 1.7), 0.012, CHROME(), 5)
@@ -1775,7 +1858,7 @@ def cardstack(b, rng):
     obox(b, (x, 0, 0.13), (0.6, 0.7, 0.02), 0, STEEL())
     for k in range(rng.randint(2, 6)):
         w = rng.uniform(0.25, 0.4)
-        obox(b, (x + rng.uniform(-0.1, 0.1), rng.uniform(-0.15, 0.15), 0.15 + w * 0.35 + (k // 2) * 0.3), (w, w * 1.2, w * 0.7), rng.uniform(-0.3, 0.3), rng.choice((CARDB, CARDB2))())
+        cbox(b, rng, (x + rng.uniform(-0.1, 0.1), rng.uniform(-0.15, 0.15), 0.15 + w * 0.35 + (k // 2) * 0.3), (w, w * 1.2, w * 0.7), rng.uniform(-0.3, 0.3))
 
 
 
@@ -1812,7 +1895,7 @@ def banner(b, rng):
     hem weighted; some hang by one corner, the rest of it turned over on itself"""
     drop = 1.3
     W, Hh = 2.4, 0.9
-    M = rng.choice((LABEL_R, LABEL_Y, LABEL_B, LABEL_W))()
+    R4 = rng.choice((OFFER_R, OFFER_Y))
     torn = rng.random() < 0.28
     n = 8
     rod(b, (-W / 2, 0, 0), (-W / 2, 0, -drop), 0.003, STEEL(), 4)
@@ -1831,9 +1914,18 @@ def banner(b, rng):
                 z = -drop - (t * W) * math.sin(a) - v * Hh * math.cos(a) * 0.9
                 return (x, 0.05 * math.sin(t * 7) + v * 0.04, z)
             return (-W / 2 + t * W, 0.07 * math.sin(t * math.pi) * (0.4 + v), -drop - v * Hh - 0.05 * math.sin(t * math.pi) * (1 - v))
-        quad(b, [P(t0, 0), P(t1, 0), P(t1, 1), P(t0, 1)], M)
-        if k in (2, 3, 4, 5) and not torn:
-            quad(b, [P(t0, 0.3), P(t1, 0.3), P(t1, 0.7), P(t0, 0.7)][::1], LABEL_W() if M is not LABEL_W() else LABEL_R())
+        # the offer printed across it, strip by strip, and the same again on the back
+        uvl = b.bm.loops.layers.uv.verify()
+        pi = b.idx(PACK())
+        pts = [P(t0, 0), P(t1, 0), P(t1, 1), P(t0, 1)]
+        for side in (0, 1):
+            ua, ub = (1 - t0, 1 - t1) if side == 0 else (t0, t1)
+            uvs = [(ua, 1), (ub, 1), (ub, 0), (ua, 0)]
+            order = range(4) if side == 0 else range(3, -1, -1)
+            f = b.bm.faces.new([b.bm.verts.new(pts[j]) for j in order])
+            f.material_index = pi
+            for lp, j in zip(f.loops, order):
+                lp[uvl].uv = (R4[0] + (R4[2] - R4[0]) * uvs[j][0], R4[1] + (R4[3] - R4[1]) * uvs[j][1])
 
 
 def baskets(b, rng):
@@ -1858,8 +1950,7 @@ def promo(b, rng):
     for y in (-0.4, 0, 0.4):
         obox(b, (0, y, 0.05), (1.15, 0.1, 0.09), 0, BOARD())
     obox(b, (0, 0, 0.11), (1.15, 1.0, 0.022), 0, BOARD())
-    M = rng.choice((CARDB, CARDB2))()
-    Lb = rng.choice((LABEL_R, LABEL_B, LABEL_G, LABEL_Y))()
+    PM = rng.choice((CASE_A, CASE_D))
     layers = rng.randint(2, 4)
     for lz in range(layers):
         for ix in range(3):
@@ -1867,12 +1958,11 @@ def promo(b, rng):
                 if rng.random() < 0.12 + 0.2 * lz:
                     continue
                 cx, cy, cz = -0.38 + ix * 0.38, -0.25 + iy * 0.5, 0.13 + lz * 0.26 + 0.125
-                obox(b, (cx + rng.uniform(-0.01, 0.01), cy, cz), (0.36, 0.47, 0.25), rng.uniform(-0.03, 0.03), M)
-                obox(b, (cx, cy - 0.24 if iy == 0 else cy + 0.24, cz), (0.24, 0.006, 0.12), 0, Lb)
+                pbox(b, (cx + rng.uniform(-0.01, 0.01), cy, cz), (0.36, 0.47, 0.25), rng.uniform(-0.03, 0.03), PM, side=CASE_P, topr=CASE_T)
     for k in range(rng.randint(1, 4)):
-        obox(b, (rng.uniform(-1.1, 1.1), rng.choice((-1, 1)) * rng.uniform(0.75, 1.1), 0.125), (0.36, 0.47, 0.25), rng.uniform(0, 3), M, tilt=(rng.choice((0, 0, 1.57)), 0))
+        pbox(b, (rng.uniform(-1.1, 1.1), rng.choice((-1, 1)) * rng.uniform(0.75, 1.1), 0.125), (0.36, 0.47, 0.25), rng.uniform(0, 3), PM, side=CASE_P, topr=CASE_T, tilt=(rng.choice((0, 0, 1.57)), 0))
     rod(b, (0.5, 0.45, 0.12), (0.5, 0.45, 1.75), 0.012, SHELFD(), 5)
-    obox(b, (0.5, 0.45, 1.95), (0.5, 0.012, 0.4), 0, LABEL_Y(), tilt=(0, rng.uniform(-0.15, 0.15)))
+    pbox(b, (0.5, 0.45, 1.95), (0.6, 0.012, 0.36), 0, rng.choice((OFFER_R, OFFER_Y)), tilt=(0, rng.uniform(-0.15, 0.15)))
 
 
 

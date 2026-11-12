@@ -57,7 +57,7 @@ const TRIPLANAR: Record<string, [string, number, number[], number]> = {
   lfrot: ['brown_mud_02', 0.5, [1.0, 0.9, 0.7], 0.9],
   lfrot2: ['brown_mud_02', 0.5, [1.8, 1.6, 1.1], 0.85],
   lfmould: ['mossy_stone_wall', 0.4, [2.0, 3.0, 3.0], 1.0],
-  lfboard: ['wood_planks_dirt', 1.0, [1.1, 1.2, 1.3], 0.75],
+  lfboard: ['wood_planks_dirt', 0.55, [0.82, 0.8, 0.78], 0.8],
   lfgalv: ['concrete_pavement_02', 1.2, [1.25, 1.5, 1.9], 0.5],
 };
 
@@ -568,6 +568,10 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   const need: [string, boolean][] = [];
   for (const t of map.textures) need.push([`tex/${t}_c.webp`, true], [`tex/${t}_n.webp`, false], [`tex/${t}_a.webp`, false]);
   need.push(['lm.webp', false], ['lm2.webp', false], ['sky.webp', false]);
+  // what is printed on the shop's stock: one sheet for every box, tin and case
+  if (MAP_ID === 'store') need.push(['tex/lf_pack_c.webp', true]);
+  // and the scans the modelled kit is projected with: the map's own list only has what its walls and floors use
+  for (const n of new Set(Object.values(TRIPLANAR).map((t) => t[0]))) if (MAP_ID === 'store' && !map.textures.includes(n) && !/mud|rusty/.test(n)) need.push([`tex/${n}_c.webp`, true]);
   if (map.terrain) {
     need.push(['lm3.webp', false], ['splat.webp', false], ['near.webp', false]);
     for (const n of ['leafy_grass', 'seaside_rock']) need.push([`tex/${n}_c.webp`, true], [`tex/${n}_n.webp`, false]);
@@ -770,6 +774,15 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
         }
         // paper on a floor is the palest thing on it: lit from the cubes it came out darker than the tiles under it
         if (/^lfpaper/.test(m0.name)) c.color.multiplyScalar(1.5);
+        // printed card and paper, by its own UVs: matt, and the sheet is already as faded as it should be
+        if (m0.name === 'lfpack') {
+          const pk = texs.get('tex/lf_pack_c.webp');
+          if (pk) {
+            c.map = pk;
+            c.color.setRGB(0.92, 0.92, 0.9);
+            c.roughness = 0.82;
+          }
+        }
         // the volume's light is from all round: in black water only a little of the sky should show
         m = applyLF(c, tiled ? { lightmap: true, tile: true, wet: 0.25 } : m0.name === 'lfpool' ? { spec: 0.22 } : {});
         if (tri && tt) triplanar(m as THREE.MeshStandardMaterial, tri[1], false, /^lflab/.test(m0.name));
