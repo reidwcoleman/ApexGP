@@ -551,6 +551,12 @@ if 'sun_az' in SKY:
     sun_obj.rotation_mode = 'QUATERNION'; sun_obj.rotation_quaternion = (-sd).to_track_quat('-Z', 'Y')
     sun_out = dict(dir=[sd.x, sd.z, -sd.y], power=S, color=list(SKY['tone']), sky=kk)
     log('sun', [round(v, 3) for v in sd], 'elev', round(math.degrees(elev), 1), 'sky strength', round(kk, 4), 'median', round(med, 3), 'E', round(e_up, 3), 'S', round(S, 2))
+if 'sun_bake' in SKY:
+    # a sun that is only in the bake: it comes in through whatever is open and lies on the floor as it fell that morning
+    sb = SKY['sun_bake']
+    ld = bpy.data.lights.new('sunb', 'SUN'); ld.energy = sb['power']; ld.angle = math.radians(1.2); ld.color = sb['color']
+    so = bpy.data.objects.new('sunb', ld); scene.collection.objects.link(so)
+    so.rotation_mode = 'QUATERNION'; so.rotation_quaternion = (-Vector(sb['dir']).normalized()).to_track_quat('-Z', 'Y')
 mixc = nt.nodes.new('ShaderNodeMix'); mixc.data_type = 'RGBA'; mixc.blend_type = 'MULTIPLY'; mixc.inputs['Factor'].default_value = 1.0
 mixc.inputs['B'].default_value = (*SKY['tint'], 1)    # the block pulls its sunset down to blue hour
 nt.links.new(env.outputs['Color'], mixc.inputs['A'])

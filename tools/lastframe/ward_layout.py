@@ -147,7 +147,7 @@ def build():
         al = math.hypot(*aim) or 1.0
         light('spot', (x + aim[0] / al * 0.16, y + aim[1] / al * 0.16, z + 1.74), HALO, p, spot=1.75, blend=0.5, radius=0.06, aim=(aim[0] / al, aim[1] / al, -0.16), flicker=flick, reach=11.0)
 
-    def way(axis, c, p, z, w=1.5, h=2.3):
+    def way(axis, c, p, z, w=1.8, h=2.3):
         """a doorway whose door went long ago: the frame is still there"""
         p = grid(p, w)
         a, b = p - w / 2, p + w / 2
@@ -155,7 +155,12 @@ def build():
         m.openings.append((p, c, z, w, axis) if axis == 'x' else (c, p, z, w, axis))
         return (a, b, z, z + h)
 
-    def breach(axis, c, p, z, w=1.6, h=1.9, t=INT_T):
+    def idoor(axis, c, p, z, w=0.92, **k):
+        """where a door hung inside the building: the leaf is gone and the opening has been taken out wider, so one room
+        looks into the next"""
+        return way(axis, c, p, z, w=max(w + 0.7, 1.9))
+
+    def breach(axis, c, p, z, w=2.2, h=2.15, t=INT_T):
         """a hole knocked through a wall, ragged: no frame, bricks showing at the edge, what came out of it on the floor"""
         p = grid(p, w)
         a, b = p - w / 2, p + w / 2
@@ -293,8 +298,8 @@ def build():
     # ================= ground floor =================
     Z = 0.0
     # ---- the south corridor. Its south side: the stair, ward A, reception wide open on columns, triage, the stair
-    part('x', SY0, X0, 18.0, Z, H1, holes=[way('x', SY0, 3.0, Z, w=5.4, h=2.45), way('x', SY0, 9.0, Z), door('x', SY0, 15.5, Z, swing=-1)])
-    part('x', SY0, 34.0, X1, Z, H1, holes=[door('x', SY0, 36.5, Z, swing=-1), way('x', SY0, 43.0, Z), way('x', SY0, X1 - 3.0, Z, w=5.4, h=2.45)])
+    part('x', SY0, X0, 18.0, Z, H1, holes=[way('x', SY0, 3.0, Z, w=5.4, h=2.45), way('x', SY0, 9.0, Z), idoor('x', SY0, 15.5, Z, swing=-1)])
+    part('x', SY0, 34.0, X1, Z, H1, holes=[idoor('x', SY0, 36.5, Z, swing=-1), way('x', SY0, 43.0, Z), way('x', SY0, X1 - 3.0, Z, w=5.4, h=2.45)])
     box((18.0, SY0 - 0.12, 2.75), (34.0, SY0 + 0.12, H1), 'wall_int', tag='int', density=0.4)
     for x in (18.0, 23.3, 28.7, 34.0):
         box((x - 0.22, SY0 - 0.22, Z), (x + 0.22, SY0 + 0.22, 2.75), 'wall_int', tag='post', density=0.4)
@@ -303,19 +308,19 @@ def build():
     # its north side, west of the atrium and east of it
     part('x', SY1, X0, AX0, Z, H1, holes=[way('x', SY1, 3.5, Z), (8.6, 13.6, Z + 1.05, Z + 2.5)])
     m.casing('x', SY1, 8.6, 13.6, Z + 1.05, Z + 2.5, INT_T, 'trim', sill=True)
-    part('x', SY1, AX1, X1, Z, H1, holes=[door('x', SY1, 40.5, Z), breach('x', SY1, 47.5, Z)])
+    part('x', SY1, AX1, X1, Z, H1, holes=[idoor('x', SY1, 40.5, Z), breach('x', SY1, 47.5, Z)])
     # the atrium's south wall: three ways through under the gallery, and glass between them
     aw = [way('x', SY1, 19.4, Z, w=2.6, h=2.5), way('x', SY1, 26.0, Z, w=3.0, h=2.5), way('x', SY1, 32.6, Z, w=2.6, h=2.5)]
     aw += [window('x', SY1, x, Z, w=1.6, h=1.5, sill=1.0, wt=0.22, glass=g) for (x, g) in ((16.4, True), (22.6, True), (29.4, False), (35.6, True))]
     wall('x', SY1, AX0, AX1, Z, H1, 0.2, 'hbrick', tag='int', holes=aw, pen=True)
     # ---- the north corridor
-    part('x', NY0, X0, AX0, Z, H1, holes=[door('x', NY0, 3.5, Z), way('x', NY0, 11.0, Z)])
-    part('x', NY0, AX1, X1, Z, H1, holes=[way('x', NY0, 41.5, Z, w=1.8), door('x', NY0, 49.0, Z, kind='steel')])
+    part('x', NY0, X0, AX0, Z, H1, holes=[idoor('x', NY0, 3.5, Z), way('x', NY0, 11.0, Z)])
+    part('x', NY0, AX1, X1, Z, H1, holes=[way('x', NY0, 41.5, Z, w=1.8), idoor('x', NY0, 49.0, Z, kind='steel')])
     aw = [way('x', NY0, 19.4, Z, w=2.6, h=2.5), way('x', NY0, 26.0, Z, w=3.0, h=2.5), way('x', NY0, 32.6, Z, w=2.6, h=2.5)]
     aw += [window('x', NY0, x, Z, w=1.6, h=1.5, sill=1.0, wt=0.22, glass=g) for (x, g) in ((16.4, False), (22.6, True), (29.4, True), (35.6, False))]
     wall('x', NY0, AX0, AX1, Z, H1, 0.2, 'hbrick', tag='int', holes=aw, pen=True)
     part('x', NY1, X0, 20.0, Z, H1, holes=[way('x', NY1, 4.5, Z), way('x', NY1, 14.5, Z, w=2.4)])
-    part('x', NY1, 32.0, X1, Z, H1, holes=[door('x', NY1, 37.5, Z, w=1.3, kind='steel', swing=-1), way('x', NY1, 47.5, Z, w=1.8)])
+    part('x', NY1, 32.0, X1, Z, H1, holes=[idoor('x', NY1, 37.5, Z, w=1.3, kind='steel', swing=-1), way('x', NY1, 47.5, Z, w=1.8)])
     # the chapel's front goes to the roof: double doors, one off its hinges
     part('x', NY1, 20.0, 32.0, Z, TOP, holes=[way('x', NY1, 26.0, Z, w=2.2, h=2.6), (21.4, 23.6, F2 + 1.0, F2 + 2.6), (28.4, 30.6, F2 + 1.0, F2 + 2.6)])
     for (a, b) in ((21.4, 23.6), (28.4, 30.6)):
@@ -323,10 +328,10 @@ def build():
         m.invisible((a, NY1 - 0.08, F2), (b, NY1 + 0.08, F2 + 1.0))
     # ---- the two blocks either side of the atrium: their walls onto the aisles
     part('y', AX0, SY1, NY0, Z, H1, holes=[way('y', AX0, 12.0, Z), breach('y', AX0, 19.6, Z, w=1.8)], t=0.2, mat='hbrick')
-    part('y', AX1, SY1, NY0, Z, H1, holes=[(9.4, 13.4, Z + 1.05, Z + 2.5), way('y', AX1, 14.6, Z, w=1.3), door('y', AX1, 19.8, Z, w=1.5, kind='steel', swing=-1)], t=0.2, mat='hbrick')
+    part('y', AX1, SY1, NY0, Z, H1, holes=[(9.4, 13.4, Z + 1.05, Z + 2.5), way('y', AX1, 14.6, Z, w=1.3), idoor('y', AX1, 19.8, Z, w=1.5, kind='steel', swing=-1)], t=0.2, mat='hbrick')
     # inside the west block
-    part('y', MX, SY1, NY0, Z, H1, holes=[breach('y', MX, 12.0, Z), door('y', MX, 20.0, Z)])
-    part('x', MY, X0, AX0, Z, H1, holes=[way('x', MY, 3.6, Z), door('x', MY, 11.5, Z, kind='steel', swing=-1)])
+    part('y', MX, SY1, NY0, Z, H1, holes=[breach('y', MX, 12.0, Z), idoor('y', MX, 20.0, Z)])
+    part('x', MY, X0, AX0, Z, H1, holes=[way('x', MY, 3.6, Z), idoor('x', MY, 11.5, Z, kind='steel', swing=-1)])
     # inside the east block
     part('y', EXM, SY1, MY, Z, H1, holes=[way('y', EXM, 12.4, Z)])
     part('y', 46.0, MY, NY0, Z, H1, holes=[way('y', 46.0, 19.6, Z, w=1.4)])
@@ -337,9 +342,9 @@ def build():
     part('y', 34.0, Y0, SY0, Z, H1, holes=[breach('y', 34.0, 2.6, Z)])
     part('y', 46.0, Y0, SY0, Z, H1)
     part('y', 9.0, NY1, Y1, Z, H1, holes=[way('y', 9.0, 30.0, Z, w=2.2)])
-    part('y', 20.0, NY1, Y1, Z, TOP, holes=[door('y', 20.0, 29.0, Z)], t=0.24)
+    part('y', 20.0, NY1, Y1, Z, TOP, holes=[idoor('y', 20.0, 29.0, Z)], t=0.24)
     part('y', 32.0, NY1, Y1, Z, TOP, holes=[breach('y', 32.0, 28.6, Z, t=0.24)], t=0.24)
-    part('y', 43.0, NY1, Y1, Z, H1, holes=[door('y', 43.0, 28.0, Z, kind='steel')])
+    part('y', 43.0, NY1, Y1, Z, H1, holes=[idoor('y', 43.0, 28.0, Z, kind='steel')])
 
     room('scor', X0, SY0, X1, SY1, Z, H1, 'hosp_wall', 'hlino')
     room('ncor', X0, NY0, X1, NY1, Z, H1, 'hosp_wall', 'hlino')
@@ -740,18 +745,18 @@ def build():
     # ================= upstairs =================
     Z = F2
     # the south corridor's walls: closed either side of the atrium, the gallery open between
-    part('x', SY0, X0, AX0, Z, H2, holes=[way('x', SY0, 3.0, Z, w=5.2, h=2.45), door('x', SY0, 9.0, Z, swing=-1), way('x', SY0, 13.0, Z)])
-    part('x', SY0, AX0, AX1, Z, H2, holes=[way('x', SY0, 19.0, Z), breach('x', SY0, 29.4, Z, w=1.8), door('x', SY0, 33.0, Z, swing=-1)])
+    part('x', SY0, X0, AX0, Z, H2, holes=[way('x', SY0, 3.0, Z, w=5.2, h=2.45), idoor('x', SY0, 9.0, Z, swing=-1), way('x', SY0, 13.0, Z)])
+    part('x', SY0, AX0, AX1, Z, H2, holes=[way('x', SY0, 19.0, Z), breach('x', SY0, 29.4, Z, w=1.8), idoor('x', SY0, 33.0, Z, swing=-1)])
     part('x', SY0, AX1, X1, Z, H2, holes=[way('x', SY0, 41.0, Z), way('x', SY0, X1 - 3.0, Z, w=5.2, h=2.45)])
-    part('x', SY1, X0, AX0, Z, H2, holes=[way('x', SY1, 4.0, Z, w=1.8), door('x', SY1, 11.5, Z, w=1.5)])
-    part('x', SY1, AX1, X1, Z, H2, holes=[door('x', SY1, 40.5, Z), way('x', SY1, 47.5, Z)])
+    part('x', SY1, X0, AX0, Z, H2, holes=[way('x', SY1, 4.0, Z, w=1.8), idoor('x', SY1, 11.5, Z, w=1.5)])
+    part('x', SY1, AX1, X1, Z, H2, holes=[idoor('x', SY1, 40.5, Z), way('x', SY1, 47.5, Z)])
     part('x', NY0, X0, AX0, Z, H2, holes=[way('x', NY0, 4.0, Z, w=1.8), way('x', NY0, 11.5, Z)])
-    part('x', NY0, AX1, X1, Z, H2, holes=[way('x', NY0, 40.5, Z), door('x', NY0, 48.5, Z, kind='steel')])
-    part('x', NY1, X0, 20.0, Z, H2, holes=[door('x', NY1, 5.0, Z, swing=-1), way('x', NY1, 14.5, Z)])
-    part('x', NY1, 32.0, X1, Z, H2, holes=[way('x', NY1, 37.5, Z), door('x', NY1, 47.5, Z, swing=-1)])
+    part('x', NY0, AX1, X1, Z, H2, holes=[way('x', NY0, 40.5, Z), idoor('x', NY0, 48.5, Z, kind='steel')])
+    part('x', NY1, X0, 20.0, Z, H2, holes=[idoor('x', NY1, 5.0, Z, swing=-1), way('x', NY1, 14.5, Z)])
+    part('x', NY1, 32.0, X1, Z, H2, holes=[way('x', NY1, 37.5, Z), idoor('x', NY1, 47.5, Z, swing=-1)])
     # the two blocks onto the gallery's aisles
     part('y', AX0, SY1, NY0, Z, H2, holes=[way('y', AX0, 12.4, Z, w=2.4, h=2.5), way('y', AX0, 19.6, Z, w=2.4, h=2.5)], t=0.2, mat='hbrick')
-    part('y', AX1, SY1, NY0, Z, H2, holes=[way('y', AX1, 12.4, Z), door('y', AX1, 19.6, Z, kind='steel', swing=-1)], t=0.2, mat='hbrick')
+    part('y', AX1, SY1, NY0, Z, H2, holes=[way('y', AX1, 12.4, Z), idoor('y', AX1, 19.6, Z, kind='steel', swing=-1)], t=0.2, mat='hbrick')
     # the east block: children south, two isolation rooms north
     part('x', MY, AX1, X1, Z, H2, holes=[way('x', MY, 49.5, Z)])
     part('y', EXM, MY, NY0, Z, H2, holes=[breach('y', EXM, 21.6, Z, w=1.5)])

@@ -405,10 +405,24 @@ const FRAG_GRIME = /* glsl */ `
     diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * vec3( 0.6, 0.48, 0.34 ), leak * 0.75 );
     float mould = smoothstep( 0.58, 0.74, lfFbm( lfQ * 1.6 + 51.0 ) ) * ( 1.0 - smoothstep( 0.15, 1.3, h ) ) * smoothstep( 0.4, 0.6, macro );
     diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.045, 0.05, 0.035 ), mould * 0.6 );
+    // years without heating: the top coat lets go in sheets and what is under it is bare, chalky and paler, with a line
+    // of shadow under each lifted edge; and the plaster itself has cracked along the lines it always does
+    float pe = lfFbm( lfQ * 0.55 + 71.0 ) + ( lfFbm( lfQ * 4.3 + 13.0 ) - 0.5 ) * 0.3 + ( lfFbm( lfQ * 17.0 + 5.0 ) - 0.5 ) * 0.1;
+    float peel = smoothstep( 0.6, 0.612, pe );
+    float lip = smoothstep( 0.58, 0.6, pe ) * ( 1.0 - peel );
+    vec3 bare = ( vec3( dot( diffuseColor.rgb, vec3( 0.34 ) ) ) * vec3( 1.02, 0.98, 0.9 ) * 1.22 + 0.025 ) * ( 0.8 + 0.4 * lfFbm( lfQ * 9.0 + 3.0 ) );
+    diffuseColor.rgb = mix( diffuseColor.rgb, bare, peel * 0.85 );
+    diffuseColor.rgb *= 1.0 - lip * 0.4;
+    float crack = ( 1.0 - smoothstep( 0.0, 0.0035, abs( lfFbm( lfQ * 0.42 + 91.0 ) + ( lfFbm( lfQ * 6.0 ) - 0.5 ) * 0.03 - 0.5 ) ) ) * smoothstep( 0.5, 0.62, lfFbm( lfQ * 0.2 + 17.0 ) );
+    diffuseColor.rgb *= 1.0 - crack * 0.6;
   } else if ( vLfN.y > 0.5 ) {
-    // floors: dust where nobody walks, grime in drifts
+    // floors: dust where nobody walks, grime in drifts, and the grit that comes off a ceiling for years
     float dirt = smoothstep( 0.42, 0.7, lfFbm( lfQ * 0.5 + 61.0 ) );
     diffuseColor.rgb *= 1.0 - dirt * 0.32;
+    float dust = smoothstep( 0.45, 0.75, lfFbm( lfQ * 0.33 + 23.0 ) + ( lfFbm( lfQ * 3.0 ) - 0.5 ) * 0.3 );
+    diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.3, 0.285, 0.26 ), dust * 0.3 );
+    float grit = smoothstep( 0.78, 0.86, lfFbm( lfQ * 27.0 + 9.0 ) ) * ( 0.4 + 0.6 * dust );
+    diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.2, 0.19, 0.17 ) * ( 0.5 + lfFbm( lfQ * 61.0 ) ), grit * 0.7 );
   }
   #endif
 }

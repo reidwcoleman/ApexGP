@@ -296,9 +296,9 @@ function gearMaterial(team: number, wounds: { value: THREE.Vector4[] }) {
 {
   // nylon that has been worn for weeks: no bright new panels, the weave uneven, dust rubbed into it, darker in the seams
   float gn = gearN( vGearP * 16.0 ) * 0.55 + gearN( vGearP * 70.0 ) * 0.45;
-  diffuseColor.rgb = min( diffuseColor.rgb, vec3( 0.13 ) ) * ( 0.6 + 0.6 * gn );
+  diffuseColor.rgb = min( diffuseColor.rgb, vec3( 0.085 ) ) * ( 0.6 + 0.6 * gn );
   float dust = smoothstep( 0.5, 0.85, gearN( vGearP * 8.0 + 4.0 ) ) * 0.4 + smoothstep( 0.6, 0.9, gearN( vGearP * 31.0 ) ) * 0.2;
-  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.16, 0.148, 0.128 ) * ( 0.7 + 0.5 * gn ), dust );
+  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.115, 0.107, 0.094 ) * ( 0.7 + 0.5 * gn ), dust );
 }
 gSoak = 0.0;
 for ( int wi = 0; wi < 4; wi++ ) {
@@ -319,7 +319,7 @@ for ( int wi = 0; wi < 4; wi++ ) {
 }`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.22, gSoak );');
   };
-  m.customProgramCacheKey = () => 'lfgear2';
+  m.customProgramCacheKey = () => 'lfgear3';
   return applyLF(m, { person: true });
 }
 
@@ -416,7 +416,7 @@ export class Soldier {
       s.uniforms.lfFP = hide;
       s.uniforms.lfMask = mask;
       s.uniforms.lfWound = wounds;
-      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nvoid main() {\n  if ( lfFP > 0.5 ) {\n    // from inside, the trunk is gone, and each sleeve ends in a clean ring a hand below the shoulder\n    vec3 fra = vec3( abs( vRest.x ), vRest.y, vRest.z );\n    vec3 fax = normalize( vec3( abs( uL1.x ) - 0.18, uL1.y - ( uL0.x - 0.06 ), 0.0 ) );\n    float fcut = 0.06;\n    float ffd = dot( fra - vec3( 0.18, uL0.x - 0.06, 0.0 ), fax );\n    // and the sleeve does not end in an edge: it thins out to nothing toward the shoulder, as anything that close to the lens does\n    float fdi = fract( 52.9829189 * fract( dot( gl_FragCoord.xy + fract( lfTime * 7.13 ) * 61.0, vec2( 0.06711056, 0.00583715 ) ) ) );\n    if ( ( ( vPart < 2.5 || vPart > 5.5 ) && 1.0 - smoothstep( uL0.z - 0.13, uL0.z - 0.03, vRest.y ) < fdi * 0.98 + 0.02 ) || ( vPart > 2.5 && vPart < 3.5 && max( smoothstep( 0.05, 0.2, ffd ), smoothstep( 3.2, 3.8, vPart ) ) * smoothstep( 2.5, 3.0, vPart ) < fdi * 0.98 + 0.02 ) ) discard;\n  }');
+      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nvoid main() {\n  if ( lfFP > 0.5 ) {\n    // from inside, the trunk is gone, and each sleeve ends in a clean ring a hand below the shoulder\n    vec3 fra = vec3( abs( vRest.x ), vRest.y, vRest.z );\n    vec3 fax = normalize( vec3( abs( uL1.x ) - 0.18, uL1.y - ( uL0.x - 0.06 ), 0.0 ) );\n    float fcut = 0.06;\n    float ffd = dot( fra - vec3( 0.18, uL0.x - 0.06, 0.0 ), fax );\n    // and the sleeve does not end in an edge: it thins out to nothing toward the shoulder, as anything that close to the lens does\n    float fdi = fract( 52.9829189 * fract( dot( gl_FragCoord.xy + fract( lfTime * 7.13 ) * 61.0, vec2( 0.06711056, 0.00583715 ) ) ) );\n    if ( ( ( vPart < 2.5 || vPart > 5.5 ) && 1.0 - smoothstep( uL0.z - 0.13, uL0.z - 0.03, vRest.y ) < fdi * 0.98 + 0.02 ) || ( vPart > 2.5 && vPart < 3.5 && max( smoothstep( 0.06, 0.2, ffd ), smoothstep( 3.2, 3.8, vPart ) ) * smoothstep( 2.5, 3.0, vPart ) < fdi * 0.98 + 0.02 ) ) discard;\n  }');
       // the head's own mesh, dyed: a balaclava that fits because it is the face. An eye slot, or a scarf to the nose
       s.fragmentShader = s.fragmentShader.replace('diffuseColor.rgb *= col;', `if ( part < 0.5 ) {
     float slot = abs( vRest.y - 1.703 ) - 0.021;
@@ -525,7 +525,7 @@ export class Soldier {
 }
 #include <lights_physical_fragment>`);
     };
-    bm.customProgramCacheKey = () => key + 'fp14';
+    bm.customProgramCacheKey = () => key + 'fp16';
     this.person.play('idle');
     this.root.traverse((o) => o.layers.enable(MOVER));
   }

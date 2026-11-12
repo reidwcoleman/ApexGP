@@ -33,8 +33,8 @@ TRUSS = (10.2, 18.25, 26.3)   # the truss lines, on the column lines     # gondo
 
 # a bright, broken-cloud morning: the building is lit by what comes in through the front glass and the rooflights, the
 # way an empty one is, and the camera cannot hold the windows and the aisles at once
-SKY = dict(hdri='kloofendal_48d_partly_cloudy_puresky', strength=4.0, tint=(1.0, 1.0, 1.0))
-WEATHER = dict(key=0.2, day=1, rain=0, wet=1, fog=0.9, sky=[1.0, 1.02, 1.06], wb=[1.0, 1.0, 1.0])
+SKY = dict(hdri='kloofendal_overcast_puresky', strength=10.0, tint=(1.0, 1.0, 1.0), sun_bake=dict(dir=(0.3, -0.72, 0.62), power=42.0, color=(1.0, 0.95, 0.86)))
+WEATHER = dict(key=0.13, day=1, rain=0, wet=1, fog=0.2, sky=[1.0, 1.02, 1.06], wb=[1.0, 1.0, 1.0])
 VOLUME = dict(step=[2, 1.15, 2], min=[-8, -1.2, -52], dim=[39, 9, 31])
 
 TUBE = (0.8, 0.94, 1.0)
@@ -201,13 +201,32 @@ def build():
     for r in rects_minus(X0, Y0, WX, FY, [STW]):
         box((r[0], r[1], F2 - SLAB), (r[2], r[3], F2), 'slab', tag='floor')
     box((X0, BY, F2 - SLAB), (BX, Y1, F2), 'slab', tag='floor')
-    box((X0 - 0.3, Y0 - 0.3, TOP), (X1 + 0.3, Y1 + 0.3, TOP + 0.35), 'roof', tag='floor', density=0.1)
+    # the roof, with the rooflights cut out of it: the glass went years ago, so what comes down through each is the sky
+    # itself and, when it is out, a bar of sun that crosses the floor through the morning
+    LIGHTS = ((10.0, 15.0), (22.0, 22.5), (34.0, 14.5), (46.0, 22.5), (54.0, 15.0), (40.0, 39.5), (52.0, 34.0),
+              (16.0, 8.0), (28.0, 9.0), (40.0, 7.5), (52.0, 8.0), (16.0, 24.0), (28.0, 17.0), (40.0, 19.5), (34.0, 24.5))
+    LW, LD = 1.5, 2.8
+    xs = sorted({X0 - 0.3, X1 + 0.3, *[v for (x, y) in LIGHTS for v in (x, x + LW)]})
+    ys = sorted({Y0 - 0.3, Y1 + 0.3, *[v for (x, y) in LIGHTS for v in (y, y + LD)]})
+    def is_hole(cx, cy):
+        return any(x < cx < x + LW and y < cy < y + LD for (x, y) in LIGHTS)
+    for j in range(len(ys) - 1):
+        i = 0
+        while i < len(xs) - 1:
+            if is_hole((xs[i] + xs[i + 1]) / 2, (ys[j] + ys[j + 1]) / 2):
+                i += 1
+                continue
+            k = i
+            while k + 1 < len(xs) - 1 and not is_hole((xs[k + 1] + xs[k + 2]) / 2, (ys[j] + ys[j + 1]) / 2):
+                k += 1
+            box((xs[i], ys[j], TOP), (xs[k + 1], ys[j + 1], TOP + 0.35), 'roof', tag='floor', density=0.1)
+            i = k + 1
+    # a kerb round each, standing proud of the deck
+    for (x, y) in LIGHTS:
+        for (a, b) in (((x - 0.06, y - 0.06), (x + LW + 0.06, y)), ((x - 0.06, y + LD), (x + LW + 0.06, y + LD + 0.06)), ((x - 0.06, y), (x, y + LD)), ((x + LW, y), (x + LW + 0.06, y + LD))):
+            box((a[0], a[1], TOP - 0.12), (b[0], b[1], TOP + 0.5), 'trim', collide=False, density=0.2)
     for a, b in (((X0 - 0.3, Y0 - 0.3), (X1 + 0.3, Y0)), ((X0 - 0.3, Y1), (X1 + 0.3, Y1 + 0.3)), ((X0 - 0.3, Y0), (X0, Y1)), ((X1, Y0), (X1 + 0.3, Y1))):
         box((a[0], a[1], TOP + 0.35), (b[0], b[1], TOP + 1.0), 'tin', density=0.1)
-    # rooflights over the hall: by day they are most of the light in it
-    for (x, y) in ((10.0, 15.0), (22.0, 22.5), (34.0, 14.5), (46.0, 22.5), (54.0, 15.0), (40.0, 39.5), (52.0, 34.0),
-                   (16.0, 8.0), (28.0, 9.0), (40.0, 7.5), (52.0, 8.0), (16.0, 24.0), (28.0, 17.0), (40.0, 19.5), (34.0, 24.5)):
-        box((x, y, TOP - 0.02), (x + 1.2, y + 2.4, TOP - 0.005), 'dayglass', collide=False, density=0.1)
 
     # ================= the outside walls =================
     EXT = 'hbrick'

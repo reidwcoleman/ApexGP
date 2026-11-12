@@ -313,6 +313,7 @@ export class Game {
     if (L.map.night) {
       // a shut building by day is still a shut building, but nobody is hidden by the dark in it
       Bot.night = !L.map.weather?.day;
+      if (L.map.weather?.day) this.post.exposureHi = 0.37;
       // the dark is still dark, but the sensor is a better one: it opens further and brings far less noise up with it
       this.post.exposureMax = 7.5;
       // a small sensor's colour: most of it gone, the way this kind of footage always looks

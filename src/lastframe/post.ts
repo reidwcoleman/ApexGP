@@ -720,6 +720,10 @@ export class Post {
   set exposureKey(k: number) {
     this.mExp.uniforms.key.value = k;
   }
+  /** how much of the bright part of the picture the meter will let clip: by day it has to hold the windows back */
+  set exposureHi(k: number) {
+    this.mExp.uniforms.hiKey.value = k;
+  }
   /** fresh blood on the lens: a new pattern, unless there's plenty there already */
   splat() {
     const u = this.mFinal.uniforms;
