@@ -768,6 +768,8 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
           c.roughness = 0.3;
           c.metalness = 0;
         }
+        // paper on a floor is the palest thing on it: lit from the cubes it came out darker than the tiles under it
+        if (/^lfpaper/.test(m0.name)) c.color.multiplyScalar(1.5);
         // the volume's light is from all round: in black water only a little of the sky should show
         m = applyLF(c, tiled ? { lightmap: true, tile: true, wet: 0.25 } : m0.name === 'lfpool' ? { spec: 0.22 } : {});
         if (tri && tt) triplanar(m as THREE.MeshStandardMaterial, tri[1], false, /^lflab/.test(m0.name));

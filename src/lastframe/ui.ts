@@ -204,29 +204,55 @@ export class Hud {
   private home() {
     const m = this.menu;
     m.className = 'menu on';
-    const log = this.cases().slice(0, 3);
-    m.innerHTML = `<div class="rail">
-        <div class="mast"><i class="dot"></i>REC<span class="sp">Evidence console</span></div>
-        <div><h1>Last<br>Frame</h1><p class="tag">Everything you see is what the camera saw.</p></div>
-        <button class="loc" id="m-loc" aria-label="Change location"><img src="${thumb(MAP_ID)}" alt=""><span class="loc-t"><small>Location</small><b>${esc(HERE.name)}</b><em>${esc(HERE.note)}</em></span><span class="loc-c">Change</span></button>
-        <label class="field"><span>Callsign</span><input id="m-name" maxlength="14" spellcheck="false" autocomplete="off" placeholder="Your name" value="${esc(this.name)}"></label>
-        <div class="acts">
-          <button class="primary" id="m-solo">Start a case<kbd>vs bots</kbd></button>
-          <button id="m-host">Open a room</button>
-          <div class="join"><input id="m-code" maxlength="4" placeholder="CODE" aria-label="Room code" spellcheck="false" autocomplete="off"><button id="m-join">Join</button></div>
+    const all = this.cases();
+    const log = all.slice(0, 3);
+    const k = all.reduce((a, c) => a + c.k, 0), d = all.reduce((a, c) => a + c.d, 0), w = all.filter((c) => c.won).length;
+    const mins = Math.round(all.reduce((a, c) => a + c.len, 0) / 60);
+    const rec: [string, string][] = [['Cases', String(all.length)], ['Won', String(w)], ['K / D', all.length ? (k / Math.max(1, d)).toFixed(2) : '0.00'], ['On camera', `${mins} min`]];
+    m.innerHTML = `${this.viewer()}<div class="home">
+        <div class="h-top"><div class="mast"><i class="dot"></i>REC<span>Evidence console</span></div></div>
+        <div class="h-main">
+          <h1>Last Frame</h1>
+          <p class="tag">Everything you see is what the camera saw.</p>
+          <label class="field h-name"><span>Callsign</span><input id="m-name" maxlength="14" spellcheck="false" autocomplete="off" placeholder="Officer" value="${esc(this.name)}"></label>
+          <div class="acts">
+            <button class="primary" id="m-solo"><span>Play<small>${esc(HERE.name)}, against bots</small></span><kbd>Enter</kbd></button>
+            <div class="h-two">
+              <button id="m-host"><b>Host a room</b><small>Friends join with a code</small></button>
+              <div class="join"><input id="m-code" maxlength="4" placeholder="CODE" aria-label="Room code" spellcheck="false" autocomplete="off"><button id="m-join">Join</button></div>
+            </div>
+          </div>
         </div>
-        <div class="group log push"><div class="lab">Case log</div>${log.length ? log.map((c) => `<div class="r"><b>${esc(c.line)}</b><span class="num">${c.k} / ${c.d}</span><small>${c.id}</small><span class="num">${MODES.find((x) => x.id === c.mode)?.name ?? ''}</span></div>`).join('') : '<div class="none">Nothing on file. Your matches land here.</div>'}</div>
-      </div>${this.viewer()}`;
+        <div class="h-foot">
+          <div class="h-loc"><div class="lab">Location</div><div class="h-maps">${MAPS.map((x) => `<button data-map="${x.id}" class="${x.id === MAP_ID ? 'sel' : ''}" aria-pressed="${x.id === MAP_ID}"><img src="${thumb(x.id)}" alt=""><span><b>${esc(x.name)}</b><em>${x.id === MAP_ID ? 'On screen now' : 'Switch the feed'}</em></span></button>`).join('')}</div></div>
+          <div class="h-rec"><div class="lab">Service record</div><div class="h-stats">${rec.map(([l, v]) => `<div><b class="num">${v}</b><span>${l}</span></div>`).join('')}</div>
+            <div class="log">${log.length ? log.map((c) => `<div class="r"><b>${esc(c.line)}</b><span class="num">${c.k} / ${c.d}</span><small>${c.id}</small><span class="num">${MODES.find((x) => x.id === c.mode)?.name ?? ''}</span></div>`).join('') : '<div class="none">No cases on file yet. Your first match lands here.</div>'}</div>
+          </div>
+        </div>
+      </div>`;
+    m.querySelectorAll<HTMLElement>('[data-map]').forEach((b) => b.addEventListener('click', () => {
+      const v = b.dataset.map!;
+      if (v === MAP_ID) return;
+      remember();
+      // each location is its own load: the page comes back on it, at this same screen
+      const u = new URL(location.href);
+      if (v !== DEFAULT_MAP) u.searchParams.set('map', v);
+      else u.searchParams.delete('map');
+      u.searchParams.delete('setup');
+      b.classList.add('going');
+      location.href = u.toString();
+    }));
+    const onKey = (e: KeyboardEvent) => {
+      if (!m.querySelector('.home')) return window.removeEventListener('keydown', onKey);
+      if (e.key === 'Enter' && (e.target as HTMLElement).id !== 'm-code') (m.querySelector('#m-solo') as HTMLElement).click();
+    };
+    window.addEventListener('keydown', onKey);
     const name = m.querySelector('#m-name') as HTMLInputElement;
     const remember = () => {
       this.name = name.value.trim().slice(0, 14) || 'Officer';
       store.set('name', name.value.trim());
     };
     m.querySelector('#m-solo')!.addEventListener('click', () => {
-      remember();
-      this.setup('solo');
-    });
-    m.querySelector('#m-loc')!.addEventListener('click', () => {
       remember();
       this.setup('solo');
     });
