@@ -272,6 +272,15 @@ export class Game {
   }
 
   sun: Sun | null = null;
+  /** a shop's sun: in the bake for what stands still, live for what doesn't */
+  sunIn: Sun | null = null;
+  private undo: (() => void) | null = null;
+  private undoDown: (() => void) | null = null;
+  private downFrom = 0;
+  private downCheck = 0;
+  private downAcc = 0;
+  private noDown = false;
+  private tmpV = new THREE.Vector3();
   private rideM = new THREE.Matrix4();
   private rideQ = new THREE.Quaternion();
   private rideE = new THREE.Euler();
@@ -362,6 +371,18 @@ export class Game {
       const lim = L.map.terrain!.limit;
       const c = new THREE.Vector3((lim[0] + lim[2]) / 2, 14, (lim[1] + lim[3]) / 2);
       sun.bake(c, Math.hypot(lim[2] - lim[0], lim[3] - lim[1]) / 2 + 26, (o) => o.name === 'sky' || o.name === 'sea' || o.name === 'grass' || doorParts.has(o) || glass.has(o) || (o as THREE.Light).isLight === true, (o) => o.name === 'veg');
+    }
+    if (LF.shadeOn && !sunInfo) {
+      const sh = LF.shade.value;
+      const sun = (this.sunIn = new Sun(this.r, this.scene, { dir: [sh.x, sh.y, sh.z], power: sh.w, color: [1, 0.95, 0.86], sky: 1 }, 16, 2048));
+      const skip = new Set<THREE.Object3D>(L.panes.map((p) => p.mesh));
+      for (const d of L.doors) d.pivot.traverse((o) => { o.layers.enable(MOVER); skip.add(o); });
+      for (const l of L.loose) l.obj.traverse((o) => { o.layers.enable(MOVER); skip.add(o); });
+      // the building, and a little of the yard the sun crosses to get in
+      const bb = new THREE.Box3();
+      for (const z of L.map.zones) bb.expandByPoint(new THREE.Vector3(z.a[0], z.a[1], z.a[2])).expandByPoint(new THREE.Vector3(z.b[0], z.b[1], z.b[2]));
+      const c = bb.getCenter(new THREE.Vector3());
+      sun.bake(c, bb.getSize(new THREE.Vector3()).length() / 2 + 3, (o) => o.name === 'sky' || skip.has(o) || (o as THREE.Light).isLight === true || ((o as THREE.Mesh).material as THREE.Material | undefined)?.transparent === true, () => false);
     }
     // what keeps the rain off; a tunnel under open ground doesn't
     // what has a roof keeps the rain off: buildings, and dug-in rooms with their roof at the ground (a dugout's top is below 0)
@@ -569,7 +590,8 @@ export class Game {
   /** a level chosen in the menu, or -1 to let the machine find its own */
   setGfx(v: number) {
     this.gfx = v;
-    this.loN = this.hiN = this.probe = this.upFail = 0;
+    this.loN = this.hiN = this.probe = this.upFail = this.downCheck = 0;
+    this.noDown = false;
     this.scale = 1;
     this.post.lite = false;
     let t = v;
@@ -595,6 +617,10 @@ export class Game {
       sh.map = null as never;
     }
     this.sound.hq = this.tier >= 2;
+    // the low level keeps everyone's mesh as it came and the sun's edges on four taps, redrawn every other frame
+    Soldier.detail = this.tier >= 1 ? 1 : 0;
+    LF.sunQ.value = this.tier >= 1 ? 1 : 0;
+    if (this.sunIn) this.sunIn.every = this.tier >= 1 ? 1 : 2;
     this.settle = 2;
     this.resize();
     if (this.gfx < 0) {
@@ -1180,7 +1206,7 @@ export class Game {
       if (sol && sol.root.visible && !(s === this.mySlot && this.me.alive) && a.y > -20 && (a.info.alive || sol.dead >= 0)) {
         const h = sol.head;
         dist = cam.position.distanceTo(h);
-        v.copy(h).project(cam);
+        v.copy(sol.faceAt(this.tmpV)).project(cam);
         if (v.z < 1 && dist > 0.25 && dist < 60 && Math.abs(v.x) < 1.25 && Math.abs(v.y) < 1.25) {
           x = v.x * 0.5 + 0.5;
           y = v.y * 0.5 + 0.5;
@@ -1422,12 +1448,22 @@ export class Game {
       this.settle--;
       return;
     }
+    // just stepped down: if that bought nothing (the processor is the limit, not the picture) it is given back, and the
+    // picture is left alone from then on. Worse-looking and no faster is the one thing this must never settle on
+    if (this.downCheck > 0) {
+      this.downAcc += fps;
+      if (--this.downCheck === 0 && this.downAcc / 2 < this.downFrom * 1.08) {
+        this.undoDown?.();
+        this.noDown = true;
+      }
+      return;
+    }
     // just stepped up: unless it holds the frame rate it had, it goes straight back, and after two tries it stops asking
     if (this.probe > 0) {
       if (fps < 55) {
         this.probe = 0;
         this.upFail++;
-        this.setTier(this.tier - 1);
+        this.undo?.();
       } else this.probe--;
       return;
     }
@@ -1443,24 +1479,41 @@ export class Game {
     // does the picture shrink
     if (this.loN >= 2) {
       this.loN = 0;
-      if (this.tier > 0) this.setTier(this.tier - 1);
-      else if (!this.post.lite) this.post.lite = true;
-      else if (this.scale > 0.72) {
+      if (this.noDown) return;
+      if (this.tier > 0) {
+        this.setTier(this.tier - 1);
+        this.undoDown = () => this.setTier(this.tier + 1);
+      } else if (!this.post.lite) {
+        this.post.lite = true;
+        this.undoDown = () => { this.post.lite = false; };
+      } else if (this.scale > 0.72) {
+        const was = this.scale;
         this.scale = Math.max(0.72, this.scale - 0.14);
+        this.undoDown = () => { this.scale = was; this.settle = 1; this.resize(); };
         this.settle = 1;
         this.resize();
-      }
+      } else return;
+      this.downFrom = fps;
+      this.downCheck = 2;
+      this.downAcc = 0;
     } else if (this.hiN >= 8) {
       this.hiN = 0;
+      // every step back up is a trial: taken back at once if the frame rate goes with it, and not asked for a third time
+      if (this.upFail >= 2) return;
       if (this.scale < 1) {
+        const was = this.scale;
         this.scale = Math.min(1, this.scale + 0.14);
+        this.undo = () => { this.scale = was; this.settle = 1; this.resize(); };
         this.settle = 1;
         this.resize();
-      } else if (this.post.lite) this.post.lite = false;
-      else if (this.tier < TIERS.length - 1 && this.upFail < 2) {
+      } else if (this.post.lite) {
+        this.post.lite = false;
+        this.undo = () => { this.post.lite = true; };
+      } else if (this.tier < TIERS.length - 1) {
         this.setTier(this.tier + 1);
-        this.probe = 3;
-      }
+        this.undo = () => this.setTier(this.tier - 1);
+      } else return;
+      this.probe = 3;
     }
   }
 
@@ -1493,6 +1546,8 @@ export class Game {
         const v = Math.hypot(me.m.vx, me.m.vz);
         sol.setWeapon(me.weapon);
         // the camera rides on the vest, 13 cm under the eyes: the body I see goes down with it, or the shoulders loom over the lens
+        this.cam.updateMatrixWorld();
+        sol.view = this.cam;
         sol.update(dt, me.m.x, me.m.y - 0.13, me.m.z, me.yaw, me.pitch, me.leanK, mine.flags, v, Math.atan2(-me.m.vx, -me.m.vz));
         const b = this.match?.bodies[this.mySlot];
         if (b) Object.assign(b, { x: me.m.x, y: me.m.y, z: me.m.z, yaw: me.yaw, pitch: me.pitch, lean: me.leanK, crouch: me.crouch, flags: mine.flags, w: WEAPON_LIST.indexOf(me.weapon) });
@@ -1620,6 +1675,7 @@ export class Game {
       const cp = this.cam.position;
       const rk = TIERS[this.tier].reach;
       for (const v of this.L.vegCells) v.mesh.visible = Math.hypot(v.x - cp.x, v.z - cp.z) < v.reach * rk;
+      this.sunIn?.update(this.cam.position, this.time);
       if (this.sun) {
         this.sun.update(this.cam.position, this.time);
         this.L.grass?.update(this.cam);

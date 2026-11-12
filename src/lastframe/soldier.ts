@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Person, loadPeople, setPeopleCore, setPeopleRest, type Look, type PeopleKit } from '../people/Humans.ts';
 import { applyLF } from './lighting.ts';
 import { BASE } from './world.ts';
+import { refine } from './refine.ts';
 import { F, WEAPONS, WEAPON_LIST, type WeaponId } from './shared.ts';
 import type { Phys, Ragdoll } from './physics.ts';
 
@@ -185,10 +186,10 @@ const CREW_TOP = ['#57513a', '#54402f', '#47403a', '#624b34', '#4a4e38'];
 export function lookFor(team: number, slot: number): Look {
   const head = FACES[(slot + team * 2) % FACES.length];
   if (team === 0) {
-    return { female: false, tone: 0.3, hair: 'buzzed', hairColor: '#1a1612', top: 'jacket', topColor: '#3a3e48', top2: '#32363f', accent: '#262a32', bottom: 'trousers', bottomColor: '#343842', shoeColor: '#1c1c20', gloves: '#26272c', body: 'Gardener_Male_01', head };
+    return { female: false, tone: 0.3, hair: 'buzzed', hairColor: '#1a1612', top: 'jacket', topColor: '#4c5261', top2: '#434854', accent: '#30343c', bottom: 'trousers', bottomColor: '#474b55', shoeColor: '#1c1c20', gloves: '#4c483f', body: 'Gardener_Male_01', head };
   }
   const c = CREW_TOP[slot % CREW_TOP.length];
-  return { female: false, tone: 0.4, hair: 'buzzed', hairColor: '#1a1612', top: 'jacket', topColor: c, top2: c, accent: '#101010', bottom: 'trousers', bottomColor: '#34383f', shoeColor: '#24211d', gloves: '#2c2a24', body: 'Gardener_Male_01', head };
+  return { female: false, tone: 0.4, hair: 'buzzed', hairColor: '#1a1612', top: 'jacket', topColor: c, top2: c, accent: '#101010', bottom: 'trousers', bottomColor: '#454a52', shoeColor: '#24211d', gloves: '#514a3c', body: 'Gardener_Male_01', head };
 }
 
 // ---- kit worn over the avatar: modelled to its measurements in gear.py, a part per bone
@@ -331,6 +332,11 @@ export class Soldier {
   readonly guns = new Map<WeaponId, Gun>();
   gun: Gun | null = null;
   weapon: WeaponId | null = null;
+  /** how far everyone else's mesh is rounded: 0 as it came, 1 every triangle cut in four */
+  static detail = 1;
+  private geo0: THREE.BufferGeometry;
+  /** first person: the lens this body wears. The shoulders hang off it, not off the feet */
+  view: THREE.Camera | null = null;
   /** first person: the gun is placed by the view, the head is gone */
   firstPerson = false;
   /** what makes a figure a person and not a mannequin: its own breath, its own stride, an aim that takes a moment to arrive */
@@ -377,6 +383,8 @@ export class Soldier {
   constructor(kit: PeopleKit, readonly team: number, slot: number) {
     this.person = new Person(kit, lookFor(team, slot));
     this.person.lively = true;
+    this.geo0 = this.person.body.geometry;
+    this.person.body.geometry = refine(this.geo0, Soldier.detail, null, 'tp' + Soldier.detail);
     this.root.add(this.person.root);
     this.root.add(this.holder);
     const gm = gearMaterial(team, this.wounds);
@@ -422,7 +430,7 @@ export class Soldier {
       s.uniforms.lfFP = hide;
       s.uniforms.lfMask = mask;
       s.uniforms.lfWound = wounds;
-      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nfloat lfFpA = 1.0;\nvoid main() {\n  if ( lfFP > 0.5 ) {\n    // from inside, the trunk is gone, and each sleeve ends in a clean ring a hand below the shoulder\n    vec3 fra = vec3( abs( vRest.x ), vRest.y, vRest.z );\n    vec3 fax = normalize( vec3( abs( uL1.x ) - 0.18, uL1.y - ( uL0.x - 0.06 ), 0.0 ) );\n    float fcut = 0.06;\n    float ffd = dot( fra - vec3( 0.18, uL0.x - 0.06, 0.0 ), fax );\n    // and the sleeve does not end in an edge: it thins out to nothing toward the shoulder, as anything that close to the lens does\n    float fa1 = ( vPart < 2.5 || vPart > 5.5 ) ? 1.0 - smoothstep( uL0.z - 0.13, uL0.z - 0.03, vRest.y ) : 1.0;\n    float fa2 = ( vPart > 2.5 && vPart < 3.5 ) ? max( smoothstep( 0.06, 0.2, ffd ), smoothstep( 3.2, 3.8, vPart ) ) * smoothstep( 2.5, 3.0, vPart ) : 1.0;\n    lfFpA = min( fa1, fa2 );\n    if ( lfFpA < 0.012 ) discard;\n  }');
+      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nfloat lfFpA = 1.0;\nvoid main() {\n  if ( lfFP > 0.5 ) {\n    // from inside the trunk is gone: the camera sits in it. The sleeves run on up out of the frame, whole, as arms do\n    float fa1 = ( vPart < 2.5 || vPart > 5.5 ) ? 1.0 - smoothstep( uL0.z - 0.15, uL0.z - 0.01, vRest.y ) : 1.0;\n    if ( fa1 < 0.4 ) discard;\n    // and the top of the legs goes into the shade of what is above them\n    lfFpA = smoothstep( 0.4, 1.0, fa1 );\n  }');
       // the head's own mesh, dyed: a balaclava that fits because it is the face. An eye slot, or a scarf to the nose
       s.fragmentShader = s.fragmentShader.replace('diffuseColor.rgb *= col;', `if ( part < 0.5 ) {
     float slot = abs( vRest.y - 1.703 ) - 0.021;
@@ -520,10 +528,10 @@ export class Soldier {
       gSheen *= 1.0 - soak;
     }
   }
-  diffuseColor.rgb *= col;`);
+  // (and the inside of a sleeve or a trouser leg is a dark hole, not a lit room)
+  diffuseColor.rgb *= col * ( 0.06 + 0.94 * lfFpA ) * ( lfFP > 0.5 && !gl_FrontFacing && vPart > 5.5 ? 0.04 : 1.0 );`);
       // that height, onto the normal
-      // seen from inside it is blended, not stippled: the sleeve and the waist thin out to nothing with no dots in them
-      s.fragmentShader = s.fragmentShader.replace('vec4 diffuseColor = vec4( diffuse, opacity );', 'vec4 diffuseColor = vec4( diffuse, opacity * lfFpA );');
+      s.fragmentShader = s.fragmentShader.replace('vec4 diffuseColor = vec4( diffuse, opacity );', 'vec4 diffuseColor = vec4( diffuse, opacity );');
       s.fragmentShader = s.fragmentShader.replace('#include <lights_physical_fragment>', `{
   vec3 bsx = dFdx( -vViewPosition ), bsy = dFdy( -vViewPosition );
   vec3 br1 = cross( bsy, normal ), br2 = cross( normal, bsx );
@@ -533,7 +541,7 @@ export class Soldier {
 }
 #include <lights_physical_fragment>`);
     };
-    bm.customProgramCacheKey = () => key + 'fp17';
+    bm.customProgramCacheKey = () => key + 'fp20';
     this.person.play('idle');
     this.root.traverse((o) => o.layers.enable(MOVER));
   }
@@ -546,9 +554,12 @@ export class Soldier {
       (o as THREE.Mesh).castShadow = !on;
     });
     this.person.bones.Head.scale.setScalar(on ? 0.001 : 1);
+    // your own arms fill a third of the frame: they get the fine mesh, and their insides, where a sleeve runs off the edge
     const bm = this.person.body.material as THREE.MeshStandardMaterial;
-    if (bm.transparent !== on) {
-      bm.transparent = on;
+    this.person.body.geometry = on ? refine(refine(this.geo0, 1, [2, 6, 7, 8], 'fpl'), 2, [3, 4, 5], 'fp') : refine(this.geo0, Soldier.detail, null, 'tp' + Soldier.detail);
+    const side = on ? THREE.DoubleSide : THREE.FrontSide;
+    if (bm.side !== side) {
+      bm.side = side;
       bm.needsUpdate = true;
     }
   }
@@ -561,6 +572,8 @@ export class Soldier {
     if (!g) this.guns.set(id, (g = buildGun(id)));
     this.gun = g;
     this.holder.add(g.group);
+    // it stands in the sun with whoever holds it
+    g.group.traverse((o) => o.layers.enable(MOVER));
   }
 
   /** a round went in: `dir` the way it was going, `k` how bad. It shows on the body, and spreads */
@@ -744,15 +757,17 @@ export class Soldier {
     fwd.set(Math.sin(face), 0, Math.cos(face));
     right.set(-Math.cos(face), 0, Math.sin(face));
     const pk = -pitch;
-    P.rotateWorld('Bip01_Spine1', right, pk * 0.3);
-    P.rotateWorld('Bip01_Spine2', right, pk * 0.34);
-    if (!this.firstPerson) P.rotateWorld('Bip01_Head', right, pk * 0.28);
+    // the camera is clipped to the chest: seen through it the chest goes exactly where the look goes
+    // (about the body's right, a positive turn tips it back: looking down is a negative one)
+    P.rotateWorld('Bip01_Spine1', right, -pk * (this.firstPerson ? 0.5 : 0.3));
+    P.rotateWorld('Bip01_Spine2', right, -pk * (this.firstPerson ? 0.5 : 0.34));
+    if (!this.firstPerson) P.rotateWorld('Bip01_Head', right, -pk * 0.28);
     // the chest fills and empties, harder after a run; a round going off rocks the shoulders back; and somebody standing
     // with nothing to shoot at looks about
     const breath = Math.sin(this.tA * (1.6 + this.sprintK * 2.2));
     if (!this.firstPerson) {
-      P.rotateWorld('Bip01_Spine2', right, breath * (0.012 + this.sprintK * 0.014) - this.kick * 0.06);
-      P.rotateWorld('Bip01_Spine1', right, -this.kick * 0.03);
+      P.rotateWorld('Bip01_Spine2', right, breath * (0.012 + this.sprintK * 0.014) + this.kick * 0.06);
+      P.rotateWorld('Bip01_Spine1', right, this.kick * 0.03);
       const idle = (1 - Math.min(1, this.spd / 0.6)) * (1 - this.aim);
       if (idle > 0.01) P.rotateWorld('Bip01_Head', UP, (Math.sin(this.tA * 0.43) * 0.2 + Math.sin(this.tA * 0.171 + 2) * 0.16) * idle);
     }
@@ -769,6 +784,15 @@ export class Soldier {
       P.rotateWorld('Bip01_Spine', fwd, this.lean * 0.16);
       P.rotateWorld('Bip01_Spine1', fwd, this.lean * 0.16);
       P.rotateWorld('Bip01_Spine2', fwd, this.lean * 0.14);
+    }
+    if (this.firstPerson && this.view) {
+      // ...and the shoulders stay where they are to the lens, bent over or leaning: just out of the frame on either side.
+      // (Hung off the feet they swung up into the picture whenever you looked at the floor.)
+      P.root.updateMatrixWorld(true);
+      const mid = P.worldOf('Bip01_R_UpperArm', this.v[4]).add(P.worldOf('Bip01_L_UpperArm', this.v[5])).multiplyScalar(0.5);
+      const to = this.v[6].set(0, -0.105, -0.08).applyMatrix4(this.view.matrixWorld);
+      P.root.position.add(to.sub(mid));
+      P.root.updateMatrixWorld(true);
     }
     if (!this.gun || !this.weapon) return;
     const spec = WEAPONS[this.weapon];
@@ -835,6 +859,13 @@ export class Soldier {
     const ang = Math.atan2(new THREE.Vector3().crossVectors(cur, want).dot(f), cur.dot(want));
     P.rotateWorld(H, f, ang);
     const axis = want.clone().multiplyScalar(s === 'R' ? -1 : 1);
+    // the thumb comes across to meet them, or it stands up off the gun like a hitch-hiker's
+    const td = s === 'R' ? TH_R : TH_L;
+    const sg = s === 'R' ? -1 : 1;
+    P.rotateWorld(`Bip01_${s}_Finger0`, f, sg * td[0] * curl);
+    P.rotateWorld(`Bip01_${s}_Finger0`, axis, td[1] * curl);
+    P.rotateWorld(`Bip01_${s}_Finger01`, axis, td[2] * curl);
+    P.rotateWorld(`Bip01_${s}_Finger02`, axis, td[2] * curl);
     for (let k = 1; k < 5; k++) {
       P.rotateWorld(`Bip01_${s}_Finger${k}`, axis, 0.95 * curl);
       P.rotateWorld(`Bip01_${s}_Finger${k}1`, axis, 0.95 * curl);
@@ -865,6 +896,14 @@ export class Soldier {
     P.aim(fa, ha, T.clone().sub(E1));
   }
 
+  /** the middle of the face, for whoever has to blur it: the head's own joint is down at the jaw */
+  faceAt(out: THREE.Vector3): THREE.Vector3 {
+    const P = this.person;
+    if (!P.bones.Bip01_LEye || !P.bones.Bip01_REye) return out.copy(this.head).setY(this.head.y + 0.08);
+    P.worldOf('Bip01_LEye', out).add(P.worldOf('Bip01_REye', this.v[3])).multiplyScalar(0.5);
+    return out.lerp(this.head, 0.3);
+  }
+
   muzzle(out: THREE.Vector3): THREE.Vector3 {
     if (!this.gun) return out.copy(this.head);
     return out.set(...WEAPONS[this.weapon!].muzzle).applyMatrix4(this.gun.group.matrixWorld);
@@ -876,6 +915,8 @@ export class Soldier {
   }
 }
 
+/** the thumb's share of a grip: round the pistol grip from behind; laid over the top of a fore-end */
+const TH_R = [0.8, 0, 0.4], TH_L = [0.3, -0.7, 0.4];
 const LED_GEO = new THREE.SphereGeometry(0.012, 8, 6);
 const LED_MAT = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.1, 1.5, 0.4), toneMapped: false });
 LED_MAT.userData.gear = true;

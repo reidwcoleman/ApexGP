@@ -65,6 +65,22 @@ export class Nav {
       }
     }
     w.dyn = dyn;
+    // a desk top reached by way of a chair, a ledge with a long drop off it: places the fill could get onto and not back
+    // from. Anyone sent there, or landing there, stood on it for the rest of the round. Keep only what leads back to a spawn
+    {
+      const N = this.nodes.length;
+      const rev: number[][] = this.nodes.map(() => []);
+      for (const n of this.nodes) for (const m of n.next) rev[m].push(n.i);
+      const good = new Uint8Array(N);
+      const stack: number[] = [];
+      for (let i = 0; i < Math.min(seeds.length, N); i++) { good[i] = 1; stack.push(i); }
+      while (stack.length) for (const m of rev[stack.pop()!]) if (!good[m]) { good[m] = 1; stack.push(m); }
+      const map = new Int32Array(N).fill(-1);
+      const kept: Node[] = [];
+      for (const n of this.nodes) if (good[n.i]) { map[n.i] = kept.length; kept.push(n); }
+      for (const n of kept) { n.next = n.next.filter((m) => map[m] >= 0).map((m) => map[m]); n.i = map[n.i]; }
+      this.nodes = kept;
+    }
     for (const n of this.nodes) {
       const k = this.cell(n.x, n.z);
       const c = this.byCell.get(k);

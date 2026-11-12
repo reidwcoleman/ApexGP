@@ -547,7 +547,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   // a baked sun: where it is and how bright a spot must be to be lying in it, for the shadows of whoever walks through
   const shade = map.weather?.shade;
   LF.shadeOn = !!shade;
-  if (shade) LF.shade.value.set(shade[0], shade[1], shade[2], shade[3] ?? 0.12);
+  if (shade) LF.shade.value.set(shade[0], shade[1], shade[2], shade[3] ?? 42);
   LF.lmK.value.set(map.lm.logr, map.lm.k);
   if (map.weather?.sun) LF.skyK.value = map.weather.sun.sky;
   const bin = await binP;

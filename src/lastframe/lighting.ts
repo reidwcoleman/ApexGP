@@ -78,10 +78,14 @@ export const LF = {
   noise: { value: noiseTile() },
   /** 1 under open sky */
   rain: { value: 1 },
-  /** a sun that is in the bake (the shop): xyz is the way to it, w the brightness above which a spot counts as lying in it.
-   *  A body between such a spot and the sun takes the sun off it: see lfCapShadow */
+  /** a sun that is in the bake (the shop): xyz is the way to it, w how strong it is. The bake lights what stands still; what
+   *  doesn't (people, a gun, what gets knocked over) takes it live from the sun's maps, and takes it off the floor behind it */
   shadeOn: false as boolean,
   shade: { value: new THREE.Vector4(0, 1, 0, 0) },
+  /** 1 finer shadow edges (sixteen taps), 0 four */
+  sunQ: { value: 1 },
+  /** how many texels across the two sun maps are */
+  sunPx: { value: new THREE.Vector2(4096, 1024) },
   /** every body as a capsule: x y z r at the feet, x y z at the head. The occlusion pass reads the same ones */
   capA: { value: Array.from({ length: CAP_MAX }, () => new THREE.Vector4()) },
   capB: { value: Array.from({ length: CAP_MAX }, () => new THREE.Vector4()) },
@@ -119,6 +123,8 @@ uniform mat4 lfDynVP;
 uniform highp sampler2D lfSunMap;
 uniform highp sampler2D lfDynMap;
 uniform vec2 lfCloud;
+uniform float lfSunQ;
+uniform vec2 lfSunPx;
 float lfIGN( vec2 p ) { return fract( 52.9829189 * fract( dot( p, vec2( 0.06711056, 0.00583715 ) ) ) ); }
 float lfCloudAt( sampler2D n, vec2 p ) {
   float c = texture2D( n, p * 0.00022 + lfCloud ).r + 0.5 * ( texture2D( n, p * 0.0009 + lfCloud * 3.0 ).r - 0.5 );
@@ -133,16 +139,51 @@ float lfMapVis( highp sampler2D m, vec3 s, float r, float a, float bias ) {
   v += step( z, texture2D( m, s.xy - e ).r );
   return v * 0.25;
 }
+/** sixteen taps weighted by where in its texel the spot lies: an edge that is smooth and stands still */
+float lfMapSoft( highp sampler2D m, vec3 s, float n, float bias ) {
+  vec2 p = s.xy * n - 0.5, f = fract( p ), b = ( floor( p ) + 0.5 ) / n;
+  float z = s.z - bias, px = 1.0 / n, v = 0.0;
+  for ( int j = -1; j <= 2; j++ ) {
+    float wy = j == -1 ? 1.0 - f.y : j == 2 ? f.y : 1.0;
+    for ( int i = -1; i <= 2; i++ ) {
+      float wx = i == -1 ? 1.0 - f.x : i == 2 ? f.x : 1.0;
+      v += wx * wy * step( z, texture2D( m, b + vec2( float( i ), float( j ) ) * px ).r );
+    }
+  }
+  return v / 9.0;
+}
 float lfInMap( vec3 s ) { return step( 0.002, min( min( s.x, s.y ), 1.0 - max( s.x, s.y ) ) ) * step( s.z, 1.0 ); }
+/** a spot the bake left in the sun, and how much of that a body standing in the way now takes off it: x in the sun, y still lit */
+vec2 lfSunBar( vec3 P, vec3 N ) {
+  vec3 q = P + N * 0.04 + lfSunDir * 0.03;
+  vec3 s = ( lfSunVP * vec4( q, 1.0 ) ).xyz * 0.5 + 0.5;
+  if ( lfInMap( s ) < 0.5 ) return vec2( 0.0, 1.0 );
+  float v = lfMapVis( lfSunMap, s, 1.2 / lfSunPx.x, 0.6, 0.00006 );
+  if ( v < 0.004 ) return vec2( 0.0, 1.0 );
+  vec3 t = ( lfDynVP * vec4( q, 1.0 ) ).xyz * 0.5 + 0.5;
+  float d = 1.0;
+  if ( lfInMap( t ) > 0.5 ) d = lfSunQ > 0.5 ? lfMapSoft( lfDynMap, t, lfSunPx.y, 0.0003 ) : lfMapVis( lfDynMap, t, 1.2 / lfSunPx.y, 1.9, 0.0003 );
+  return vec2( v, d );
+}
 /** the two shadow maps; noise turns the taps a little every pixel and the temporal pass averages them */
 float lfSunVis( vec3 P, vec3 N, float a ) {
   vec3 q = P + N * 0.09 + lfSunDir * 0.05;
   vec3 s = ( lfSunVP * vec4( q, 1.0 ) ).xyz * 0.5 + 0.5;
   float v = 1.0;
+  #ifdef LF_SUNIN
+  // indoors the sun comes in bars: outside the big map there is none of it, and nothing dances
+  if ( lfInMap( s ) < 0.5 ) return 0.0;
+  v = lfSunQ > 0.5 ? lfMapSoft( lfSunMap, s, lfSunPx.x, 0.00006 ) : lfMapVis( lfSunMap, s, 1.2 / lfSunPx.x, 0.6, 0.00006 );
+  if ( v < 0.004 ) return 0.0;
+  vec3 t = ( lfDynVP * vec4( q, 1.0 ) ).xyz * 0.5 + 0.5;
+  if ( lfInMap( t ) > 0.5 ) v *= lfSunQ > 0.5 ? lfMapSoft( lfDynMap, t, lfSunPx.y, 0.0004 ) : lfMapVis( lfDynMap, t, 1.2 / lfSunPx.y, 1.9, 0.0004 );
+  return v;
+  #else
   if ( lfInMap( s ) > 0.5 ) v = lfMapVis( lfSunMap, s, 1.5 / 4096.0, a, 0.00004 );
   vec3 t = ( lfDynVP * vec4( q, 1.0 ) ).xyz * 0.5 + 0.5;
   if ( lfInMap( t ) > 0.5 ) v *= lfMapVis( lfDynMap, t, 1.4 / 1024.0, a + 1.3, 0.0002 );
   return v;
+  #endif
 }
 `;
 
@@ -202,29 +243,12 @@ float lfFlickDim( vec3 p ) {
   }
   return k;
 }
-#ifdef LF_SUN
+#if defined( LF_SUN ) || defined( LF_SHADE )
 ${SUN_GLSL}
 #endif
 #ifdef LF_LM
 varying vec2 vLfLM;
 uniform sampler2D lfLM;
-#endif
-#if defined( LF_LM ) && defined( LF_SHADE )
-uniform vec4 lfShade;
-uniform vec4 lfCapA[ ${CAP_MAX} ];
-uniform vec4 lfCapB[ ${CAP_MAX} ];
-uniform int lfCapN;
-// how much of the sun gets past a body on its way to this spot: the nearest the ray comes to the capsule, against how far off that is
-float lfCapShadow( vec3 ro, vec3 rd, vec3 a, vec3 b, float r ) {
-  vec3 ba = b - a, oa = ro - a;
-  float oad = dot( oa, rd ), dba = dot( rd, ba ), baba = dot( ba, ba ), oaba = dot( oa, ba );
-  vec2 th = vec2( -oad * baba + dba * oaba, oaba - oad * dba ) / max( baba - dba * dba, 1e-4 );
-  th.x = max( th.x, 1e-4 );
-  th.y = clamp( th.y, 0.0, 1.0 );
-  float d = length( a + ba * th.y - ( ro + rd * th.x ) ) - r;
-  float k = clamp( 9.0 * d / th.x + 0.5, 0.0, 1.0 );
-  return k * k * ( 3.0 - 2.0 * k );
-}
 #endif
 #ifdef LF_WET
 uniform float lfWet;
@@ -309,15 +333,12 @@ const FRAG_LIGHT = /* glsl */ `
     #ifdef LF_SHADE
     {
       // the sun on this floor was baked with nobody in the building: whoever stands in it now takes it away again
-      float lfSunny = smoothstep( lfShade.w, lfShade.w * 2.2, dot( lfBaked, vec3( 0.3, 0.6, 0.1 ) ) ) * step( 0.02, dot( normalize( vLfN ), lfShade.xyz ) );
-      if ( lfSunny > 0.0 ) {
-        float lfSh = 1.0;
-        vec3 lfRo = vLfW + normalize( vLfN ) * 0.03;
-        for ( int i = 0; i < ${CAP_MAX}; i++ ) {
-          if ( i >= lfCapN ) break;
-          lfSh = min( lfSh, lfCapShadow( lfRo, lfShade.xyz, lfCapA[ i ].xyz, lfCapB[ i ].xyz, lfCapA[ i ].w ) );
-        }
-        lfBaked *= mix( 1.0, mix( 0.2, 1.0, lfSh ), lfSunny );
+      vec3 lfSn = normalize( vLfN );
+      if ( dot( lfSn, lfSunDir ) > 0.02 ) {
+        vec2 lfBar = lfSunBar( vLfW, lfSn );
+        float lfOff = lfBar.x * ( 1.0 - lfBar.y );
+        // the bake's sun is the same lamp as the live one: take off exactly what it put there, and the room's own light is left
+        if ( lfOff > 0.003 ) lfBaked = mix( lfBaked, max( lfBaked - lfSunC * ( dot( lfSn, lfSunDir ) * RECIPROCAL_PI ), lfBaked * 0.13 ), lfOff );
       }
     }
     #endif
@@ -380,8 +401,12 @@ const FRAG_LIGHT = /* glsl */ `
   #endif
   #ifdef LF_SUN
   {
+    #ifdef LF_SUNIN
+    float lfVis = lfSunVis( vLfW, normalize( vLfN ), 0.6 ) * 0.36;
+    #else
     float lfA = lfIGN( gl_FragCoord.xy + fract( lfTime * 7.13 ) * 67.0 ) * 6.2831853;
     float lfVis = lfSunVis( vLfW, normalize( vLfN ), lfA ) * lfCloudAt( lfNoiseT, vLfW.xz );
+    #endif
     if ( lfVis > 0.003 ) {
       IncidentLight lfDi;
       lfDi.direction = normalize( ( viewMatrix * vec4( lfSunDir, 0.0 ) ).xyz );
@@ -607,7 +632,8 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
   if (o.outdoor) m.defines.LF_OUT = 1;
   if (o.terrain) m.defines.LF_LAND = 1;
   if (o.leaf) m.defines.LF_LEAF = 1;
-  if (LF.sunOn) m.defines.LF_SUN = 1;
+  if (LF.sunOn || (LF.shadeOn && !o.lightmap)) m.defines.LF_SUN = 1;
+  if (LF.shadeOn) m.defines.LF_SUNIN = 1;
   if (LF.shadeOn && o.lightmap) m.defines.LF_SHADE = 1;
   const wet = { value: o.wet ?? 0 };
   const prev = m.onBeforeCompile;
@@ -633,13 +659,9 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
     s.uniforms.lfPlanar = LF.planar;
     s.uniforms.lfPlanarVP = LF.planarVP;
     s.uniforms.lfPlanarK = LF.planarK;
-    if (LF.shadeOn && o.lightmap) {
-      s.uniforms.lfShade = LF.shade;
-      s.uniforms.lfCapA = LF.capA;
-      s.uniforms.lfCapB = LF.capB;
-      s.uniforms.lfCapN = LF.capN;
-    }
-    if (LF.sunOn) {
+    if (LF.sunOn || LF.shadeOn) {
+      s.uniforms.lfSunQ = LF.sunQ;
+      s.uniforms.lfSunPx = LF.sunPx;
       s.uniforms.lfSunDir = LF.sunDir;
       s.uniforms.lfSunC = LF.sunC;
       s.uniforms.lfSunVP = LF.sunVP;

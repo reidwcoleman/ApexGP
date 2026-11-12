@@ -7,8 +7,6 @@ import { LF } from './lighting.ts';
  * goes into one big depth map once, at load, and only the movers get a small map of their own each frame.
  */
 const BIG = 4096;
-const SMALL = 1024;
-const REACH = 26;
 
 export interface SunInfo {
   dir: number[];
@@ -29,20 +27,25 @@ function depthTarget(n: number) {
 
 export class Sun {
   private big = depthTarget(BIG);
-  private small = depthTarget(SMALL);
+  private small: THREE.WebGLRenderTarget;
   private cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 1200);
-  private dyn = new THREE.OrthographicCamera(-REACH, REACH, REACH, -REACH, 1, 240);
+  private dyn: THREE.OrthographicCamera;
   private blank = new THREE.MeshBasicMaterial({ colorWrite: false });
   private dir = new THREE.Vector3();
   private rt = new THREE.Vector3();
   private up = new THREE.Vector3();
   private v = new THREE.Vector3();
-  private texel = (REACH * 2) / SMALL;
+  private texel: number;
   private wind = new THREE.Vector2(0.31, 0.12);
   every = 1;
   private n = 0;
 
-  constructor(private r: THREE.WebGLRenderer, private scene: THREE.Scene, info: SunInfo) {
+  /** `reach`: how far round the eye the movers' map covers, over `small` texels: indoors it is a room's worth and fine */
+  constructor(private r: THREE.WebGLRenderer, private scene: THREE.Scene, info: SunInfo, reach = 26, small = 1024) {
+    this.small = depthTarget(small);
+    this.dyn = new THREE.OrthographicCamera(-reach, reach, reach, -reach, 1, 240);
+    this.texel = (reach * 2) / small;
+    LF.sunPx.value.set(BIG, small);
     const d = this.dir.set(info.dir[0], info.dir[1], info.dir[2]).normalize();
     LF.sunDir.value.copy(d);
     LF.sunC.value.set(info.color[0], info.color[1], info.color[2]).multiplyScalar(info.power);
