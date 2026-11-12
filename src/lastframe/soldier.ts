@@ -333,6 +333,12 @@ export class Soldier {
   weapon: WeaponId | null = null;
   /** first person: the gun is placed by the view, the head is gone */
   firstPerson = false;
+  /** what makes a figure a person and not a mannequin: its own breath, its own stride, an aim that takes a moment to arrive */
+  private tA = Math.random() * 20;
+  private dtL = 0.016;
+  private gait = Math.random() * 6;
+  private spd = 0;
+  private aimV = new THREE.Vector3();
   crouch = 0;
   aim = 0;
   lean = 0;
@@ -416,7 +422,7 @@ export class Soldier {
       s.uniforms.lfFP = hide;
       s.uniforms.lfMask = mask;
       s.uniforms.lfWound = wounds;
-      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nvoid main() {\n  if ( lfFP > 0.5 ) {\n    // from inside, the trunk is gone, and each sleeve ends in a clean ring a hand below the shoulder\n    vec3 fra = vec3( abs( vRest.x ), vRest.y, vRest.z );\n    vec3 fax = normalize( vec3( abs( uL1.x ) - 0.18, uL1.y - ( uL0.x - 0.06 ), 0.0 ) );\n    float fcut = 0.06;\n    float ffd = dot( fra - vec3( 0.18, uL0.x - 0.06, 0.0 ), fax );\n    // and the sleeve does not end in an edge: it thins out to nothing toward the shoulder, as anything that close to the lens does\n    float fdi = fract( 52.9829189 * fract( dot( gl_FragCoord.xy + fract( lfTime * 7.13 ) * 61.0, vec2( 0.06711056, 0.00583715 ) ) ) );\n    if ( ( ( vPart < 2.5 || vPart > 5.5 ) && 1.0 - smoothstep( uL0.z - 0.13, uL0.z - 0.03, vRest.y ) < fdi * 0.98 + 0.02 ) || ( vPart > 2.5 && vPart < 3.5 && max( smoothstep( 0.06, 0.2, ffd ), smoothstep( 3.2, 3.8, vPart ) ) * smoothstep( 2.5, 3.0, vPart ) < fdi * 0.98 + 0.02 ) ) discard;\n  }');
+      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nfloat lfFpA = 1.0;\nvoid main() {\n  if ( lfFP > 0.5 ) {\n    // from inside, the trunk is gone, and each sleeve ends in a clean ring a hand below the shoulder\n    vec3 fra = vec3( abs( vRest.x ), vRest.y, vRest.z );\n    vec3 fax = normalize( vec3( abs( uL1.x ) - 0.18, uL1.y - ( uL0.x - 0.06 ), 0.0 ) );\n    float fcut = 0.06;\n    float ffd = dot( fra - vec3( 0.18, uL0.x - 0.06, 0.0 ), fax );\n    // and the sleeve does not end in an edge: it thins out to nothing toward the shoulder, as anything that close to the lens does\n    float fa1 = ( vPart < 2.5 || vPart > 5.5 ) ? 1.0 - smoothstep( uL0.z - 0.13, uL0.z - 0.03, vRest.y ) : 1.0;\n    float fa2 = ( vPart > 2.5 && vPart < 3.5 ) ? max( smoothstep( 0.06, 0.2, ffd ), smoothstep( 3.2, 3.8, vPart ) ) * smoothstep( 2.5, 3.0, vPart ) : 1.0;\n    lfFpA = min( fa1, fa2 );\n    if ( lfFpA < 0.012 ) discard;\n  }');
       // the head's own mesh, dyed: a balaclava that fits because it is the face. An eye slot, or a scarf to the nose
       s.fragmentShader = s.fragmentShader.replace('diffuseColor.rgb *= col;', `if ( part < 0.5 ) {
     float slot = abs( vRest.y - 1.703 ) - 0.021;
@@ -516,6 +522,8 @@ export class Soldier {
   }
   diffuseColor.rgb *= col;`);
       // that height, onto the normal
+      // seen from inside it is blended, not stippled: the sleeve and the waist thin out to nothing with no dots in them
+      s.fragmentShader = s.fragmentShader.replace('vec4 diffuseColor = vec4( diffuse, opacity );', 'vec4 diffuseColor = vec4( diffuse, opacity * lfFpA );');
       s.fragmentShader = s.fragmentShader.replace('#include <lights_physical_fragment>', `{
   vec3 bsx = dFdx( -vViewPosition ), bsy = dFdy( -vViewPosition );
   vec3 br1 = cross( bsy, normal ), br2 = cross( normal, bsx );
@@ -525,7 +533,7 @@ export class Soldier {
 }
 #include <lights_physical_fragment>`);
     };
-    bm.customProgramCacheKey = () => key + 'fp16';
+    bm.customProgramCacheKey = () => key + 'fp17';
     this.person.play('idle');
     this.root.traverse((o) => o.layers.enable(MOVER));
   }
@@ -538,6 +546,11 @@ export class Soldier {
       (o as THREE.Mesh).castShadow = !on;
     });
     this.person.bones.Head.scale.setScalar(on ? 0.001 : 1);
+    const bm = this.person.body.material as THREE.MeshStandardMaterial;
+    if (bm.transparent !== on) {
+      bm.transparent = on;
+      bm.needsUpdate = true;
+    }
   }
 
   setWeapon(id: WeaponId) {
@@ -642,6 +655,10 @@ export class Soldier {
       this.head.copy(this.rag?.head ?? this.head);
       return;
     }
+    this.dtL = dt;
+    this.tA += dt;
+    this.spd += (speed - this.spd) * Math.min(1, dt * 8);
+    this.gait += dt * Math.min(speed, 6) * 1.9;
     // ---- gait
     let clip = 'idle', rate = 1;
     const moving = speed > 0.3;
@@ -730,6 +747,15 @@ export class Soldier {
     P.rotateWorld('Bip01_Spine1', right, pk * 0.3);
     P.rotateWorld('Bip01_Spine2', right, pk * 0.34);
     if (!this.firstPerson) P.rotateWorld('Bip01_Head', right, pk * 0.28);
+    // the chest fills and empties, harder after a run; a round going off rocks the shoulders back; and somebody standing
+    // with nothing to shoot at looks about
+    const breath = Math.sin(this.tA * (1.6 + this.sprintK * 2.2));
+    if (!this.firstPerson) {
+      P.rotateWorld('Bip01_Spine2', right, breath * (0.012 + this.sprintK * 0.014) - this.kick * 0.06);
+      P.rotateWorld('Bip01_Spine1', right, -this.kick * 0.03);
+      const idle = (1 - Math.min(1, this.spd / 0.6)) * (1 - this.aim);
+      if (idle > 0.01) P.rotateWorld('Bip01_Head', UP, (Math.sin(this.tA * 0.43) * 0.2 + Math.sin(this.tA * 0.171 + 2) * 0.16) * idle);
+    }
     if (this.hitK > 0) {
       // the upper body takes it along the line of the shot
       const k = Math.sin(this.hitK * Math.PI * 0.5) ** 2;
@@ -753,11 +779,17 @@ export class Soldier {
       dir.copy(fwd).multiplyScalar(Math.cos(pitch)).addScaledVector(UP, Math.sin(pitch)).normalize();
       const lowK = Math.max(1 - Math.min(1, this.aim + 0.55), this.sprintK);
       dir.addScaledVector(UP, -0.35 * lowK - 0.3 * this.sprintK).addScaledVector(right, -0.55 * this.sprintK).normalize();
+      // the muzzle follows the eyes a beat behind, rides the breath, and swings with the stride
+      const mv = Math.min(1, this.spd / 3);
+      dir.addScaledVector(UP, breath * 0.006 + Math.sin(this.gait * 2) * 0.018 * mv).addScaledVector(right, Math.cos(this.gait) * 0.022 * mv).normalize();
+      if (this.aimV.lengthSq() < 0.5 || this.aimV.dot(dir) < 0.2) this.aimV.copy(dir);
+      else this.aimV.lerp(dir, 1 - Math.exp(-this.dtL * 15)).normalize();
+      dir.copy(this.aimV);
       const sR = P.worldOf('Bip01_R_UpperArm', this.v[4]);
       const sL = P.worldOf('Bip01_L_UpperArm', this.v[5]);
       const grip = tmp;
       if (long) {
-        grip.copy(sR).addScaledVector(dir, 0.2 - this.kick * 0.05).addScaledVector(UP, -0.09).addScaledVector(right, -0.05);
+        grip.copy(sR).addScaledVector(dir, 0.2 - this.kick * 0.05).addScaledVector(UP, -0.09 - Math.abs(Math.sin(this.gait)) * 0.012 * mv).addScaledVector(right, -0.05);
       } else {
         grip.copy(sR).add(sL).multiplyScalar(0.5).addScaledVector(dir, 0.42 - this.kick * 0.04).addScaledVector(UP, -0.06);
       }

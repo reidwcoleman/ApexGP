@@ -34,7 +34,7 @@ TRUSS = (10.2, 18.25, 26.3)   # the truss lines, on the column lines     # gondo
 # a bright, broken-cloud morning: the building is lit by what comes in through the front glass and the rooflights, the
 # way an empty one is, and the camera cannot hold the windows and the aisles at once
 SKY = dict(hdri='kloofendal_overcast_puresky', strength=10.0, tint=(1.0, 1.0, 1.0), sun_bake=dict(dir=(0.3, -0.72, 0.62), power=42.0, color=(1.0, 0.95, 0.86)))
-WEATHER = dict(key=0.085, day=1, rain=0, wet=1, fog=0.2, sky=[1.0, 1.02, 1.06], wb=[1.0, 1.0, 1.0])
+WEATHER = dict(key=0.085, day=1, shade=[0.301, 0.622, 0.723, 0.12], rain=0, wet=1, fog=0.2, sky=[1.0, 1.02, 1.06], wb=[1.0, 1.0, 1.0])
 VOLUME = dict(step=[2, 1.15, 2], min=[-8, -1.2, -52], dim=[39, 9, 31])
 
 TUBE = (0.8, 0.94, 1.0)
@@ -130,6 +130,10 @@ def build():
         else:
             K(f'strips_{seed}', c, pp, z, r=math.pi / 2)
         return hole
+
+    def idoor(axis, c, p, z, w=0.92, **k):
+        """where a door hung inside the shop: the leaf is gone and the opening taken out wider, so nothing indoors is shut"""
+        return way(axis, c, p, z, w=max(w + 0.7, 1.9))
 
     def breach(axis, c, p, z, w=1.6, h=1.9, t=INT_T):
         p = grid(p, w)
@@ -262,10 +266,10 @@ def build():
     # ================= the front corners =================
     Z = 0.0
     # ---- west: the stair, the pharmacy, the office over them
-    part('x', FY, X0, WX, Z, H1, holes=[way('x', FY, 1.6, Z, w=1.6), (5.0, 9.0, Z + 1.05, Z + 2.3), door('x', FY, 12.0, Z)])
+    part('x', FY, X0, WX, Z, H1, holes=[way('x', FY, 1.6, Z, w=1.6), (5.0, 9.0, Z + 1.05, Z + 2.3), idoor('x', FY, 12.0, Z)])
     m.casing('x', FY, 5.0, 9.0, Z + 1.05, Z + 2.3, INT_T, 'trim', sill=True)
     box((4.95, FY - 0.3, 1.0), (9.05, FY + 0.3, 1.05), 'wood_top', collide=False, density=0.3)
-    part('y', WX, Y0, FY, Z, H1, holes=[door('y', WX, 4.5, Z, kind='steel')])
+    part('y', WX, Y0, FY, Z, H1, holes=[idoor('y', WX, 4.5, Z, kind='steel')])
     part('y', 3.15, Y0, FY, Z, H1)
     part('x', FY, X0, WX, F2, H2, holes=[way('x', FY, 1.0, F2, w=1.2), window('x', FY, 5.5, F2, w=2.4, h=1.4, sill=0.9, wt=INT_T), window('x', FY, 8.8, F2, w=2.4, h=1.4, sill=0.9, wt=INT_T, glass=False),
                                          window('x', FY, 12.0, F2, w=2.0, h=1.4, sill=0.9, wt=INT_T)])
@@ -311,8 +315,8 @@ def build():
     stains((51.0, 4.0, 0.0, 0, 0, 1, 1.5), (54.0, 6.0, 0.0, 0, 0, 1, 1.0), (X1 - 0.18, 3.0, 1.0, -1, 0, 0, 1.2))
 
     # ================= the hall =================
-    part('x', BY, X0, X1, Z, TOP, holes=[curtain('x', BY, 5.0, Z, 1), door('x', BY, 19.0, Z, w=1.2, kind='steel', swing=1), way('x', BY, 27.0, Z, w=1.5),
-                                         curtain('x', BY, 34.0, Z, 2), door('x', BY, 56.0, Z, w=1.3, kind='steel', swing=1), way('x', BY, 1.0, F2, w=1.2)], t=0.2, mat='hbrick')
+    part('x', BY, X0, X1, Z, TOP, holes=[curtain('x', BY, 5.0, Z, 1), idoor('x', BY, 19.0, Z, w=1.2), way('x', BY, 27.0, Z, w=1.5),
+                                         curtain('x', BY, 34.0, Z, 2), idoor('x', BY, 56.0, Z, w=1.3), way('x', BY, 1.0, F2, w=1.2)], t=0.2, mat='hbrick')
     room('tills', WX, Y0, EX, FY, Z, TOP, 'hosp_wall3', 'mtile', ceil='tin_in')
     room('sales', X0, FY, X1, BY, Z, TOP, 'hosp_wall3', 'mtile', ceil='tin_in')
     # the roof steel: three lines of truss over the hall, a dead fitting on most bays

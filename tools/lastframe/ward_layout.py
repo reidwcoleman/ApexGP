@@ -578,8 +578,16 @@ def build():
     for x in (1.0, 1.75, 2.5):
         prop('electric_stove', x, Y1 - 0.55, rot=math.pi)
     table(3.0, 28.4, 6.2, 29.4)
-    box((6.6, 31.0, 0.0), (8.86, 33.86, 2.5), 'steel', faces={'-y': 'steel'}, density=0.3)
-    box((6.9, 30.92, 0.0), (7.9, 31.0, 2.1), 'plastic_black', collide=False, density=0.2)
+    # the walk-in is a room, and its door stands open against its own front: steel panels, a rack, what was left in it
+    for lo, hi in (((6.6, 31.0, 0.0), (6.68, 33.86, 2.5)), ((8.78, 31.0, 0.0), (8.86, 33.86, 2.5)), ((6.6, 31.0, 0.0), (6.9, 31.08, 2.5)),
+                   ((7.9, 31.0, 0.0), (8.86, 31.08, 2.5)), ((6.9, 31.0, 2.1), (7.9, 31.08, 2.5)), ((6.6, 31.0, 2.42), (8.86, 33.86, 2.5))):
+        box(lo, hi, 'steel', density=0.3)
+    box((7.93, 30.94, 0.02), (8.84, 31.0, 2.08), 'steel', collide=False, density=0.2)
+    box((7.9, 30.92, 0.9), (7.96, 30.96, 1.2), 'plastic_black', collide=False, density=0.2)
+    m.openings.append((7.4, 31.04, 0.0, 1.0, 'x'))
+    prop('worn_metal_rack', 8.3, 32.7, rot=math.pi / 2)
+    light('point', (7.6, 32.6, 2.25), COLD, 1.6, radius=0.04, reach=3.5)
+    stains((7.5, 32.2, 0.0, 0, 0, 1, 1.2))
     light('point', (7.5, 30.6, 2.2), COLD, 3.0, radius=0.04, reach=5.0)
     D('brass_pan_01', 4.0, 28.9, z=0.89)
     D('pot_enamel_01', 5.4, 28.8, z=0.89)

@@ -21,14 +21,14 @@ export async function capture(r: THREE.WebGLRenderer, scene: THREE.Scene, L: Loa
   const [dx, dy, dz] = DIM;
   const n = dx * dy * dz;
   const perRow = Math.floor(2048 / (T * 6));
-  const rows = 64;
+  const rows = 12;
   const batch = perRow * rows;
   const rt = new THREE.WebGLRenderTarget(perRow * T * 6, rows * T, { type: THREE.FloatType, depthBuffer: true });
   const cam = new THREE.PerspectiveCamera(90, 1, 0.03, 900);
   // only the architecture and the sky: props take their light from these cells
   const hidden: THREE.Object3D[] = [];
   L.group.traverse((o) => {
-    if ((o as THREE.InstancedMesh).isInstancedMesh || (o.parent === L.group && !(o as THREE.Mesh).isMesh && o.name !== 'land') || o.name === 'sea') {
+    if ((o as THREE.InstancedMesh).isInstancedMesh || o.name === 'weld' || (o.parent === L.group && !(o as THREE.Mesh).isMesh && o.name !== 'land') || o.name === 'sea') {
       if (o.visible) hidden.push(o);
       o.visible = false;
     }

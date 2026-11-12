@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LF } from './lighting.ts';
+import { CAP_MAX, LF } from './lighting.ts';
 import { AIR } from './fx.ts';
 
 /**
@@ -32,7 +32,9 @@ float ign( vec2 p ) { return fract( 52.9829189 * fract( dot( p, vec2( 0.06711056
 `;
 
 /** ambient occlusion in the depth, and the soft dark under each body, which is no part of any bake */
-const AO_MAX = 14;
+const AO_MAX = CAP_MAX;
+/** the layer of what is drawn in the depth pass: solid, still, and not cut out by a texture */
+export const PRE = 7;
 const AO = /* glsl */ `
 varying vec2 vUv;
 ${DEPTH}
@@ -443,6 +445,30 @@ uniform vec2 shutter;
 uniform vec3 flare;
 uniform float caK;
 uniform float satK;
+uniform vec2 srcPx;
+uniform float sharpK;
+
+// the picture is drawn at its own size and laid onto the screen's: five taps of a Catmull-Rom filter, which keeps an edge an
+// edge where a plain stretch would smear it. Weighed in a squeezed range, so a window ten stops over the wall beside it
+// doesn't ring
+vec3 squeeze( vec3 c ) { return c / ( 1.0 + max( c.r, max( c.g, c.b ) ) ); }
+vec3 srcAt( vec2 uv ) {
+  vec2 pos = uv / srcPx, c = floor( pos - 0.5 ) + 0.5, f = pos - c;
+  vec2 w0 = f * ( -0.5 + f * ( 1.0 - 0.5 * f ) );
+  vec2 w1 = 1.0 + f * f * ( -2.5 + 1.5 * f );
+  vec2 w2 = f * ( 0.5 + f * ( 2.0 - 1.5 * f ) );
+  vec2 w3 = f * f * ( -0.5 + 0.5 * f );
+  vec2 w12 = w1 + w2, o = w2 / w12;
+  vec2 t0 = ( c - 1.0 ) * srcPx, t3 = ( c + 2.0 ) * srcPx, t12 = ( c + o ) * srcPx;
+  vec3 r = squeeze( texture2D( tSrc, vec2( t12.x, t0.y ) ).rgb ) * ( w12.x * w0.y );
+  r += squeeze( texture2D( tSrc, vec2( t0.x, t12.y ) ).rgb ) * ( w0.x * w12.y );
+  r += squeeze( texture2D( tSrc, t12 ).rgb ) * ( w12.x * w12.y );
+  r += squeeze( texture2D( tSrc, vec2( t3.x, t12.y ) ).rgb ) * ( w3.x * w12.y );
+  r += squeeze( texture2D( tSrc, vec2( t12.x, t3.y ) ).rgb ) * ( w12.x * w3.y );
+  float ws = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+  r = clamp( r / ws, vec3( 0.0 ), vec3( 0.985 ) );
+  return r / ( 1.0 - max( r.r, max( r.g, r.b ) ) );
+}
 
 float hash( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }
 float vnoise( vec2 p ) {
@@ -550,18 +576,15 @@ void main() {
   vec2 cg = lens( p, rho, 1.0, aspect ) / ( 2.0 * vec2( aspect, 1.0 ) ) + 0.5;
   vec2 cb = lens( p, rho, 1.0 - ca, aspect ) / ( 2.0 * vec2( aspect, 1.0 ) ) + 0.5;
 
-  vec3 c = vec3( texture2D( tSrc, cr ).r, texture2D( tSrc, cg ).g, texture2D( tSrc, cb ).b );
-  // unsharp mask, as the camera's own processing does it
+  vec3 c = srcAt( cg );
+  // the fringe is the difference between where the red and the blue land and where the green did
+  vec3 c0 = texture2D( tSrc, cg ).rgb;
+  c.r += texture2D( tSrc, cr ).r - c0.r;
+  c.b += texture2D( tSrc, cb ).b - c0.b;
+  c = max( c, vec3( 0.0 ) );
+  // the camera's own sharpening: a little, held to a fraction of what is there so no edge grows a halo
   vec3 soft = texture2D( tHalf, cg ).rgb;
-  // a cheap wide lens is only sharp in the middle, and what's a hand's length from it (the wearer's own arms) is never in focus
-  float zF = nfF.x * nfF.y / ( nfF.y - texture2D( tDepthF, cg ).r * ( nfF.y - nfF.x ) );
-  float nearK = smoothstep( 0.3, 0.1, zF );
-  float softK = clamp( smoothstep( 0.72, 1.0, edge ) * 0.3 + nearK * 0.4, 0.0, 1.0 );
-  vec3 softer = texture2D( tBlock, cg ).rgb;
-  // a glint a hand from the lens must not swell into a ball of light: the blur can't hold much more than the sharp picture did
-  softer = min( softer, max( c, soft ) * 1.5 + 0.01 );
-  c = max( c + ( c - soft ) * 1.4 * ( 1.0 - softK ), vec3( 0.0 ) );
-  c = mix( c, soft, softK );
+  c = max( c + clamp( c - soft, -0.35 * c, 0.35 * c + 0.01 ) * sharpK, vec3( 0.0 ) );
   // footage that has been through an office before anyone saw it: every head in it under a mosaic, the way the redaction
   // tool does it. Square blocks fixed to the frame, each one the average of what was under it, cut to the shape of the
   // head and no bigger
@@ -586,7 +609,7 @@ void main() {
   float expo = texture2D( tExp, vec2( 0.5 ) ).r;
   // grease and dust on the housing's window: nothing in the dark, a smeared glow round anything bright
   vec2 dq = vUv * vec2( aspect, 1.0 );
-  float dirt = smoothstep( 0.42, 0.95, vnoise( dq * 3.1 + 7.0 ) * 0.65 + vnoise( dq * 7.3 ) * 0.35 ) + step( 0.9965, hash( floor( dq * 140.0 ) ) ) * 0.6;
+  float dirt = smoothstep( 0.42, 0.95, vnoise( dq * 3.1 + 7.0 ) * 0.65 + vnoise( dq * 7.3 ) * 0.35 );
   vec3 hdr = c + bloom * ( 0.06 + dirt * 0.16 ) + whiteout * 9.0;
   if ( flare.z > 0.003 ) {
     // the sun in a cheap plastic lens: a veil across the frame, the iris's star, and ghosts strung along the line through the centre
@@ -606,12 +629,6 @@ void main() {
     }
     hdr += fl * flare.z * 1.5;
   }
-  // macroblocks: the dark parts of a stream fall apart first
-  vec2 blk = ( floor( cg * res / 10.0 ) + 0.5 ) * 10.0 / res;
-  vec3 bl = texture2D( tBlock, blk ).rgb;
-  float lum0 = dot( hdr * expo, vec3( 0.3, 0.6, 0.1 ) );
-  float blum = dot( bl * expo, vec3( 0.3, 0.6, 0.1 ) );
-  hdr = mix( hdr, bl, 0.07 * smoothstep( 0.1, 0.0, lum0 ) * smoothstep( 0.14, 0.03, blum ) );
   hdr *= expo;
   // white balance: night through a cheap sensor is grey, with sodium in it, not blue
   hdr *= wb;
@@ -656,17 +673,11 @@ void main() {
   col *= 1.0 - hurt * 0.3 * smoothstep( 0.2, 0.9, edge );
   col = mix( col, vec3( 0.0 ), feedCut );
   col = pow( max( col, 0.0 ), vec3( 1.0 / 2.2 ) );
-  // sensor noise, in display space so the blacks don't turn to gravel
+  // a clean picture: no grain is laid on it. What is left is a dither under one step of the screen's own depth, which
+  // nobody can see and which keeps a dark wall from banding
   vec2 gp = gl_FragCoord.xy;
-  float g = hash( gp + fract( time ) * 91.7 ) - 0.5;
-  float g2 = hash( gp * 1.7 + fract( time * 1.3 ) * 37.1 ) - 0.5;
-  // the sensor gains up in the dark, and its noise comes up with it: finer grain, then blotches of colour a few pixels across
-  float gain = clamp( expo / 1.1, 1.0, 3.2 );
-  float gk = mix( 0.022, 0.012, smoothstep( 0.0, 0.42, l ) ) * grainK * ( 1.0 - feedCut ) * ( 0.8 + 0.16 * gain );
-  col += vec3( g + g2 * 0.2, g, g - g2 * 0.2 ) * gk;
-  vec2 cbk = floor( gp / 3.0 );
-  float c1 = hash( cbk + fract( time * 0.97 ) * 53.0 ) - 0.5, c2 = hash( cbk * 1.3 + fract( time * 1.13 ) * 17.0 ) - 0.5;
-  col += vec3( c1, -0.5 * ( c1 + c2 ), c2 ) * 0.003 * ( gain - 1.0 ) * ( 1.0 - smoothstep( 0.08, 0.5, l ) ) * ( 1.0 - feedCut );
+  float g = hash( gp + fract( time ) * 91.7 ) + hash( gp * 1.7 + fract( time * 1.3 ) * 37.1 ) - 1.0;
+  col += g * ( 1.0 / 255.0 + 0.004 * grainK ) * ( 1.0 - feedCut );
   gl_FragColor = vec4( col, 1.0 );
 }
 `;
@@ -700,8 +711,8 @@ export class Post {
   /** x y z r per end of each body's capsule, written by the game */
   /** heads to blur, in the picture before the lens bends it: x, y, radius (in picture heights), how much */
   faces = Array.from({ length: 8 }, () => new THREE.Vector4());
-  capA = Array.from({ length: AO_MAX }, () => new THREE.Vector4());
-  capB = Array.from({ length: AO_MAX }, () => new THREE.Vector4());
+  capA = LF.capA.value;
+  capB = LF.capB.value;
   capN = 0;
   /** what floats: drawn by Fx */
   airScene: THREE.Scene | null = null;
@@ -746,13 +757,19 @@ export class Post {
   private mBlur = pass(BLUR, { tSrc: { value: null }, tDepth: { value: null }, reproj: { value: new THREE.Matrix4() }, amount: { value: 1 } });
   mFinal = pass(FINAL, {
     tSrc: { value: null }, tBloom: { value: null }, tHalf: { value: null }, tBlock: { value: null }, tExp: { value: null }, tDepthF: AIR.tDepth, nfF: AIR.nf, res: { value: new THREE.Vector2() }, time: { value: 0 },
-    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, wb: { value: new THREE.Vector3(1.03, 1, 0.88) }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 0.5 }, lensWet: { value: 0 }, lensBlood: { value: 0 }, cover: { value: 0 }, faces: { value: this.faces }, faceN: { value: 0 }, bloodSeed: { value: new THREE.Vector3() }, shutter: { value: new THREE.Vector2() }, flare: { value: new THREE.Vector3() }, caK: { value: 0.007 }, satK: { value: 0.82 },
+    tanHalf: { value: 0.9 }, fish: { value: 0.85 }, wb: { value: new THREE.Vector3(1.03, 1, 0.88) }, whiteout: { value: 0 }, hurt: { value: 0 }, glitch: { value: 0 }, feedCut: { value: 0 }, grainK: { value: 0.5 }, lensWet: { value: 0 }, lensBlood: { value: 0 }, cover: { value: 0 }, faces: { value: this.faces }, faceN: { value: 0 }, bloodSeed: { value: new THREE.Vector3() }, shutter: { value: new THREE.Vector2() }, flare: { value: new THREE.Vector3() }, caK: { value: 0.0035 }, satK: { value: 0.82 }, srcPx: { value: new THREE.Vector2() }, sharpK: { value: 0.55 },
   });
   private prevVP = new THREE.Matrix4();
   private curVP = new THREE.Matrix4();
   private hadPrev = false;
-  /** a machine that can't keep up: no occlusion, no air, no shutter blur */
+  /** a machine that can't keep up at all: no occlusion, no air, no shutter blur */
   lite = false;
+  /** depth laid down before the picture (see render) */
+  depthFirst = true;
+  private mDepth = new THREE.MeshBasicMaterial({ colorWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 });
+  private mDepth2 = new THREE.MeshBasicMaterial({ colorWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2, side: THREE.DoubleSide });
+  /** the floor's reflections are the dearest layer: a machine short of breath goes without them first */
+  ssrOn = true;
   /** next frame jumps straight to the right exposure and forgets what it saw */
   cutExposure = true;
   motionBlur = true;
@@ -763,7 +780,8 @@ export class Post {
     this.qs.add(this.quad);
   }
 
-  resize(w: number, h: number) {
+  /** w, h: the picture as it is drawn; cw, ch: the screen it is laid onto */
+  resize(w: number, h: number, cw = w, ch = h) {
     for (const t of [this.scene, this.blur, this.aoA, this.aoB, this.fogT, this.fogB, this.airT, this.ssrT, ...this.hist, ...this.down, ...this.up]) t?.dispose();
     const W = Math.round(w), H = Math.round(h);
     const depth = new THREE.DepthTexture(W, H, THREE.UnsignedIntType);
@@ -790,7 +808,8 @@ export class Post {
       this.down.push(target(a, b));
       if (i < 5) this.up.push(target(a, b));
     }
-    this.mFinal.uniforms.res.value.set(W, H);
+    this.mFinal.uniforms.res.value.set(Math.round(cw), Math.round(ch));
+    this.mFinal.uniforms.srcPx.value.set(1 / W, 1 / H);
     this.cutExposure = true;
     this.liteDone = false;
   }
@@ -813,7 +832,28 @@ export class Post {
     P.elements[9] += (jy * 2) / H;
     r.setRenderTarget(this.scene);
     r.clear();
-    r.render(scene, cam);
+    if (this.depthFirst) {
+      // the building's own surfaces go down as depth alone first, so the picture after it shades each pixel once: a wall
+      // behind a shelf behind a counter was being lit, shadowed and thrown away three times over
+      const mask = cam.layers.mask, auto = r.shadowMap.autoUpdate, need = r.shadowMap.needsUpdate;
+      r.shadowMap.autoUpdate = false;
+      r.shadowMap.needsUpdate = false;
+      cam.layers.set(PRE);
+      scene.overrideMaterial = this.mDepth;
+      r.render(scene, cam);
+      // and what is drawn from both sides, from both sides
+      r.autoClear = false;
+      cam.layers.set(PRE + 1);
+      scene.overrideMaterial = this.mDepth2;
+      r.render(scene, cam);
+      scene.overrideMaterial = null;
+      cam.layers.mask = mask;
+      r.shadowMap.autoUpdate = auto;
+      r.shadowMap.needsUpdate = need;
+      r.autoClear = false;
+      r.render(scene, cam);
+      r.autoClear = true;
+    } else r.render(scene, cam);
     P.elements[8] = e8;
     P.elements[9] = e9;
     let src = this.scene.texture;
@@ -866,7 +906,7 @@ export class Post {
     // ---- one resolve: all of it, onto the last frames
     const uR = this.mResolve.uniforms;
     const h0 = this.hist[this.hi], h1 = this.hist[1 - this.hi];
-    const ssr = !this.lite && this.reflections > 0 && this.hadPrev;
+    const ssr = !this.lite && this.ssrOn && this.reflections > 0 && this.hadPrev;
     if (ssr) {
       const uS = this.mSSR.uniforms;
       uS.tHist.value = h0.texture;

@@ -22,20 +22,33 @@ export class Sound {
   private ring!: GainNode;
   private duck!: GainNode;
   volume = 0.8;
+  /** a machine with room to spare places the loud sounds round the head properly; the cheap pan costs a fraction of it */
+  hq = true;
+
+  /** the browser stops the sound when the tab is put away or the output changes, and does not always start it again:
+   *  any time it is found stopped while the game is in front, it is started */
+  private wake = () => {
+    const c = this.ctx;
+    if (c && c.state !== 'running' && !document.hidden) void c.resume().catch(() => {});
+  };
 
   start() {
     if (this.ctx) {
-      void this.ctx.resume();
+      this.wake();
       return;
     }
-    const c = (this.ctx = new AudioContext());
+    const c = (this.ctx = new AudioContext({ latencyHint: 'interactive' }));
+    c.addEventListener('statechange', this.wake);
+    document.addEventListener('visibilitychange', this.wake);
+    for (const ev of ['pointerdown', 'keydown', 'focus'] as const) window.addEventListener(ev, this.wake, true);
     this.master = c.createGain();
     this.master.gain.value = this.volume;
     const comp = c.createDynamicsCompressor();
-    comp.threshold.value = -12;
-    comp.ratio.value = 6;
-    comp.attack.value = 0.002;
-    comp.release.value = 0.18;
+    // it holds a shot down and lets go at once: a slow release is the room going quiet after every round and swelling back
+    comp.threshold.value = -10;
+    comp.ratio.value = 4;
+    comp.attack.value = 0.003;
+    comp.release.value = 0.09;
     this.duck = c.createGain();
     // a body camera's microphone: what's loud saturates, and a shot up close crunches
     const clip = c.createWaveShaper();
@@ -63,40 +76,47 @@ export class Sound {
       v.connect(this.duck);
       return g;
     });
-    // ambience
-    const rain = c.createBufferSource();
-    rain.buffer = this.noise;
-    rain.loop = true;
-    const hp = c.createBiquadFilter();
-    hp.type = 'highpass';
-    hp.frequency.value = 900;
-    const lp = c.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 7000;
-    this.rainG = c.createGain();
-    this.rainG.gain.value = 0;
-    rain.connect(hp).connect(lp).connect(this.rainG).connect(this.dry);
-    rain.start();
+    // ---- what is always there. It goes round the compressor and the ducking, straight to the output, so nothing that
+    // happens in the room can turn it down: a building is never silent, and a microphone never hears nothing
+    this.bed = c.createGain();
+    this.bed.gain.value = 0;
+    this.bed.connect(this.master);
+    const pink = (this.pinkB = this.pink(14));
+    const layer = (buf: AudioBuffer, hp: number, lp: number, gain: number, rate = 1) => {
+      const s = c.createBufferSource();
+      s.buffer = buf;
+      s.loop = true;
+      s.playbackRate.value = rate;
+      const a = c.createBiquadFilter();
+      a.type = 'highpass';
+      a.frequency.value = hp;
+      a.Q.value = 0.5;
+      const b = c.createBiquadFilter();
+      b.type = 'lowpass';
+      b.frequency.value = lp;
+      b.Q.value = 0.5;
+      const g = c.createGain();
+      g.gain.value = gain;
+      s.connect(a).connect(b).connect(g).connect(this.bed);
+      s.start(0, Math.random() * buf.duration);
+      return g;
+    };
+    // the room's own tone, the weight of the building under it, the air moving through it
+    layer(pink, 90, 1400, 0.2);
+    layer(pink, 20, 130, 0.4, 0.6);
+    this.airBed = layer(pink, 250, 900, 0.09, 0.8);
+    this.rainG = layer(this.noise, 1100, 7000, 0);
+    // whatever is still on a live circuit: a mains hum with its harmonics, steady
     const hum = c.createOscillator();
     hum.type = 'sawtooth';
-    hum.frequency.value = 120;
+    hum.frequency.value = 100;
     const hlp = c.createBiquadFilter();
     hlp.type = 'lowpass';
-    hlp.frequency.value = 420;
+    hlp.frequency.value = 380;
     this.humG = c.createGain();
     this.humG.gain.value = 0;
-    hum.connect(hlp).connect(this.humG).connect(this.dry);
+    hum.connect(hlp).connect(this.humG).connect(this.bed);
     hum.start();
-    const city = c.createBufferSource();
-    city.buffer = this.noise;
-    city.loop = true;
-    const clp = c.createBiquadFilter();
-    clp.type = 'lowpass';
-    clp.frequency.value = 170;
-    const cg = c.createGain();
-    cg.gain.value = 0.055;
-    city.connect(clp).connect(cg).connect(this.dry);
-    city.start();
     // the ring in your ears
     const t = c.createOscillator();
     t.frequency.value = 4100;
@@ -105,6 +125,45 @@ export class Sound {
     t.connect(this.ring).connect(this.master);
     t.start();
   }
+
+  /** pink noise, in stereo, whose end runs into its beginning: it can go round for ever with no seam to hear. Wide-band, so
+   *  its level holds; a narrow band of noise wanders up and down on its own and sounds like something switching on and off */
+  private pink(sec: number) {
+    const c = this.ctx!;
+    const n = Math.floor(sec * c.sampleRate), fade = Math.floor(0.5 * c.sampleRate);
+    const buf = c.createBuffer(2, n, c.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const raw = new Float32Array(n + fade);
+      let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+      for (let i = 0; i < n + fade; i++) {
+        const w = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + w * 0.0555179;
+        b1 = 0.99332 * b1 + w * 0.0750759;
+        b2 = 0.969 * b2 + w * 0.153852;
+        b3 = 0.8665 * b3 + w * 0.3104856;
+        b4 = 0.55 * b4 + w * 0.5329522;
+        b5 = -0.7616 * b5 - w * 0.016898;
+        raw[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
+        b6 = w * 0.115926;
+      }
+      const d = buf.getChannelData(ch);
+      for (let i = 0; i < n; i++) d[i] = raw[i];
+      for (let i = 0; i < fade; i++) {
+        const t = i / fade;
+        d[i] = raw[i] * Math.sqrt(t) + raw[n + i] * Math.sqrt(1 - t);
+      }
+    }
+    return buf;
+  }
+
+  /** the map's weather: how much rain is on the roof (0: none), and whether anything electric is still running */
+  rainK = 1;
+  humK = 0.5;
+  private bed!: GainNode;
+  private pinkB!: AudioBuffer;
+  private airBed!: GainNode;
+  private zoneWas = '';
+  private bedOn = false;
 
   private ir(sec: number, decay: number, cut: number, late = 0) {
     const c = this.ctx!;
@@ -142,28 +201,40 @@ export class Sound {
     this.ear.copy(p);
     const f = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion), u = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
     if (l.positionX) {
-      const t = c.currentTime;
-      l.positionX.setTargetAtTime(p.x, t, 0.01);
-      l.positionY.setTargetAtTime(p.y, t, 0.01);
-      l.positionZ.setTargetAtTime(p.z, t, 0.01);
-      l.forwardX.setTargetAtTime(f.x, t, 0.01);
-      l.forwardY.setTargetAtTime(f.y, t, 0.01);
-      l.forwardZ.setTargetAtTime(f.z, t, 0.01);
-      l.upX.setTargetAtTime(u.x, t, 0.01);
-      l.upY.setTargetAtTime(u.y, t, 0.01);
-      l.upZ.setTargetAtTime(u.z, t, 0.01);
+      // set, not scheduled: sixty automation events a second on nine parameters is a queue that only ever grows
+      l.positionX.value = p.x;
+      l.positionY.value = p.y;
+      l.positionZ.value = p.z;
+      l.forwardX.value = f.x;
+      l.forwardY.value = f.y;
+      l.forwardZ.value = f.z;
+      l.upX.value = u.x;
+      l.upY.value = u.y;
+      l.upZ.value = u.z;
     } else {
       // Firefox's older listener
       const o = l as unknown as { setPosition(x: number, y: number, z: number): void; setOrientation(a: number, b: number, c: number, d: number, e: number, f: number): void };
       o.setPosition?.(p.x, p.y, p.z);
       o.setOrientation?.(f.x, f.y, f.z, u.x, u.y, u.z);
     }
+    if (!this.bedOn) {
+      this.bedOn = true;
+      this.bed.gain.setTargetAtTime(0.65, c.currentTime, 0.6);
+    }
+    // only when the room changes, and slowly: walking through a doorway must not switch anything on or off
+    if (kind === this.zoneWas) return;
+    this.zoneWas = kind;
     const t = c.currentTime;
-    this.roomG.gain.setTargetAtTime(kind === 'small' ? 1 : 0, t, 0.12);
-    this.hallG.gain.setTargetAtTime(kind === 'hall' ? 1 : 0, t, 0.12);
-    this.streetG.gain.setTargetAtTime(kind === 'street' ? 0.9 : 0, t, 0.12);
-    this.rainG.gain.setTargetAtTime(this.coast ? 0 : kind === 'street' ? 0.075 : 0.016, t, 0.3);
-    this.humG.gain.setTargetAtTime(kind === 'small' ? 0.006 : 0, t, 0.3);
+    const set = (g: AudioParam, v: number, tc: number) => {
+      g.cancelScheduledValues(t);
+      g.setTargetAtTime(v, t, tc);
+    };
+    set(this.roomG.gain, kind === 'small' ? 1 : 0, 0.25);
+    set(this.hallG.gain, kind === 'hall' ? 1 : 0, 0.25);
+    set(this.streetG.gain, kind === 'street' ? 0.9 : 0, 0.25);
+    set(this.rainG.gain, this.coast ? 0 : this.rainK * (kind === 'street' ? 0.11 : kind === 'hall' ? 0.055 : 0.045), 1.2);
+    set(this.humG.gain, this.humK * (kind === 'street' ? 0.004 : kind === 'hall' ? 0.011 : 0.015), 1.2);
+    set(this.airBed.gain, kind === 'street' ? 0.2 : kind === 'hall' ? 0.12 : 0.09, 1.2);
   }
 
   /** a map by the sea: no rain, surf and wind instead */
@@ -280,7 +351,7 @@ export class Sound {
       g.connect(out);
     } else {
       const pan = c.createPanner();
-      pan.panningModel = 'HRTF';
+      pan.panningModel = this.hq && gain >= 0.7 ? 'HRTF' : 'equalpower';
       pan.distanceModel = 'inverse';
       pan.refDistance = 3;
       pan.rolloffFactor = 1.1;
@@ -366,30 +437,38 @@ export class Sound {
   private dreadG: GainNode | null = null;
   private dreadF!: BiquadFilterNode;
   private dreadT = 0;
+  private dreadTick = 0;
   private dripT = 1;
   dread(ear: THREE.Vector3, under: boolean, dt: number, on: boolean) {
     const c = this.ctx;
     if (!c) return;
     if (!this.dreadG) {
       const s = c.createBufferSource();
-      s.buffer = this.noise;
+      s.buffer = this.pinkB;
       s.loop = true;
-      s.playbackRate.value = 0.5;
+      s.playbackRate.value = 0.7;
       this.dreadF = c.createBiquadFilter();
       this.dreadF.type = 'lowpass';
-      this.dreadF.frequency.value = 140;
-      this.dreadF.Q.value = 2.5;
+      this.dreadF.frequency.value = 150;
+      this.dreadF.Q.value = 0.7;
       this.dreadG = c.createGain();
       this.dreadG.gain.value = 0;
-      s.connect(this.dreadF).connect(this.dreadG).connect(this.dry);
-      s.start();
+      s.connect(this.dreadF).connect(this.dreadG).connect(this.bed);
+      s.start(0, 3);
     }
     const t = c.currentTime;
     this.dreadT += dt;
+    // it breathes, a little: it never dies away
     const swell = 0.5 + 0.5 * Math.sin(this.dreadT * 0.21) * Math.sin(this.dreadT * 0.077 + 1);
-    this.dreadG.gain.setTargetAtTime(on ? (under ? 0.11 : 0.07) * (0.45 + swell * 0.8) : 0, t, 0.5);
+    this.dreadTick -= dt;
+    if (this.dreadTick <= 0) {
+      this.dreadTick = 0.25;
+      this.dreadG.gain.cancelScheduledValues(t);
+      this.dreadG.gain.setTargetAtTime(on ? (under ? 0.4 : 0.28) * (0.85 + swell * 0.3) : 0, t, 0.6);
+      this.dreadF.frequency.cancelScheduledValues(t);
+      this.dreadF.frequency.setTargetAtTime(130 + swell * 50, t, 0.8);
+    }
     if (!on) return;
-    this.dreadF.frequency.setTargetAtTime(90 + swell * 120, t, 0.8);
     this.dripT -= dt;
     if (this.dripT <= 0) {
       this.dripT = (under ? 0.5 : 2.2) + Math.random() * (under ? 1.6 : 5);
@@ -695,7 +774,7 @@ export class Sound {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     this.duck.gain.cancelScheduledValues(t);
-    this.duck.gain.setValueAtTime(0.05, t);
+    this.duck.gain.setValueAtTime(0.18, t);
     this.duck.gain.linearRampToValueAtTime(1, t + sec);
     this.ring.gain.cancelScheduledValues(t);
     this.ring.gain.setValueAtTime(0.09, t);

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Sun, MOVER } from './sun.ts';
+import { PRE } from './post.ts';
 import type { PeopleKit } from '../people/Humans.ts';
 import { Planar, Post } from './post.ts';
 import { MAP_ID, loadVolume, loadWorld, type Door, type Loaded, type MapData } from './world.ts';
@@ -53,6 +54,48 @@ class Actor {
 export type Role = 'solo' | 'host' | 'guest';
 
 const CAM_STEP = 1 / 30;
+
+/** what each level of picture costs. dpr and maxW: the screen's own pixels; mp: how many the scene is drawn with (millions),
+ * never more than ss times the screen's; own and others: every how many frames each weapon light's shadows are redrawn */
+export const TIERS = [
+  { name: 'Low', dpr: 1, maxW: 1920, mp: 0.8, ss: 1, shadow: 512, own: 2, others: 3, ssr: false, blur: false, reach: 0.7, aniso: 2 },
+  { name: 'Medium', dpr: 1.5, maxW: 2560, mp: 1.4, ss: 1, shadow: 1024, own: 1, others: 2, ssr: false, blur: true, reach: 0.85, aniso: 4 },
+  { name: 'High', dpr: 2, maxW: 2560, mp: 2.4, ss: 1.3, shadow: 1024, own: 1, others: 1, ssr: true, blur: true, reach: 1, aniso: 8 },
+  { name: 'Ultra', dpr: 2, maxW: 3072, mp: 4.4, ss: 1.5, shadow: 2048, own: 1, others: 1, ssr: true, blur: true, reach: 1.4, aniso: 16 },
+];
+
+/** three's soft shadow turns five lookups round a random angle at every pixel: that is trigonometry per tap and a stipple in
+ *  every shadow's edge. Four lookups on a fixed square cost half as much and have no grain in them (each is already the
+ *  card's own blend of four texels) */
+let softened = false;
+function softShadows() {
+  if (softened) return;
+  softened = true;
+  const src = THREE.ShaderChunk.shadowmap_pars_fragment;
+  const a = src.indexOf('float phi = interleavedGradientNoise( gl_FragCoord.xy ) * PI2;');
+  const b = src.indexOf(') * 0.2;', a);
+  if (a < 0 || b < 0) return;
+  THREE.ShaderChunk.shadowmap_pars_fragment = src.slice(0, a) + `vec2 lfO = vec2( 0.62 ) * max( radius, texelSize.x );
+				shadow = (
+					texture( shadowMap, vec3( shadowCoord.xy + lfO, shadowCoord.z ) ) +
+					texture( shadowMap, vec3( shadowCoord.xy - lfO, shadowCoord.z ) ) +
+					texture( shadowMap, vec3( shadowCoord.xy + vec2( lfO.x, -lfO.y ), shadowCoord.z ) ) +
+					texture( shadowMap, vec3( shadowCoord.xy + vec2( -lfO.x, lfO.y ), shadowCoord.z ) )
+				) * 0.25;` + src.slice(b + ') * 0.2;'.length);
+}
+
+/** a first guess from the name of the graphics card; the frame rate corrects it within a few seconds either way */
+function guessTier(r: THREE.WebGLRenderer) {
+  let s = '';
+  try {
+    const gl = r.getContext();
+    const e = gl.getExtension('WEBGL_debug_renderer_info');
+    if (e) s = String(gl.getParameter(e.UNMASKED_RENDERER_WEBGL));
+  } catch { /* hidden */ }
+  if (/SwiftShader|llvmpipe|Software|Basic Render|Mali|Adreno|PowerVR|HD Graphics|UHD Graphics [1-6]\d\d\b/i.test(s)) return 0;
+  if (/Apple M\d+ (Pro|Max|Ultra)|Apple M[3-9]|RTX|RX [5-9]\d{3}|GTX 1[06-9]\d\d|GTX 10[6-8]0|Arc\(TM\) A[57]/i.test(s)) return 2;
+  return 1;
+}
 
 export class Game {
   readonly r: THREE.WebGLRenderer;
@@ -119,7 +162,7 @@ export class Game {
   private drips: { x: number; y: number; z: number; vy: number; floor: number }[] = [];
   private dripAcc = 0;
   private breathT = 2;
-  private caBase = 0.007;
+  private caBase = 0.0035;
   private whiteout = 0;
   private hurt = 0;
   private lensBlood = 0;
@@ -149,7 +192,16 @@ export class Game {
   private lampT = 0;
   private liteK = 0;
   private wet = 1;
-  quality = 1;
+  /** what was asked for: -1 leaves it to the machine, 0 to 3 is a level chosen by hand */
+  gfx = -1;
+  /** the level in force */
+  tier = 1;
+  private loN = 0;
+  private hiN = 0;
+  private settle = 2;
+  private probe = 0;
+  private upFail = 0;
+  private frameN = 0;
   holdZone = 0;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -157,10 +209,15 @@ export class Game {
     r.setPixelRatio(1);
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFShadowMap;
+    softShadows();
     this.post = new Post(r);
     this.planar = new Planar(r);
     this.hud = new Hud(this);
     this.input = new Input(canvas, () => document.pointerLockElement === canvas || this.autoInput);
+    // the building is heard from the first click anywhere, menu included: a browser allows no sound before one
+    const hear = () => this.sound.start();
+    window.addEventListener('pointerdown', hear, { once: true });
+    window.addEventListener('keydown', hear, { once: true });
     // the flashlight: the one light in the map that casts a live shadow
     // a weapon light is an LED: cold white, a hard hot spot, the reflector's ring, a wide dim spill
     const s = (this.spot = new THREE.SpotLight(0xeef1ff, 0, 38, 0.85, 0.18, 1.7));
@@ -283,9 +340,18 @@ export class Game {
     L.group.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh && !(m.material as THREE.Material).transparent) {
-        m.castShadow = true;
+        m.castShadow = !m.userData.small;
         m.receiveShadow = true;
+        const mt = m.material as THREE.Material;
+        if (!Array.isArray(mt) && mt.alphaTest === 0 && mt.depthWrite && m.name !== 'veg' && m.name !== 'sky' && !m.userData.small) m.layers.enable(mt.side === THREE.DoubleSide ? PRE + 1 : PRE);
       }
+    });
+    // how hard the textures are filtered at a slant is set once, before any of them has gone to the card
+    const an = Math.min(TIERS[this.tier].aniso, this.r.capabilities.getMaxAnisotropy());
+    L.group.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+      if (!m || Array.isArray(m)) return;
+      for (const t of [m.map, m.normalMap, m.roughnessMap]) if (t && t.anisotropy !== an) t.anisotropy = an;
     });
     const sunInfo = L.map.weather?.sun;
     if (sunInfo) {
@@ -309,6 +375,9 @@ export class Game {
     const wb = L.map.weather?.wb;
     if (wb) (this.post.mFinal.uniforms.wb.value as THREE.Vector3).set(wb[0], wb[1], wb[2]);
     this.fx.rainOn = L.map.weather?.rain ?? 1;
+    this.sound.rainK = L.map.weather?.rain ?? 1;
+    // the shop still has a live circuit: its freezers and a few tubes; the hospital only a generator somewhere
+    this.sound.humK = MAP_ID === 'store' ? 1 : 0.45;
     if (L.map.weather?.key) this.post.exposureKey = L.map.weather.key;
     if (L.map.night) {
       // a shut building by day is still a shut building, but nobody is hidden by the dark in it
@@ -479,16 +548,60 @@ export class Game {
 
   resize() {
     const w = innerWidth, h = innerHeight;
-    const dpr = Math.min(devicePixelRatio || 1, 2);
-    const k = Math.min(1, 2560 / (w * dpr)) * dpr * this.scale * this.quality;
-    this.r.setSize(w, h, false);
+    const T = TIERS[this.tier];
+    // the screen gets its own pixels, as many as the level allows; the picture is drawn at the size the level pays for and
+    // laid onto them. On a strong machine that is more than the screen has, which is what keeps the middle of a wide lens sharp
+    const dpr = Math.min(devicePixelRatio || 1, T.dpr);
+    const ck = Math.min(1, T.maxW / (w * dpr)) * dpr;
+    const cw = Math.max(2, Math.round(w * ck)), ch = Math.max(2, Math.round(h * ck));
+    const k = Math.min(T.ss, Math.sqrt((T.mp * 1e6) / (cw * ch))) * this.scale;
+    const W = Math.max(2, Math.round(cw * k)), H = Math.max(2, Math.round(ch * k));
+    this.r.setSize(cw, ch, false);
     this.r.domElement.style.width = '100%';
     this.r.domElement.style.height = '100%';
-    this.r.setSize(Math.round(w * k), Math.round(h * k), false);
     this.cam.aspect = w / h;
     this.cam.updateProjectionMatrix();
-    this.post.resize(Math.round(w * k), Math.round(h * k));
-    this.planar.resize(Math.round(w * k), Math.round(h * k));
+    this.post.resize(W, H, cw, ch);
+    this.post.mFinal.uniforms.sharpK.value = k < 0.95 ? 0.8 : 0.55;
+    this.planar.resize(W, H);
+  }
+
+  /** a level chosen in the menu, or -1 to let the machine find its own */
+  setGfx(v: number) {
+    this.gfx = v;
+    this.loN = this.hiN = this.probe = this.upFail = 0;
+    this.scale = 1;
+    this.post.lite = false;
+    let t = v;
+    if (t < 0) {
+      t = guessTier(this.r);
+      try {
+        const kept = localStorage.getItem('lf.tier');
+        if (kept !== null && kept !== '') t = THREE.MathUtils.clamp(Number(kept) | 0, 0, 3);
+      } catch { /* private window */ }
+    }
+    this.setTier(t);
+  }
+
+  private setTier(t: number) {
+    this.tier = THREE.MathUtils.clamp(t, 0, TIERS.length - 1);
+    const T = TIERS[this.tier];
+    this.post.ssrOn = T.ssr;
+    this.post.motionBlur = T.blur;
+    const sh = this.spot.shadow;
+    if (sh.mapSize.x !== T.shadow) {
+      sh.mapSize.set(T.shadow, T.shadow);
+      sh.map?.dispose();
+      sh.map = null as never;
+    }
+    this.sound.hq = this.tier >= 2;
+    this.settle = 2;
+    this.resize();
+    if (this.gfx < 0) {
+      try {
+        localStorage.setItem('lf.tier', String(this.tier));
+      } catch { /* private window */ }
+    }
   }
 
   zone(x: number, y: number, z: number): 'street' | 'small' | 'hall' {
@@ -1101,7 +1214,7 @@ export class Game {
 
   /** lightning, thunder, and the noises an empty building makes */
   private night(dt: number, outside: boolean) {
-    this.sound.dread(this.cam.position, this.cam.position.y < -1, dt, this.inMatch && !outside);
+    this.sound.dread(this.cam.position, this.cam.position.y < -1, dt, this.inMatch);
     this.thunderT -= dt;
     if (this.thunderT <= 0 && (this.L.map.weather?.rain ?? 1) > 0) {
       // now and then, one sheet of it a long way off: not a strobe
@@ -1303,17 +1416,52 @@ export class Game {
     this.fpsAcc = 0;
     this.fpsN = 0;
     this.hud.fps(fps);
-    if (this.autoInput) return;
-    const was = this.scale;
-    // a soft picture is worse than a missing effect: the resolution only gives a little, then the air, the
-    // occlusion and the reflections go, and only then does it come down further
-    const floor = this.liteK >= 2 ? 0.62 : 0.8;
-    if (fps < 42) this.scale = Math.max(floor, this.scale * Math.max(0.88, Math.sqrt(fps / 50)));
-    else if (fps > 55 && this.scale < 1) this.scale = Math.min(1, this.scale * 1.05);
-    if (this.scale <= 0.81 && fps < 40) this.liteK++;
-    else if (fps > 55 && this.liteK > 0) this.liteK--;
-    this.post.lite = this.liteK >= 2 || this.quality < 0.75;
-    if (Math.abs(was - this.scale) > 0.02) this.resize();
+    // a level chosen by hand is left alone
+    if (this.autoInput || this.gfx >= 0 || !this.inMatch || document.hidden) return;
+    if (this.settle > 0) {
+      this.settle--;
+      return;
+    }
+    // just stepped up: unless it holds the frame rate it had, it goes straight back, and after two tries it stops asking
+    if (this.probe > 0) {
+      if (fps < 55) {
+        this.probe = 0;
+        this.upFail++;
+        this.setTier(this.tier - 1);
+      } else this.probe--;
+      return;
+    }
+    if (fps < 45) {
+      this.loN++;
+      this.hiN = 0;
+    } else if (fps > 57) {
+      this.hiN++;
+      this.loN = 0;
+    } else this.loN = this.hiN = 0;
+    // most of a frame here is the processor handing the scene over, and fewer pixels don't make that any quicker: a soft
+    // picture is the last thing tried, not the first. The level comes down, then the air and the occlusion go, and only then
+    // does the picture shrink
+    if (this.loN >= 2) {
+      this.loN = 0;
+      if (this.tier > 0) this.setTier(this.tier - 1);
+      else if (!this.post.lite) this.post.lite = true;
+      else if (this.scale > 0.72) {
+        this.scale = Math.max(0.72, this.scale - 0.14);
+        this.settle = 1;
+        this.resize();
+      }
+    } else if (this.hiN >= 8) {
+      this.hiN = 0;
+      if (this.scale < 1) {
+        this.scale = Math.min(1, this.scale + 0.14);
+        this.settle = 1;
+        this.resize();
+      } else if (this.post.lite) this.post.lite = false;
+      else if (this.tier < TIERS.length - 1 && this.upFail < 2) {
+        this.setTier(this.tier + 1);
+        this.probe = 3;
+      }
+    }
   }
 
   tick(dt: number) {
@@ -1397,6 +1545,7 @@ export class Game {
       }
     }
     post.capN = cap;
+    LF.capN.value = cap;
     this.redact(dt);
     this.phys.step(dt);
     this.lights(dt);
@@ -1469,7 +1618,8 @@ export class Game {
       this.planar.render(this.scene, this.cam, this.planarHide(), out);
       // after the mirror, which puts back whatever it hid
       const cp = this.cam.position;
-      for (const v of this.L.vegCells) v.mesh.visible = Math.hypot(v.x - cp.x, v.z - cp.z) < v.reach;
+      const rk = TIERS[this.tier].reach;
+      for (const v of this.L.vegCells) v.mesh.visible = Math.hypot(v.x - cp.x, v.z - cp.z) < v.reach * rk;
       if (this.sun) {
         this.sun.update(this.cam.position, this.time);
         this.L.grass?.update(this.cam);
@@ -1694,6 +1844,14 @@ export class Game {
     for (; n < 6; n++) LF.lampP.value[n].w = 0;
   }
 
+  /** a lamp's shadow map is drawn only while the lamp is lit, and every `every` frames. (The map itself has to stay bound:
+   *  a shader with a shadow sampler and no depth texture behind it is an invalid draw, and the browser drops it) */
+  private shade(l: THREE.SpotLight, every: number, phase: number) {
+    const sh = l.shadow;
+    sh.autoUpdate = false;
+    sh.needsUpdate = !sh.map || (l.intensity > 0.05 && this.frameN % every === phase);
+  }
+
   private lights(dt: number) {
     const me = this.me;
     const s = this.spot;
@@ -1791,6 +1949,14 @@ export class Game {
       u.time.value = this.time;
       u.axis.value.set(dx / dl, dy / dl, dz / dl);
     });
+    // a lamp that is off draws no shadow map, and a slow machine draws them less often: a frame late on a light is nothing
+    const T = TIERS[this.tier];
+    this.frameN++;
+    // a lamp that is off still has its shadow map looked up at every pixel in its cone: with no reach it has no cone
+    s.distance = s.intensity > 0.05 ? 38 : 0.01;
+    for (const o of this.others) o.distance = o.intensity > 0.05 ? 30 : 0.01;
+    this.shade(s, T.own, 0);
+    if (this.others[0].castShadow) this.shade(this.others[0], T.others, 1 % T.others);
     this.flashPoint.intensity = this.flashK * 7;
     this.flashK = Math.max(0, this.flashK - dt * 110);
     // the fill stands behind and above the lens: from there the near arm and the far hand get much the same of it,

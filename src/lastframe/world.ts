@@ -88,6 +88,79 @@ const PRINT = /* glsl */ `{
   }
 }`;
 
+const WELD_CELL = 20;
+interface Weld {
+  mat: THREE.Material;
+  small: boolean;
+  parts: { geo: THREE.BufferGeometry; m: THREE.Matrix4; tint: number[] }[];
+}
+/** many small meshes of one material, in place, as one: positions and normals in the world's own space, each one's tint in its colours */
+function weld(w: Weld) {
+  let nv = 0, ni = 0;
+  for (const p of w.parts) {
+    nv += p.geo.attributes.position.count;
+    ni += p.geo.index ? p.geo.index.count : p.geo.attributes.position.count;
+  }
+  const useColor = (w.mat as THREE.MeshStandardMaterial).vertexColors;
+  const useUv = w.parts.some((p) => !!p.geo.attributes.uv);
+  const pos = new Float32Array(nv * 3), nor = new Int16Array(nv * 4), colr = useColor ? new Uint8Array(nv * 4) : null, uvs = useUv ? new Float32Array(nv * 2) : null;
+  const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+  const v = new THREE.Vector3(), nm = new THREE.Matrix3();
+  let vo = 0, io = 0;
+  for (const p of w.parts) {
+    const P = p.geo.attributes.position, N = p.geo.attributes.normal, C = p.geo.attributes.color, U = p.geo.attributes.uv;
+    nm.getNormalMatrix(p.m);
+    const n = P.count;
+    for (let i = 0; i < n; i++) {
+      v.fromBufferAttribute(P, i).applyMatrix4(p.m);
+      const o = (vo + i) * 3;
+      pos[o] = v.x;
+      pos[o + 1] = v.y;
+      pos[o + 2] = v.z;
+      if (N) {
+        v.fromBufferAttribute(N, i).applyMatrix3(nm).normalize();
+        const k = (vo + i) * 4;
+        nor[k] = Math.round(v.x * 32767);
+        nor[k + 1] = Math.round(v.y * 32767);
+        nor[k + 2] = Math.round(v.z * 32767);
+      }
+      if (colr) {
+        const k = (vo + i) * 4;
+        colr[k] = Math.min(255, Math.round((C ? C.getX(i) : 1) * p.tint[0] * 255));
+        colr[k + 1] = Math.min(255, Math.round((C ? C.getY(i) : 1) * p.tint[1] * 255));
+        colr[k + 2] = Math.min(255, Math.round((C ? C.getZ(i) : 1) * p.tint[2] * 255));
+        colr[k + 3] = 255;
+      }
+      if (uvs && U) {
+        uvs[(vo + i) * 2] = U.getX(i);
+        uvs[(vo + i) * 2 + 1] = U.getY(i);
+      }
+    }
+    // a mirrored module is inside out until its triangles are turned round
+    const flip = p.m.determinant() < 0;
+    const I = p.geo.index, c = I ? I.count : n;
+    for (let i = 0; i < c; i += 3) {
+      const a = I ? I.getX(i) : i, b = I ? I.getX(i + 1) : i + 1, d = I ? I.getX(i + 2) : i + 2;
+      idx[io++] = vo + a;
+      idx[io++] = vo + (flip ? d : b);
+      idx[io++] = vo + (flip ? b : d);
+    }
+    vo += n;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(nor, 4, true));
+  if (colr) g.setAttribute('color', new THREE.BufferAttribute(colr, 4, true));
+  if (uvs) g.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  g.computeBoundingSphere();
+  g.computeBoundingBox();
+  const mesh = new THREE.Mesh(g, w.mat);
+  mesh.matrixAutoUpdate = false;
+  mesh.name = 'weld';
+  return mesh;
+}
+
 /** a map sampled from world position, blended over the three axes by the surface's facing */
 function triplanar(m: THREE.MeshStandardMaterial, scale: number, local = false, print = false) {
   const prev = m.onBeforeCompile;
@@ -148,7 +221,7 @@ export interface MapData {
   /** a map in the dark: lights start on, old blood on the walls */
   night?: number;
   stains?: number[][];
-  weather?: { key?: number; day?: number; rain: number; wet: number; fog: number; sky: number[]; wb: number[]; sun?: SunInfo; dim?: number; sunK?: number; skyTint?: number[]; expMax?: number; sat?: number };
+  weather?: { key?: number; day?: number; shade?: number[]; rain: number; wet: number; fog: number; sky: number[]; wb: number[]; sun?: SunInfo; dim?: number; sunK?: number; skyTint?: number[]; expMax?: number; sat?: number };
   /** what spawns face, and the shot behind the menu */
   centre?: number[];
   attract?: number[][];
@@ -471,6 +544,10 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   const binP = fetch(MB + 'world.bin').then((r) => r.arrayBuffer());
   const propsP = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(MB + 'props.glb');
   const map: MapData = await (await fetch(MB + 'map.json')).json();
+  // a baked sun: where it is and how bright a spot must be to be lying in it, for the shadows of whoever walks through
+  const shade = map.weather?.shade;
+  LF.shadeOn = !!shade;
+  if (shade) LF.shade.value.set(shade[0], shade[1], shade[2], shade[3] ?? 0.12);
   LF.lmK.value.set(map.lm.logr, map.lm.k);
   if (map.weather?.sun) LF.skyK.value = map.weather.sun.sky;
   const bin = await binP;
@@ -755,6 +832,10 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
       else byCell.set(k, [u]);
     }
     const col = new THREE.Color();
+    // a module that stands in one or two places gains nothing from instancing, and costs a draw call for every material
+    // in it, in the picture and again in every shadow map. Those are welded, per material and per block of the map
+    const welds = new Map<string, Weld>();
+    const box3 = new THREE.Box3(), size3 = new THREE.Vector3();
     for (const [key, list] of byCell) {
       const id = key.split('@')[0];
       const src = byId.get(id) ?? byId.get(id.replace(/[.\s|+]/g, '_')) ?? byId.get(id.replace(/[.\s|+]/g, ''));
@@ -772,9 +853,28 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
         geo.index = mesh.geometry.index;
         for (const [n, a] of Object.entries(mesh.geometry.attributes)) geo.setAttribute(n, a);
         if (tiled && mesh.geometry.getAttribute('uv1')) geo.setAttribute('uvLM', mesh.geometry.getAttribute('uv1'));
+        const mat = matFor(m0, tiled);
+        // what is flat on a wall or lying on the floor throws no shadow anyone would miss
+        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+        box3.copy(mesh.geometry.boundingBox!).applyMatrix4(local).getSize(size3);
+        const u0 = list[0];
+        const ext = [size3.x * u0.sc[0], size3.y * u0.sc[2], size3.z * u0.sc[1]];
+        const small = Math.min(ext[0], ext[1], ext[2]) < 0.06 || Math.max(ext[0], ext[1], ext[2]) < 0.3;
+        const std = mat as THREE.MeshStandardMaterial;
+        if (!tiled && !u0.float && list.length < 5 && std.isMeshStandardMaterial && !std.transparent && (std.vertexColors || list.every((u) => u.tint[0] === 1 && u.tint[1] === 1 && u.tint[2] === 1))) {
+          for (const u of list) {
+            const wk = `${mat.uuid}@${Math.floor(u.pos[0] / WELD_CELL)},${Math.floor(u.pos[2] / WELD_CELL)}${small ? 's' : ''}`;
+            let w = welds.get(wk);
+            if (!w) welds.set(wk, (w = { mat, small, parts: [] }));
+            q.setFromAxisAngle(UP, u.rot);
+            w.parts.push({ geo: mesh.geometry, m: new THREE.Matrix4().compose(v.set(u.pos[0], u.pos[1], u.pos[2]), q, sc.set(u.sc[0], u.sc[2], u.sc[1])).multiply(local), tint: u.tint });
+          }
+          return;
+        }
         const tiles = new Float32Array(list.length * 4);
-        const inst = new THREE.InstancedMesh(geo, matFor(m0, tiled), list.length);
+        const inst = new THREE.InstancedMesh(geo, mat, list.length);
         inst.name = id;
+        inst.userData.small = small;
         list.forEach((u, i) => {
           q.setFromAxisAngle(UP, u.rot);
           // sc is along the module, out of it, up it
@@ -792,6 +892,14 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
           floats.push({ mesh: inst, base, x: list.map((u) => u.pos[0]), z: list.map((u) => u.pos[2]), yaw: list.map((u) => u.rot) });
         }
       });
+    }
+    for (const w of welds.values()) {
+      const mesh = weld(w);
+      mesh.userData.small = w.small;
+      group.add(mesh);
+      const bs = mesh.geometry.boundingSphere!;
+      // the small stuff is nothing from the far end of the building
+      if (w.small) vegCells.push({ mesh: mesh as unknown as THREE.InstancedMesh, x: bs.center.x, z: bs.center.z, reach: 38 + bs.radius });
     }
   }
   // what's planted: blocks of the map, each drawn only when it's in view, swaying

@@ -471,7 +471,7 @@ export class Hud {
       <div class="group">
         <label class="line"><span>Mouse</span><input id="p-sens" type="range" min="0.0006" max="0.005" step="0.0001" value="${q.me.sens}"></label>
         <label class="line"><span>Volume</span><input id="p-vol" type="range" min="0" max="1" step="0.02" value="${q.sound.volume}"></label>
-        <div class="line"><span>Resolution</span>${this.seg('q', [['0.7', 'Low'], ['0.85', 'Medium'], ['1', 'High']], ['0.7', '0.85', '1'].find((v) => Number(v) === q.quality) ?? '1')}</div>
+        <div class="line"><span>Graphics</span>${this.seg('q', [['-1', 'Auto'], ['0', 'Low'], ['1', 'Medium'], ['2', 'High'], ['3', 'Ultra']], String(q.gfx))}</div>
         <div class="line"><span>Free aim</span>${this.seg('fa', [['1', 'On'], ['0', 'Off']], q.me.freeAim ? '1' : '0')}</div>
       </div>
       <div class="group"><div class="lab">Controls</div><div class="keys">${KEYS.map(([k, a]) => `<div><span>${a}</span><b>${k}</b></div>`).join('')}</div></div>
@@ -496,16 +496,15 @@ export class Hud {
         store.set('freeaim', b.dataset.v!);
         return;
       }
-      q.quality = Number(b.dataset.v);
-      store.set('quality', b.dataset.v!);
-      q.resize();
+      store.set('gfx', b.dataset.v!);
+      q.setGfx(Number(b.dataset.v));
     }));
   }
 
   applyPrefs() {
     this.g.me.sens = Number(store.get('sens', String(this.g.me.sens)));
     this.g.sound.volume = Number(store.get('vol', '0.8'));
-    this.g.quality = Number(store.get('quality', '1'));
+    this.g.setGfx(Number(store.get('gfx', '-1')));
     this.g.me.freeAim = store.get('freeaim', '1') === '1';
   }
 

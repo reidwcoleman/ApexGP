@@ -47,6 +47,7 @@ function noiseTile() {
   return t;
 }
 
+export const CAP_MAX = 14;
 export const LF = {
   lm: { value: null as THREE.Texture | null },
   /** the kit's own atlas */
@@ -77,6 +78,14 @@ export const LF = {
   noise: { value: noiseTile() },
   /** 1 under open sky */
   rain: { value: 1 },
+  /** a sun that is in the bake (the shop): xyz is the way to it, w the brightness above which a spot counts as lying in it.
+   *  A body between such a spot and the sun takes the sun off it: see lfCapShadow */
+  shadeOn: false as boolean,
+  shade: { value: new THREE.Vector4(0, 1, 0, 0) },
+  /** every body as a capsule: x y z r at the feet, x y z at the head. The occlusion pass reads the same ones */
+  capA: { value: Array.from({ length: CAP_MAX }, () => new THREE.Vector4()) },
+  capB: { value: Array.from({ length: CAP_MAX }, () => new THREE.Vector4()) },
+  capN: { value: 0 },
   /** a map in daylight: the sun is drawn live and the bake holds only the sky and the bounce (see sun.ts) */
   // the cove is the only sunlit location, and it's out of the rotation while every map is indoors (world.ts OUTDOOR)
   sunOn: false as boolean,
@@ -200,6 +209,23 @@ ${SUN_GLSL}
 varying vec2 vLfLM;
 uniform sampler2D lfLM;
 #endif
+#if defined( LF_LM ) && defined( LF_SHADE )
+uniform vec4 lfShade;
+uniform vec4 lfCapA[ ${CAP_MAX} ];
+uniform vec4 lfCapB[ ${CAP_MAX} ];
+uniform int lfCapN;
+// how much of the sun gets past a body on its way to this spot: the nearest the ray comes to the capsule, against how far off that is
+float lfCapShadow( vec3 ro, vec3 rd, vec3 a, vec3 b, float r ) {
+  vec3 ba = b - a, oa = ro - a;
+  float oad = dot( oa, rd ), dba = dot( rd, ba ), baba = dot( ba, ba ), oaba = dot( oa, ba );
+  vec2 th = vec2( -oad * baba + dba * oaba, oaba - oad * dba ) / max( baba - dba * dba, 1e-4 );
+  th.x = max( th.x, 1e-4 );
+  th.y = clamp( th.y, 0.0, 1.0 );
+  float d = length( a + ba * th.y - ( ro + rd * th.x ) ) - r;
+  float k = clamp( 9.0 * d / th.x + 0.5, 0.0, 1.0 );
+  return k * k * ( 3.0 - 2.0 * k );
+}
+#endif
 #ifdef LF_WET
 uniform float lfWet;
 uniform sampler2D lfPlanar;
@@ -280,6 +306,21 @@ const FRAG_LIGHT = /* glsl */ `
   vec3 lfR = reflect( - lfVw, lfNw );
   #ifdef LF_LM
     vec3 lfBaked = max( lfDecode( texture2D( lfLM, vLfLM ).rgb ), vec3( 0.0055, 0.0065, 0.0095 ) ) * lfFlickDim( vLfW );
+    #ifdef LF_SHADE
+    {
+      // the sun on this floor was baked with nobody in the building: whoever stands in it now takes it away again
+      float lfSunny = smoothstep( lfShade.w, lfShade.w * 2.2, dot( lfBaked, vec3( 0.3, 0.6, 0.1 ) ) ) * step( 0.02, dot( normalize( vLfN ), lfShade.xyz ) );
+      if ( lfSunny > 0.0 ) {
+        float lfSh = 1.0;
+        vec3 lfRo = vLfW + normalize( vLfN ) * 0.03;
+        for ( int i = 0; i < ${CAP_MAX}; i++ ) {
+          if ( i >= lfCapN ) break;
+          lfSh = min( lfSh, lfCapShadow( lfRo, lfShade.xyz, lfCapA[ i ].xyz, lfCapB[ i ].xyz, lfCapA[ i ].w ) );
+        }
+        lfBaked *= mix( 1.0, mix( 0.2, 1.0, lfSh ), lfSunny );
+      }
+    }
+    #endif
     // the lightmap has no idea about the normal map. The cubes know where this spot's light comes from:
     // ask them how much more or less a bump tilted this way sees, and lean the bake on that
     vec3 lfGn = normalize( vLfN );
@@ -567,6 +608,7 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
   if (o.terrain) m.defines.LF_LAND = 1;
   if (o.leaf) m.defines.LF_LEAF = 1;
   if (LF.sunOn) m.defines.LF_SUN = 1;
+  if (LF.shadeOn && o.lightmap) m.defines.LF_SHADE = 1;
   const wet = { value: o.wet ?? 0 };
   const prev = m.onBeforeCompile;
   const prevKey = m.customProgramCacheKey?.() ?? '';
@@ -591,6 +633,12 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
     s.uniforms.lfPlanar = LF.planar;
     s.uniforms.lfPlanarVP = LF.planarVP;
     s.uniforms.lfPlanarK = LF.planarK;
+    if (LF.shadeOn && o.lightmap) {
+      s.uniforms.lfShade = LF.shade;
+      s.uniforms.lfCapA = LF.capA;
+      s.uniforms.lfCapB = LF.capB;
+      s.uniforms.lfCapN = LF.capN;
+    }
     if (LF.sunOn) {
       s.uniforms.lfSunDir = LF.sunDir;
       s.uniforms.lfSunC = LF.sunC;
@@ -620,6 +668,6 @@ if ( lfPuddle > 0.02 && lfRain > 0.0 ) {
 `);
     s.fragmentShader = s.fragmentShader.replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n' + FRAG_LIGHT);
   };
-  m.customProgramCacheKey = () => `${prevKey}lf${o.lightmap ? 1 : 0}${o.wet ? 1 : 0}${o.spec ?? 1}${o.view ?? 0}${o.tile ? 1 : 0}${o.outdoor ? 1 : 0}${o.leaf ? 1 : 0}${LF.sunOn ? 1 : 0}`;
+  m.customProgramCacheKey = () => `${prevKey}lf${o.lightmap ? 1 : 0}${o.wet ? 1 : 0}${o.spec ?? 1}${o.view ?? 0}${o.tile ? 1 : 0}${o.outdoor ? 1 : 0}${o.leaf ? 1 : 0}${LF.sunOn ? 1 : 0}${LF.shadeOn ? 1 : 0}`;
   return m;
 }

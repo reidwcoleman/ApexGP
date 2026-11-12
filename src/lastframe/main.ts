@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { LF } from './lighting.ts';
 import { Game } from './game.ts';
 import { capture } from './capture.ts';
@@ -14,7 +15,7 @@ async function boot() {
   await g.load((f, what) => g.hud.loading(f, what));
   g.hud.loading(1, 'Ready');
   Object.assign(window, {
-    __lf: { scene: g.scene, cam: g.cam, post: g.post, L: g.L, r: g.r, g, LF },
+    __lf: { scene: g.scene, cam: g.cam, post: g.post, L: g.L, r: g.r, g, LF, THREE },
     __capture: async () => {
       g.hideLoose();
       const x = await capture(g.r, g.scene, g.L, (f) => console.log('cap', f));
