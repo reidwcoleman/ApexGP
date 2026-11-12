@@ -34,7 +34,7 @@ TRUSS = (10.2, 18.25, 26.3)   # the truss lines, on the column lines     # gondo
 # a bright, broken-cloud morning: the building is lit by what comes in through the front glass and the rooflights, the
 # way an empty one is, and the camera cannot hold the windows and the aisles at once
 SKY = dict(hdri='kloofendal_overcast_puresky', strength=10.0, tint=(1.0, 1.0, 1.0), sun_bake=dict(dir=(0.3, -0.72, 0.62), power=42.0, color=(1.0, 0.95, 0.86)))
-WEATHER = dict(key=0.13, day=1, rain=0, wet=1, fog=0.2, sky=[1.0, 1.02, 1.06], wb=[1.0, 1.0, 1.0])
+WEATHER = dict(key=0.085, day=1, rain=0, wet=1, fog=0.2, sky=[1.0, 1.02, 1.06], wb=[1.0, 1.0, 1.0])
 VOLUME = dict(step=[2, 1.15, 2], min=[-8, -1.2, -52], dim=[39, 9, 31])
 
 TUBE = (0.8, 0.94, 1.0)
