@@ -88,7 +88,7 @@ const PRINT = /* glsl */ `{
   }
 }`;
 
-const WELD_CELL = 20;
+const WELD_CELL = 40;
 interface Weld {
   mat: THREE.Material;
   small: boolean;
@@ -643,6 +643,9 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
     g.setIndex(new THREE.BufferAttribute(new Uint32Array(bin, e.idx, e.tris * 3), 1));
     const mesh = new THREE.Mesh(g, makeMat(e.mat));
     mesh.name = e.mat;
+    mesh.userData.arch = true;
+    // after the furniture: its depth is already down, so whatever a shelf covers is never shaded as wall first
+    mesh.renderOrder = 1;
     mesh.frustumCulled = false;
     mesh.matrixAutoUpdate = false;
     group.add(mesh);
@@ -841,7 +844,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
     const byCell = new Map<string, MapData['units']>();
     for (const u of map.units ?? []) {
       if (isCart(u.id)) continue;
-      const k = `${u.id}@${Math.floor(u.pos[0] / 24)},${Math.floor(u.pos[2] / 24)}${u.float ? 'f' : ''}`;
+      const k = `${u.id}@${Math.floor(u.pos[0] / 48)},${Math.floor(u.pos[2] / 48)}${u.float ? 'f' : ''}`;
       const c = byCell.get(k);
       if (c) c.push(u);
       else byCell.set(k, [u]);
@@ -911,6 +914,8 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
     for (const w of welds.values()) {
       const mesh = weld(w);
       mesh.userData.small = w.small;
+      // what stands on a shelf is in the shelf's own shadow from any lamp that matters: it takes shadows and throws none
+      if (/^lf(pack|tin|can|jar|bottle|lab)/.test(w.mat.name)) mesh.userData.stock = true;
       group.add(mesh);
       const bs = mesh.geometry.boundingSphere!;
       // the small stuff is nothing from the far end of the building

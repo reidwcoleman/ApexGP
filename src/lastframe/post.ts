@@ -55,7 +55,8 @@ void main() {
   vec3 N = normalize( cross( dx, dy ) );
   float R = 0.62;
   float rad = min( 0.12, R / ( z * pInv.y * 2.0 ) );
-  float n = ign( gl_FragCoord.xy + frame * 5.588238 ) * 6.2832;
+  // the same turn at a pixel every frame: turned afresh each frame, the shade in every corner boiled
+  float n = ign( gl_FragCoord.xy ) * 6.2832;
   float occ = 0.0;
   for ( int i = 0; i < 8; i++ ) {
     float fi = ( float( i ) + 0.5 ) / 8.0;
@@ -312,7 +313,8 @@ void main() {
   vec3 box = ( mx - mn ) * 0.5 + 0.002;
   h = clamp( h, max( mn, mean - box * 1.2 ), min( mx, mean + box * 1.2 ) );
   float out_ = step( 0.0, pu.x ) * step( pu.x, 1.0 ) * step( 0.0, pu.y ) * step( pu.y, 1.0 );
-  float k = cut > 0.5 ? 1.0 : mix( 1.0, z < 1.1 ? 0.3 : 0.13, out_ );
+  // how much of this frame goes in: little, so an edge is the average of all eight places the lens has been nudged to
+  float k = cut > 0.5 ? 1.0 : mix( 1.0, z < 1.1 ? 0.14 : 0.09, out_ );
   gl_FragColor = vec4( mix( h, cur, k ), 1.0 );
 }
 `;
@@ -765,7 +767,8 @@ export class Post {
   /** a machine that can't keep up at all: no occlusion, no air, no shutter blur */
   lite = false;
   /** depth laid down before the picture (see render) */
-  depthFirst = true;
+  /** 0 not at all, 1 the building's own walls and floors, 2 every solid thing */
+  depthFirst = 2;
   private mDepth = new THREE.MeshBasicMaterial({ colorWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 });
   private mDepth2 = new THREE.MeshBasicMaterial({ colorWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2, side: THREE.DoubleSide });
   /** the floor's reflections are the dearest layer: a machine short of breath goes without them first */
@@ -838,12 +841,13 @@ export class Post {
       const mask = cam.layers.mask, auto = r.shadowMap.autoUpdate, need = r.shadowMap.needsUpdate;
       r.shadowMap.autoUpdate = false;
       r.shadowMap.needsUpdate = false;
-      cam.layers.set(PRE);
+      const pre = this.depthFirst === 2 ? PRE : PRE + 2;
+      cam.layers.set(pre);
       scene.overrideMaterial = this.mDepth;
       r.render(scene, cam);
       // and what is drawn from both sides, from both sides
       r.autoClear = false;
-      cam.layers.set(PRE + 1);
+      cam.layers.set(pre + 1);
       scene.overrideMaterial = this.mDepth2;
       r.render(scene, cam);
       scene.overrideMaterial = null;

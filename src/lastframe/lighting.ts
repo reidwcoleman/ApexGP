@@ -59,6 +59,11 @@ export const LF = {
   /** the lamps nearest the camera: xyz, radius / rgb. The bake holds their light, not their glint */
   lampP: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, -99, 0, 0)) },
   lampC: { value: Array.from({ length: 6 }, () => new THREE.Vector3()) },
+  /** the small lights that come and go (the muzzle's flash, the flashlight's bounce off a wall, the fill on your own arms):
+   *  xyz and reach / colour times strength. As lights of the renderer's own each one was a whole specular lobe at every
+   *  pixel of every surface, lit or not; here each is a dot product, and nothing at all outside its reach */
+  softP: { value: Array.from({ length: 3 }, () => new THREE.Vector4(0, -99, 0, 0.01)) },
+  softC: { value: Array.from({ length: 3 }, () => new THREE.Vector3()) },
   /** lamps that can't make up their minds: xyz, reach / how far down they are this frame. Their light is in the bake, so it's taken away */
   flickP: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, -99, 0, 0)) },
   flickA: { value: [0, 0, 0, 0, 0, 0, 0, 0] },
@@ -233,6 +238,19 @@ uniform vec4 lfLampP[6];
 uniform vec3 lfLampC[6];
 uniform vec4 lfFlickP[8];
 uniform float lfFlickA[8];
+uniform vec4 lfSoftP[3];
+uniform vec3 lfSoftC[3];
+vec3 lfSoft( vec3 P, vec3 N ) {
+  vec3 o = vec3( 0.0 );
+  for ( int i = 0; i < 3; i++ ) {
+    vec3 l = lfSoftP[i].xyz - P;
+    float d2 = dot( l, l ), c2 = lfSoftP[i].w * lfSoftP[i].w;
+    if ( d2 > c2 ) continue;
+    float q = d2 / c2, w = 1.0 - q * q;
+    o += lfSoftC[i] * ( max( dot( N, l ) * inversesqrt( d2 ), 0.0 ) * w * w / max( d2, 0.01 ) );
+  }
+  return o;
+}
 float lfFlickDim( vec3 p ) {
   float k = 1.0;
   for ( int i = 0; i < 8; i++ ) {
@@ -328,6 +346,7 @@ const FRAG_LIGHT = /* glsl */ `
   vec3 lfNw = normalize( ( vec4( geometryNormal, 0.0 ) * viewMatrix ).xyz );
   vec3 lfVw = normalize( ( vec4( geometryViewDir, 0.0 ) * viewMatrix ).xyz );
   vec3 lfR = reflect( - lfVw, lfNw );
+  irradiance += lfSoft( vLfW, lfNw );
   #ifdef LF_LM
     vec3 lfBaked = max( lfDecode( texture2D( lfLM, vLfLM ).rgb ), vec3( 0.0055, 0.0065, 0.0095 ) ) * lfFlickDim( vLfW );
     #ifdef LF_SHADE
@@ -651,6 +670,8 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
     s.uniforms.lfFlash = LF.flash;
     s.uniforms.lfLampP = LF.lampP;
     s.uniforms.lfLampC = LF.lampC;
+    s.uniforms.lfSoftP = LF.softP;
+    s.uniforms.lfSoftC = LF.softC;
     s.uniforms.lfFlickP = LF.flickP;
     s.uniforms.lfFlickA = LF.flickA;
     s.uniforms.lfRain = LF.rain;

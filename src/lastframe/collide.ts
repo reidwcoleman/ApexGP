@@ -24,6 +24,8 @@ export interface Hit {
 }
 
 const CELL = 3;
+/** the tags of what is built: walls, floors and roofs */
+const WALLS = new Set(['ext', 'int', 'floor', 'wall', 'under', 'roof', 'ground']);
 
 /** ground that isn't boxes: heights on a grid. z runs north-negative, so rows go with -z */
 export interface Terrain {
@@ -131,6 +133,7 @@ export class World {
     const ix = 1 / (dx || 1e-9), iy = 1 / (dy || 1e-9), iz = 1 / (dz || 1e-9);
     const test = (b: Box) => {
       if (b.off || (skipPen && b.pen) || (real && (b.tag === 'inv' || b.tag === 'prop'))) return;
+      if (this.wallsOnly && !WALLS.has(b.tag)) return;
       if (b.slab) {
         const h = raySlab(b, ox, oy, oz, dx, dy, dz, bt);
         if (h) {
@@ -205,6 +208,20 @@ export class World {
       }
     }
     return best;
+  }
+
+  /** only the building itself: what the eye cannot see through, whatever else stands in the room */
+  private wallsOnly = false;
+
+  /** nothing of the building between two points. Shelving, counters and glass do not count: they are not walls, and a
+   *  body half seen through one must still be drawn */
+  open(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
+    const dx = bx - ax, dy = by - ay, dz = bz - az;
+    const d = Math.hypot(dx, dy, dz) || 1;
+    this.wallsOnly = true;
+    const h = this.ray(ax, ay, az, dx / d, dy / d, dz / d, d - 0.05, false, true);
+    this.wallsOnly = false;
+    return !h;
   }
 
   /** clear line between two points */

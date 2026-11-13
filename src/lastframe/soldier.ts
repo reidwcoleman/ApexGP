@@ -395,6 +395,7 @@ export class Soldier {
     worn.castShadow = true;
     worn.userData.gear = true;
     P0.body.parent!.add(worn);
+    this.skins = [P0.body as THREE.SkinnedMesh, worn];
     this.person.body.traverse((o) => (o.castShadow = true));
     // the recording light on the chest camera: a steady green LED, and the little bloom of it that carries across a dark room
     {
@@ -546,7 +547,47 @@ export class Soldier {
     this.root.traverse((o) => o.layers.enable(MOVER));
   }
 
+  /** A skinned mesh has no bounds the renderer can trust, so these were drawn in every pass whichever way it looked: all
+   *  fifteen bodies into each lamp's shadow map and the sun's, most of them behind it. Each is given a ball round where it
+   *  stands now, and is drawn only by what can see that ball */
+  private skins: THREE.SkinnedMesh[] = [];
+  private ball = new THREE.Sphere();
+  private inv = new THREE.Matrix4();
+  private bound(x: number, y: number, z: number, r: number) {
+    if (this.firstPerson) return;
+    const b = this.skins[0];
+    b.updateWorldMatrix(true, false);
+    this.inv.copy(b.matrixWorld).invert();
+    this.ball.center.set(x, y, z).applyMatrix4(this.inv);
+    this.ball.radius = r * this.inv.getMaxScaleOnAxis();
+    for (const m of this.skins) {
+      m.boundingSphere = this.ball;
+      m.frustumCulled = true;
+    }
+  }
+
+  /** whether the figure is drawn at all. A body with a wall between it and the lens costs its triangles four times over
+   *  (the picture, the depth, the sun and the lamp), for nothing */
+  private drawn = true;
+  setDrawn(on: boolean) {
+    if (on === this.drawn) return;
+    this.drawn = on;
+    this.person.root.visible = on;
+    this.holder.visible = on;
+  }
+  get isDrawn() { return this.drawn; }
+  get isFar() { return this.far; }
+
+  /** across a room nobody can tell a rounded sleeve from the eight-sided one it started as */
+  private far = false;
+  setFar(far: boolean) {
+    if (far === this.far || this.firstPerson) return;
+    this.far = far;
+    this.person.body.geometry = far ? this.geo0 : refine(this.geo0, Soldier.detail, null, 'tp' + Soldier.detail);
+  }
+
   setFirstPerson(on: boolean) {
+    this.far = false;
     this.firstPerson = on;
     this.fpHide.value = on ? 1 : 0;
     this.person.root.traverse((o) => {
@@ -554,6 +595,10 @@ export class Soldier {
       (o as THREE.Mesh).castShadow = !on;
     });
     this.person.bones.Head.scale.setScalar(on ? 0.001 : 1);
+    for (const m of this.skins) m.frustumCulled = false;
+    this.gun?.group.traverse((o) => (o.frustumCulled = !on));
+    // your own arms and gun cover a quarter of the frame: drawn first, the room behind them is never shaded at all
+    this.root.traverse((o) => { if ((o as THREE.Mesh).isMesh && !((o as THREE.Mesh).material as THREE.Material).transparent) o.renderOrder = on ? -10 : 0; });
     // your own arms fill a third of the frame: they get the fine mesh, and their insides, where a sleeve runs off the edge
     const bm = this.person.body.material as THREE.MeshStandardMaterial;
     this.person.body.geometry = on ? refine(refine(this.geo0, 1, [2, 6, 7, 8], 'fpl'), 2, [3, 4, 5], 'fp') : refine(this.geo0, Soldier.detail, null, 'tp' + Soldier.detail);
@@ -573,7 +618,11 @@ export class Soldier {
     this.gun = g;
     this.holder.add(g.group);
     // it stands in the sun with whoever holds it
-    g.group.traverse((o) => o.layers.enable(MOVER));
+    g.group.traverse((o) => {
+      o.layers.enable(MOVER);
+      o.frustumCulled = !this.firstPerson;
+      if (this.firstPerson && (o as THREE.Mesh).isMesh && !((o as THREE.Mesh).material as THREE.Material).transparent) o.renderOrder = -10;
+    });
   }
 
   /** a round went in: `dir` the way it was going, `k` how bad. It shows on the body, and spreads */
@@ -666,6 +715,7 @@ export class Soldier {
     if (this.dead >= 0) {
       this.dead += dt;
       this.head.copy(this.rag?.head ?? this.head);
+      this.bound(this.head.x, this.head.y, this.head.z, 2.2);
       return;
     }
     this.dtL = dt;
@@ -745,6 +795,7 @@ export class Soldier {
     this.pose(face, pitch);
     P.root.updateMatrixWorld(true);
     P.worldOf('Bip01_Head', this.head);
+    this.bound(x, y + 0.95, z, 1.5);
   }
 
   private pose(face: number, pitch: number) {

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Sun, MOVER } from './sun.ts';
+import { buildCasters } from './casters.ts';
 import { PRE } from './post.ts';
 import type { PeopleKit } from '../people/Humans.ts';
 import { Planar, Post } from './post.ts';
@@ -58,7 +59,7 @@ const CAM_STEP = 1 / 30;
 /** what each level of picture costs. dpr and maxW: the screen's own pixels; mp: how many the scene is drawn with (millions),
  * never more than ss times the screen's; own and others: every how many frames each weapon light's shadows are redrawn */
 export const TIERS = [
-  { name: 'Low', dpr: 1, maxW: 1920, mp: 0.8, ss: 1, shadow: 512, own: 2, others: 3, ssr: false, blur: false, reach: 0.7, aniso: 2 },
+  { name: 'Low', dpr: 1, maxW: 1920, mp: 1.0, ss: 1, shadow: 512, own: 2, others: 3, ssr: false, blur: true, reach: 0.7, aniso: 2 },
   { name: 'Medium', dpr: 1.5, maxW: 2560, mp: 1.4, ss: 1, shadow: 1024, own: 1, others: 2, ssr: false, blur: true, reach: 0.85, aniso: 4 },
   { name: 'High', dpr: 2, maxW: 2560, mp: 2.4, ss: 1.3, shadow: 1024, own: 1, others: 1, ssr: true, blur: true, reach: 1, aniso: 8 },
   { name: 'Ultra', dpr: 2, maxW: 3072, mp: 4.4, ss: 1.5, shadow: 2048, own: 1, others: 1, ssr: true, blur: true, reach: 1.4, aniso: 16 },
@@ -227,7 +228,19 @@ export class Game {
     s.castShadow = true;
     s.shadow.mapSize.set(1024, 1024);
     s.shadow.camera.near = 0.25;
-    s.shadow.camera.far = 34;
+    // the lamp sits a hand's width from the lens, so what it cannot reach the lens cannot see either: past a room's length
+    // its shadows are a sliver behind each edge, and drawing the whole building into the map for them was a third of it
+    s.shadow.camera.far = 20;
+    {
+      // (three sets the map's far plane from the light's reach every frame: it is told the shorter one while it does)
+      const sh = s.shadow, um = sh.updateMatrices.bind(sh);
+      sh.updateMatrices = (l: THREE.SpotLight) => {
+        const d = l.distance;
+        l.distance = Math.min(d, 20);
+        um(l);
+        l.distance = d;
+      };
+    }
     s.shadow.bias = -0.0006;
     s.shadow.normalBias = 0.02;
     this.scene.add(s, s.target);
@@ -244,7 +257,9 @@ export class Game {
         o.shadow.normalBias = 0.03;
       }
       this.others.push(o);
-      this.scene.add(o, o.target);
+      // one of theirs lights the room: the nearest. The second still has its beam in the air and its glare in the lens, but
+      // as a light it was a whole lamp worked out at every pixel in the building for a patch on a far wall
+      if (i === 0) this.scene.add(o, o.target);
       const beam = new THREE.Mesh(beamGeo(), beamMat());
       beam.visible = false;
       beam.frustumCulled = false;
@@ -253,7 +268,7 @@ export class Game {
       this.scene.add(beam);
     }
     this.flashPoint = new THREE.PointLight(0xffc08a, 0, 13, 1.8);
-    this.scene.add(this.flashPoint, this.bounce, this.fill);
+    // these three never go in the scene: the surface shader takes them as plain numbers (LF.softP)
     const gt = glareTex();
     for (let i = 0; i < 2; i++) {
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: gt, color: new THREE.Color(3.0, 3.2, 3.5), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 }));
@@ -274,6 +289,10 @@ export class Game {
   sun: Sun | null = null;
   /** a shop's sun: in the bake for what stands still, live for what doesn't */
   sunIn: Sun | null = null;
+  private sunRest: { obj: THREE.Object3D; at: THREE.Vector3 }[] = [];
+  private sunBake: (() => void) | null = null;
+  private sunSettle = 0;
+  private sunSkip: Set<THREE.Object3D> | null = null;
   private undo: (() => void) | null = null;
   private undoDown: (() => void) | null = null;
   private downFrom = 0;
@@ -349,12 +368,16 @@ export class Game {
     L.group.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh && !(m.material as THREE.Material).transparent) {
-        m.castShadow = !m.userData.small;
+        m.castShadow = !m.userData.small && !m.userData.stock;
         m.receiveShadow = true;
         const mt = m.material as THREE.Material;
-        if (!Array.isArray(mt) && mt.alphaTest === 0 && mt.depthWrite && m.name !== 'veg' && m.name !== 'sky' && !m.userData.small) m.layers.enable(mt.side === THREE.DoubleSide ? PRE + 1 : PRE);
+        if (!Array.isArray(mt) && mt.alphaTest === 0 && mt.depthWrite && m.name !== 'veg' && m.name !== 'sky' && !m.userData.small) {
+          m.layers.enable(mt.side === THREE.DoubleSide ? PRE + 1 : PRE);
+        }
       }
     });
+    // what never moves throws its shadows, and lays its depth, from a few merged blocks (casters.ts)
+    this.scene.add(buildCasters(L.group, new Set<THREE.Object3D>(L.doors.map((d) => d.pivot))));
     // how hard the textures are filtered at a slant is set once, before any of them has gone to the card
     const an = Math.min(TIERS[this.tier].aniso, this.r.capabilities.getMaxAnisotropy());
     L.group.traverse((o) => {
@@ -377,12 +400,18 @@ export class Game {
       const sun = (this.sunIn = new Sun(this.r, this.scene, { dir: [sh.x, sh.y, sh.z], power: sh.w, color: [1, 0.95, 0.86], sky: 1 }, 16, 2048));
       const skip = new Set<THREE.Object3D>(L.panes.map((p) => p.mesh));
       for (const d of L.doors) d.pivot.traverse((o) => { o.layers.enable(MOVER); skip.add(o); });
+      // what can be knocked over stands in the big map with the building until somebody knocks it: a hundred crates and
+      // bags that never move were being drawn into the movers' map every frame. The first time one shifts it joins the
+      // movers, and the big map is drawn again without it
       for (const l of L.loose) l.obj.traverse((o) => { o.layers.enable(MOVER); skip.add(o); });
+      this.sunSettle = 150;
       // the building, and a little of the yard the sun crosses to get in
       const bb = new THREE.Box3();
       for (const z of L.map.zones) bb.expandByPoint(new THREE.Vector3(z.a[0], z.a[1], z.a[2])).expandByPoint(new THREE.Vector3(z.b[0], z.b[1], z.b[2]));
       const c = bb.getCenter(new THREE.Vector3());
-      sun.bake(c, bb.getSize(new THREE.Vector3()).length() / 2 + 3, (o) => o.name === 'sky' || skip.has(o) || (o as THREE.Light).isLight === true || ((o as THREE.Mesh).material as THREE.Material | undefined)?.transparent === true, () => false);
+      this.sunBake = () => sun.bake(c, bb.getSize(new THREE.Vector3()).length() / 2 + 3, (o) => o.name === 'sky' || skip.has(o) || (o.parent === this.scene && o !== L.group && o !== this.looseGroup) || (o as THREE.Light).isLight === true || ((o as THREE.Mesh).material as THREE.Material | undefined)?.transparent === true, () => false);
+      this.sunSkip = skip;
+      this.sunBake();
     }
     // what keeps the rain off; a tunnel under open ground doesn't
     // what has a roof keeps the rain off: buildings, and dug-in rooms with their roof at the ground (a dugout's top is below 0)
@@ -470,6 +499,20 @@ export class Game {
     }
     addEventListener('resize', () => this.resize());
     this.resize();
+    // the building never moves: its matrices are worked out once, not composed again by every pass of every frame
+    L.group.updateMatrixWorld(true);
+    {
+      const hinged = new Set<THREE.Object3D>(L.doors.map((d) => d.pivot));
+      const still = (o: THREE.Object3D) => {
+        if (hinged.has(o)) return;
+        o.matrixAutoUpdate = false;
+        for (const c of o.children) still(c);
+      };
+      still(L.group);
+    }
+    // every lamp is seen by every pass, whatever layers that pass draws: a pass that counted fewer lights than the last made
+    // the renderer look every material's program up again, on every frame, for the same answer
+    this.scene.traverse((o) => { if ((o as THREE.Light).isLight) o.layers.enableAll(); });
     await this.warm();
     progress(1, 'Ready');
     this.attract = 0.001;
@@ -528,6 +571,8 @@ export class Game {
       const geo = this.stockGeo[k];
       const mesh = new THREE.Mesh(geo, this.stockMat[Math.floor(Math.random() * this.stockMat.length)]);
       this.looseGroup.add(mesh);
+      mesh.layers.enable(MOVER);
+      this.sunSkip?.add(mesh);
       geo.computeBoundingBox();
       const b = geo.boundingBox!.max;
       const p = new THREE.Vector3(x + ox * 0.12 + (Math.random() - 0.5) * 0.3 * Math.abs(oz), y + (Math.random() - 0.3) * 0.12, z + oz * 0.12 + (Math.random() - 0.5) * 0.3 * Math.abs(ox));
@@ -583,7 +628,9 @@ export class Game {
     this.cam.aspect = w / h;
     this.cam.updateProjectionMatrix();
     this.post.resize(W, H, cw, ch);
-    this.post.mFinal.uniforms.sharpK.value = k < 0.95 ? 0.8 : 0.55;
+    // a picture laid onto more pixels than it has is sharpened less, not more: the edge filter was turning every stair-step
+    // and every frame's sub-pixel wobble into grit
+    this.post.mFinal.uniforms.sharpK.value = k < 0.95 ? 0.22 : 0.38;
     this.planar.resize(W, H);
   }
 
@@ -620,6 +667,9 @@ export class Game {
     // the low level keeps everyone's mesh as it came and the sun's edges on four taps, redrawn every other frame
     Soldier.detail = this.tier >= 1 ? 1 : 0;
     LF.sunQ.value = this.tier >= 1 ? 1 : 0;
+    // laying the depth down first saves shading what ends up hidden, and costs every solid thing a second draw: short of
+    // the top level only the building itself goes down first, which is most of the saving for a twentieth of the draws
+    this.post.depthFirst = this.tier >= 3 ? 2 : 1;
     if (this.sunIn) this.sunIn.every = this.tier >= 1 ? 1 : 2;
     this.settle = 2;
     this.resize();
@@ -1675,6 +1725,23 @@ export class Game {
       const cp = this.cam.position;
       const rk = TIERS[this.tier].reach;
       for (const v of this.L.vegCells) v.mesh.visible = Math.hypot(v.x - cp.x, v.z - cp.z) < v.reach * rk;
+      if (this.sunSettle > 0 && --this.sunSettle === 0 && this.sunBake) {
+        // everything has dropped the last inch onto its shelf by now: from here it stands in the big map
+        this.sunRest = this.L.loose.map((l) => ({ obj: l.obj, at: l.obj.position.clone() }));
+        for (const q of this.sunRest) q.obj.traverse((o) => { o.layers.disable(MOVER); this.sunSkip!.delete(o); });
+        this.sunBake();
+      }
+      if (this.sunRest.length && this.sunBake) {
+        let woke = false;
+        for (let i = this.sunRest.length - 1; i >= 0; i--) {
+          const q = this.sunRest[i];
+          if (q.obj.position.distanceToSquared(q.at) < 0.0009) continue;
+          q.obj.traverse((o) => { o.layers.enable(MOVER); this.sunSkip!.add(o); });
+          this.sunRest.splice(i, 1);
+          woke = true;
+        }
+        if (woke) this.sunBake();
+      }
       this.sunIn?.update(this.cam.position, this.time);
       if (this.sun) {
         this.sun.update(this.cam.position, this.time);
@@ -1695,6 +1762,31 @@ export class Game {
     if (this.mySoldier) h.push(this.mySoldier.root);
     for (const o of this.L.indoors) h.push(o);
     return h;
+  }
+
+  /** Is any of this body where the lens could see it? Inside the wide cone of the lens, and with no wall between: five lines
+   *  to it (head, chest, feet, either shoulder), every other frame, and a body last seen under half a
+   *  second ago still counts, so nobody arrives in a doorway a frame late */
+  private sightAt = new Map<number, number>();
+  private inSight(a: Actor, s: number): boolean {
+    const c = this.cam.position;
+    const dx = a.x - c.x, dy = a.y + 1 - c.y, dz = a.z - c.z;
+    const d = Math.hypot(dx, dy, dz);
+    const last = this.sightAt.get(s) ?? -1;
+    let fresh = last < 0 || d < 5;
+    if (!fresh && (this.frameN + s) % 2 === 0) {
+      const f = this.tmpV.set(0, 0, -1).applyQuaternion(this.cam.quaternion);
+      // the lens takes in well over a right angle, and a turn of the head is quicker than the look comes round again
+      if ((dx * f.x + dy * f.y + dz * f.z) / (d || 1) > -0.25 && d < 140) {
+        const w = this.L.world, px = (-dz / (d || 1)) * 0.42, pz = (dx / (d || 1)) * 0.42;
+        fresh = w.open(c.x, c.y, c.z, a.x, a.y + 1.62, a.z) || w.open(c.x, c.y, c.z, a.x, a.y + 1.05, a.z) || w.open(c.x, c.y, c.z, a.x, a.y + 0.15, a.z)
+          || w.open(c.x, c.y, c.z, a.x + px, a.y + 1.2, a.z + pz) || w.open(c.x, c.y, c.z, a.x - px, a.y + 1.2, a.z - pz);
+      }
+    }
+    if (fresh) this.sightAt.set(s, this.time);
+    const shown = fresh || this.time - last < 0.5;
+    if (shown) a.soldier?.setFar(d > (a.soldier.isFar ? 9 : 11));
+    return shown;
   }
 
   private moveActor(a: Actor, s: number, dt: number, now: number) {
@@ -1732,6 +1824,10 @@ export class Game {
     if (!a.info.alive && a.deadAt < 0) return;
     const sol = this.body(a);
     if (a.w >= 0 && a.w < 4) sol.setWeapon(WEAPON_LIST[a.w]);
+    // a body the lens cannot see is not drawn, and while it stands it is not posed either
+    const shown = this.inSight(a, s);
+    sol.setDrawn(shown);
+    if (!shown && a.info.alive && a.deadAt < 0) return;
     sol.update(dt, a.x, a.y, a.z, a.yaw, a.pitch, a.lean, a.flags, a.speed, a.moveYaw);
     if (a.deadAt >= 0 && this.time - a.deadAt > 14) sol.root.visible = false;
     // their boots
@@ -2020,6 +2116,10 @@ export class Game {
     const cf = this.tmp.set(0.05, 0.22, 0.7).applyQuaternion(this.cam.quaternion);
     this.fill.position.copy(this.cam.position).add(cf);
     this.fill.intensity = me.alive ? 0.11 : 0;
+    [this.flashPoint, this.bounce, this.fill].forEach((l, i) => {
+      LF.softP.value[i].set(l.position.x, l.position.y, l.position.z, l.intensity > 0.002 ? l.distance : 0.01);
+      LF.softC.value[i].set(l.color.r, l.color.g, l.color.b).multiplyScalar(l.intensity);
+    });
     // a light aimed at the lens blooms across it, if nothing's between
     this.others.forEach((o, i) => {
       const g = this.glares[i];
