@@ -56,10 +56,10 @@ export interface Level {
 }
 
 export const LEVELS: Level[] = [
-  { id: 'easy', name: 'Easy', blurb: 'A gentle crowd. They wobble, wait and fall off.', skill: [0.25, 0.65], boost: 0, ease: 1, mix: { racer: 3, bruiser: 0.5, daredevil: 2, steady: 3, closer: 1 } },
-  { id: 'normal', name: 'Normal', blurb: 'A real race. You can win it, but not by falling off.', skill: [0.45, 0.88], boost: 0.05, ease: 0.75, mix: { racer: 3, bruiser: 2, daredevil: 2, steady: 2, closer: 2 } },
-  { id: 'hard', name: 'Hard', blurb: 'Sharp, fast and pushy. You will need the shortcuts.', skill: [0.72, 0.98], boost: 0.45, ease: 0.3, mix: { racer: 3, bruiser: 3, daredevil: 3, steady: 1, closer: 2 } },
-  { id: 'insane', name: 'Insane', blurb: 'Near-perfect lines, every dash spent, no mercy.', skill: [0.92, 1], boost: 1, ease: 0, mix: { racer: 2, bruiser: 4, daredevil: 3, steady: 0.5, closer: 2 } },
+  { id: 'easy', name: 'Easy', blurb: 'A gentle crowd. They wobble, wait and fall off.', skill: [0.1, 0.42], boost: 0, ease: 1, mix: { racer: 3, bruiser: 0.5, daredevil: 2, steady: 3, closer: 1 } },
+  { id: 'normal', name: 'Normal', blurb: 'A real race. You can win it, but not by falling off.', skill: [0.22, 0.62], boost: 0, ease: 0.95, mix: { racer: 3, bruiser: 2, daredevil: 2, steady: 2, closer: 2 } },
+  { id: 'hard', name: 'Hard', blurb: 'Sharp, fast and pushy. You will need the shortcuts.', skill: [0.45, 0.8], boost: 0.15, ease: 0.6, mix: { racer: 3, bruiser: 3, daredevil: 3, steady: 1, closer: 2 } },
+  { id: 'insane', name: 'Insane', blurb: 'Sharp lines and every dash spent, but they still slip up.', skill: [0.7, 0.92], boost: 0.5, ease: 0.25, mix: { racer: 2, bruiser: 4, daredevil: 3, steady: 0.5, closer: 2 } },
 ];
 
 export function level(id: string | null | undefined): Level {
@@ -69,7 +69,7 @@ export function level(id: string | null | undefined): Level {
 /** a contestant's skill and style for this difficulty (a few naturals at the top, as ever) */
 export function roll(l: Level, rnd: () => number): { skill: number; style: StyleId } {
   const [lo, hi] = l.skill;
-  const u = rnd() < 0.15 ? 0.85 + rnd() * 0.15 : rnd();
+  const u = rnd() < 0.06 ? 0.85 + rnd() * 0.15 : rnd();
   const skill = lo + (hi - lo) * u;
   const ids = Object.keys(l.mix) as StyleId[];
   let total = 0;

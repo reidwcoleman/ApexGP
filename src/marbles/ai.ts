@@ -121,7 +121,7 @@ export class Bot {
     const k = skill, st = style, b = boost;
     this.aggr = st.aggr[0] + (st.aggr[1] - st.aggr[0]) * this.rnd();
     this.bias = (this.rnd() - 0.5) * 0.8;
-    this.pace = 0.86 + 0.14 * k;
+    this.pace = 0.8 + 0.18 * k;
     this.cornerK = 0.62 + 0.38 * k + st.corner + 0.03 * b;
     this.lineUse = 0.35 + 0.65 * k;
     this.thinkDt = (0.07 + (1 - k) * 0.16) * (1 - 0.3 * b);
