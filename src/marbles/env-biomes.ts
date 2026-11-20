@@ -558,7 +558,7 @@ function build(id: BiomeId): Piece[] {
       // mirror balls hanging in the night, turning
       ring(9, (k) => {
         const R = 10 + rnd() * 18;
-        const g = new THREE.IcosahedronGeometry(R, 2).toNonIndexed();
+        const g = new THREE.IcosahedronGeometry(R, 2);
         g.computeVertexNormals();
         return { shiny: [col(g, () => pick([0xe8e8f8, 0xc8c8e0, 0xf8f0ff, 0xb8c0e0]))], y: 60 + rnd() * 90, spin: (k % 2 ? 1 : -1) * 0.2, bob: 2 };
       }, 110, 300);

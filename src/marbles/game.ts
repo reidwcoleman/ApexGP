@@ -427,11 +427,13 @@ export class MarbleGame {
     this.dropAhead();
     const c = buildRound(id);
     if (c.path) courseAI(c);
-    this.ahead = { id, c, world: biome() };
-    void this.renderer.compileAsync(c.b.group, this.camera, this.scene).catch(() => undefined);
+    // (its shaders compile in the background: it isn't thrown away until they're done)
+    const ready = this.renderer.compileAsync(c.b.group, this.camera, this.scene).then(() => undefined, () => undefined);
+    this.ahead = { id, c, world: biome(), ready };
   }
   private dropAhead() {
-    if (this.ahead) disposeGroup(this.ahead.c.b.group);
+    const a = this.ahead;
+    if (a) void a.ready.then(() => disposeGroup(a.c.b.group));
     this.ahead = null;
   }
   private syncT = 0;
@@ -455,7 +457,7 @@ export class MarbleGame {
   private bonks = 0;
   private keepSent = 0;
   private callI = -1;
-  private ahead: { id: RoundId; c: Course; world: Biome } | null = null;
+  private ahead: { id: RoundId; c: Course; world: Biome; ready: Promise<void> } | null = null;
   /** when the browser has a quiet moment */
   private idle(f: () => void) {
     const w = window as Window & { requestIdleCallback?: (f: () => void, o: { timeout: number }) => void };
@@ -551,6 +553,9 @@ export class MarbleGame {
     const id: RoundId = menu ? 'hopscotch' : SHOW[idx].id;
     const done = !menu && this.ahead?.id === id ? this.ahead : null;
     if (done) this.ahead = null;
+    // (its background compile finishes before it's drawn: drawing it switches some of its programs,
+    // and a program let go while the compile is still asking after it is a GL error)
+    if (done) await done.ready;
     const c = (this.course = done ? done.c : buildRound(id));
     if (!done && c.path) courseAI(c);
     this.scene.add(c.b.group);
@@ -564,6 +569,10 @@ export class MarbleGame {
     // (the player at a random spot on the grid; online, the host's order)
     const order = field.map((_, i) => i);
     if (!menu && !order0) order.sort(() => Math.random() - 0.5);
+    // (team games: friends playing together are on the same team. The first of them keeps the side
+    // the deal gave them, the rest are moved onto it and the bots fill what's left; every browser
+    // works it out the same from the host's order)
+    if (!menu && (c.team || c.cup)) friendsTogether(field, order, c.team ? c.team.teams : 2);
     field.forEach((x, k) => {
       const g = grid[order[k]];
       const local = menu || this.isLocal(x);
@@ -1760,6 +1769,12 @@ export class MarbleGame {
     const left = this.roster.filter((x) => !x.out).length;
     const next = () => {
       this.ui.hideResults();
+      // (a show that ran out of rounds without a final, as a test link's can: start a new one)
+      if (!SHOW[this.roundIdx + 1]) {
+        if (this.host) this.toLobby();
+        else this.newShow();
+        return;
+      }
       this.roundIdx++;
       void this.startRound();
     };
@@ -2391,6 +2406,22 @@ export class MarbleGame {
     // (the free arenas: a few metres out in front of you, at your feet's height)
     const look = free ? tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 3.2, 0.5, Math.cos(yaw) * 3.2)) : tgt.clone().add(new THREE.Vector3(Math.sin(yaw) * 2.2, 1.05, Math.cos(yaw) * 2.2));
     if (c.plate && !free && !c.cup) look.lerp(c.plate.center, 0.25);
+    // (the ball games: the view leans toward the ball, out along the pitch and up into the air, so
+    // a ball far off or high up stays in the picture instead of slipping off the top of it)
+    if (c.cup && this.cupP) {
+      const ball = this.cupP.ballNear(m.pos);
+      if (ball) {
+        const d = Math.hypot(ball.pos.x - m.pos.x, ball.pos.z - m.pos.z);
+        look.lerp(ball.pos, THREE.MathUtils.clamp((d - 3) / 24, 0, 1) * 0.45);
+        const up = ball.pos.y - c.cup.center.y - c.cup.cfg.R;
+        if (up > 0.5) look.y += up * THREE.MathUtils.clamp(1 - d / 34, 0.25, 1) * 0.6;
+      }
+      // (but you never leave it: with the camera pinned against the glass right over you, or the
+      // view up after a high ball, the aim comes back down until you're inside the frame again)
+      const toP = this.camTmp.subVectors(tgt, pos), toL = look.clone().sub(pos);
+      const lim = THREE.MathUtils.degToRad(this.camera.fov / 2) * 0.62, a = toP.angleTo(toL);
+      if (a > lim) look.lerp(tgt, 1 - lim / a);
+    }
     if (this.snapCam) {
       this.camPos.copy(pos);
       this.camLook.copy(look);
@@ -2734,3 +2765,28 @@ function disposeGroup(g: THREE.Object3D) {
   // course would only compile the same program again)
   for (const m of mats) for (const v of Object.values(m)) if (v instanceof THREE.Texture) v.dispose();
 }
+
+/**
+ * Re-deals the grid slots of a team round so the people (everyone not a bot) share a team, as far as
+ * the team sizes allow. A slot's team is its index mod the team count; the sizes stay as they were.
+ */
+export function friendsTogether(field: { human: boolean }[], order: number[], teams: number) {
+  const people = field.map((_, k) => k).filter((k) => field[k].human);
+  if (people.length < 2) return;
+  const free = Array.from({ length: teams }, (_, t) => order.filter((s) => s % teams === t));
+  const next = new Array<number>(order.length);
+  const taken = new Set<number>();
+  let t = order[people[0]] % teams;
+  for (const k of people) {
+    while (!free[t].length) t = (t + 1) % teams;
+    const s = free[t].shift()!;
+    next[k] = s;
+    taken.add(s);
+  }
+  const rest = order.filter((s) => !taken.has(s));
+  field.forEach((x, k) => {
+    if (!x.human) next[k] = rest.shift()!;
+  });
+  for (let k = 0; k < order.length; k++) order[k] = next[k];
+}
+

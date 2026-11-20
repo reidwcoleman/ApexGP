@@ -564,7 +564,7 @@ export class CourseBuilder {
       }
     }
     if (parts.length) {
-      const g = mergeGeometries(parts.map((p) => p.toNonIndexed()), false);
+      const g = mergeGeometries(parts.map((p) => (p.index ? p.toNonIndexed() : p)), false);
       if (g) this.batch.add(this.postWood, g);
     }
   }

@@ -55,7 +55,7 @@
 .mm-actions { margin-top: 20px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .mm-help { margin-top: 20px; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 15px; font-weight: 600; color: rgba(255, 248, 236, 0.92); text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6); }
 .mm-help b { font-family: var(--mm-display); font-weight: 400; color: var(--mm-yellow); letter-spacing: 0.03em; }
-.mm-back { position: absolute; top: 18px; left: 20px; pointer-events: auto; color: var(--mm-cream); text-decoration: none; font-weight: 700; font-size: 15px; background: rgba(36, 20, 44, 0.45); padding: 8px 14px; border-radius: 12px; }
+.mm-back { position: absolute; top: 18px; left: 20px; z-index: 5; pointer-events: auto; color: var(--mm-cream); text-decoration: none; font-weight: 700; font-size: 15px; background: rgba(36, 20, 44, 0.45); padding: 8px 14px; border-radius: 12px; }
 .mm-back:hover { background: rgba(36, 20, 44, 0.7); }
 .mm-show { margin-top: 18px; display: flex; gap: 8px; flex-wrap: wrap; }
 .mm-show i { font-style: normal; font-size: 13px; font-weight: 700; padding: 5px 11px; border-radius: 10px; background: rgba(255, 255, 255, 0.16); backdrop-filter: blur(4px); }
@@ -191,6 +191,13 @@
 @media (max-height: 800px) {
   .mm-menu .mm-title { font-size: clamp(56px, 7vw, 88px); }
   .mm-help { font-size: 14px; gap: 4px 14px; }
+}
+
+/* the round list is long: under 800 px tall its chips go small, and the menu starts below the back link */
+@media (max-height: 800px) {
+  .mm-menu { padding-top: 58px; padding-bottom: 12px; }
+  .mm-show { gap: 5px; }
+  .mm-show i { font-size: 11.5px; padding: 3px 8px; border-radius: 8px; }
 }
 
 /* the menu has more rows now (name, party): keep it inside short windows */

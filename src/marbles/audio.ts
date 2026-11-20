@@ -915,6 +915,8 @@ function marimba(ctx: AudioContext, out: AudioNode, t: number, midi: number, vel
     [10, 0.18, 0.04],
   ];
   for (const [m, a, d] of parts) {
+    // (a partial past what anyone can hear is left out: the top notes' 10th would be 26 kHz)
+    if (f * m > 20000) continue;
     const o = ctx.createOscillator();
     o.frequency.value = f * m;
     const gg = ctx.createGain();
@@ -935,6 +937,7 @@ function glockenspiel(ctx: AudioContext, out: AudioNode, t: number, midi: number
     [2.76, 0.4, 0.5],
     [5.4, 0.2, 0.2],
   ] as [number, number, number][]) {
+    if (f * m > 20000) continue;
     const o = ctx.createOscillator();
     o.frequency.value = f * m;
     const g = ctx.createGain();
