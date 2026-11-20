@@ -360,7 +360,7 @@ def build():
     # the way in: matting, the tag gates, baskets
     box((27.6, 0.3, 0.0), (32.4, 2.2, 0.008), 'plastic_black', collide=False, density=0.2)
     for gx in (28.5, 30.0, 31.5):
-        box((gx - 0.03, 2.4, 0.0), (gx + 0.03, 2.9, 1.5), 'trim', pen=True, tag='post', density=0.3)
+        K('taggate', gx, 2.65, 0.0, solid=(0.04, 0.25, 1.5))
         box((gx - 0.06, 2.36, 0.0), (gx + 0.06, 2.94, 0.06), 'plastic_black', collide=False, density=0.2)
     K('baskets_1', 26.6, 0.9, 0.0, r=0.2)
     K('baskets_2', 33.4, 1.0, 0.0, r=2.0)

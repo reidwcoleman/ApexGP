@@ -1177,3 +1177,54 @@ def radiator(b, rng):
 
 KINDS.update(radiator=radiator)
 FINISH.update(radiator=0.0)
+
+
+def coffin(b, rng):
+    """a chest freezer island, 2.4 x 1: a moulded tub with rounded corners, its liner, a bumper round the foot, a rail round
+    the rim, glass lids sliding on it (one off and on the floor), a black soup in the bottom and what was in it"""
+    L, D, H = 2.4, 1.0, 0.88
+    W = WK.WHITEP()
+    c = (0, 0)
+    a, e = L / 2, D / 2
+    rings = [oval(c, a - 0.03, e - 0.03, 0.12, 28, 9), oval(c, a, e, 0.16, 28, 9), oval(c, a, e, H - 0.03, 28, 9), oval(c, a - 0.008, e - 0.008, H, 28, 9),
+             oval(c, a - 0.06, e - 0.06, H, 28, 9), oval(c, a - 0.07, e - 0.07, H - 0.02, 28, 9), oval(c, a - 0.09, e - 0.09, 0.31, 28, 9)]
+    loft(b, rings, W)
+    loft(b, [oval(c, a - 0.09, e - 0.09, 0.31, 28, 9)], WK.ROT(), cap1=True)
+    panel(b, (0, 0, 0.065), (L - 0.08, D - 0.08, 0.13), WK.SHELFD(), 0.01, seg=1)
+    # the bumper and the rim rail
+    loft(b, [oval(c, a + 0.012, e + 0.012, z, 28, 9) for z in (0.2, 0.215, 0.255, 0.27)][::1], WK.RUBBER())
+    pipe(b, [(p[0], p[1], H + 0.012) for p in oval(c, a - 0.03, e - 0.03, 0, 12, 9)], 0.009, WK.CHROME(), 5, bend=0, closed=True)
+    pipe(b, [(-L / 2 + 0.04, 0, H + 0.012), (L / 2 - 0.04, 0, H + 0.012)], 0.008, WK.CHROME(), 5, caps=False)
+    for k in range(rng.randint(3, 9)):
+        w = rng.uniform(0.12, 0.26)
+        WK.obox(b, (rng.uniform(-1.0, 1.0), rng.uniform(-0.35, 0.35), 0.31 + w * 0.2), (w, w * 1.4, w * 0.4), rng.uniform(0, 3), rng.choice((WK.ROT2, WK.MOULD, WK.CARDB, WK.LABEL_W))(), tilt=(rng.uniform(-0.2, 0.2), 0))
+    for k in range(3):
+        x = -L / 2 + 0.42 + k * 0.78
+        if rng.random() < 0.3:
+            panel(b, (x + rng.uniform(-0.3, 0.3), -D / 2 - 0.35, 0.02), (0.76, 0.5, 0.012), WK.GLASSD(), 0.004, yaw=rng.uniform(-0.6, 0.6), seg=1)
+            continue
+        xx = x + rng.uniform(-0.2, 0.2)
+        panel(b, (xx, 0, H + 0.022), (0.76, D - 0.09, 0.008), WK.GLASSD(), 0.003, seg=1)
+        for sy in (-1, 1):
+            panel(b, (xx, sy * (D / 2 - 0.05), H + 0.024), (0.76, 0.02, 0.014), WK.CHROME(), 0.003, seg=1)
+        panel(b, (xx + 0.3, 0, H + 0.03), (0.03, 0.2, 0.012), WK.SHELFD(), 0.004, seg=1)
+    panel(b, (0, -D / 2 - 0.004, H - 0.12), (L - 0.3, 0.006, 0.09), WK.LABEL_B(), 0.0, seg=1)
+    # the grille at one end where the works are
+    for k in range(6):
+        panel(b, (L / 2 + 0.002, 0, 0.3 + k * 0.035), (0.006, D * 0.5, 0.014), WK.RUBBER(), 0.0, seg=1)
+
+
+def taggate(b, rng):
+    """a security pedestal at the shop door: a loop of tube inside a loop of tube on a plastic foot, the alarm box at the top.
+    It stands across x (thin), half a metre along y"""
+    G = WK.GREYP()
+    panel(b, (0, 0, 0.03), (0.1, 0.56, 0.06), WK.BLACKM(), 0.012, seg=2)
+    pipe(b, [(0, -0.23, 0.05), (0, -0.23, 1.5), (0, 0.23, 1.5), (0, 0.23, 0.05)], 0.02, G, 8, bend=0.12, seg=5)
+    pipe(b, [(0, -0.13, 0.05), (0, -0.13, 1.3), (0, 0.13, 1.3), (0, 0.13, 0.05)], 0.011, G, 6, bend=0.08, seg=4)
+    panel(b, (0, 0, 1.42), (0.05, 0.2, 0.07), G, 0.012, seg=2)
+    turned(b, (0.026, 0, 1.42), [(0, 0.01), (0.004, 0.008)], WK.REDP(), 8, axis=(1, 0, 0))
+
+
+KINDS.update(coffin=coffin, taggate=taggate)
+FINISH.update(coffin=0.0, taggate=0.0)
+VARIANTS.update(coffin=4, freezer=6, endcap=12)

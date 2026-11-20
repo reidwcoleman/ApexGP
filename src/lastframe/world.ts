@@ -910,7 +910,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
         const small = Math.min(ext[0], ext[1], ext[2]) < 0.06 || Math.max(ext[0], ext[1], ext[2]) < 0.3;
         const fine = /^lf(chrome|steel|cable|wire|blackm|basket)$/.test(m0.name);
         const std = mat as THREE.MeshStandardMaterial;
-        if (!tiled && !u0.float && list.length < 5 && std.isMeshStandardMaterial && !std.transparent && (std.vertexColors || list.every((u) => u.tint[0] === 1 && u.tint[1] === 1 && u.tint[2] === 1))) {
+        if (!tiled && !u0.float && list.length < 5 && std.isMeshStandardMaterial && (!std.transparent || m0.name === 'lfglassd') && (std.vertexColors || list.every((u) => u.tint[0] === 1 && u.tint[1] === 1 && u.tint[2] === 1))) {
           for (const u of list) {
             const wk = `${mat.uuid}@${Math.floor(u.pos[0] / WELD_CELL)},${Math.floor(u.pos[2] / WELD_CELL)}${small ? 's' : ''}`;
             let w = welds.get(wk);
