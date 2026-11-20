@@ -97,8 +97,13 @@ export class Nav {
   nearest(x: number, y: number, z: number): Node | null {
     let best: Node | null = null, bd = 1e9;
     const cx = Math.floor(x / 4), cz = Math.floor(z / 4);
-    for (let r = 0; r < 4 && !best; r++) {
+    // the ring a point is found in, and the one round it: the nearest point is often just over the line in the next
+    // cell, and the nearest in this one may be the far side of a wall
+    let stop = 4;
+    for (let r = 0; r < stop; r++) {
+      if (best && stop === 4) stop = r + 1;
       for (let i = cx - r; i <= cx + r; i++) for (let j = cz - r; j <= cz + r; j++) {
+        if (r > 0 && Math.max(Math.abs(i - cx), Math.abs(j - cz)) < r) continue;
         const c = this.byCell.get(i * 4096 + j);
         if (!c) continue;
         for (const k of c) {
@@ -114,7 +119,8 @@ export class Nav {
     return best;
   }
 
-  path(from: Node, to: Node, noise = 0): Node[] {
+  /** extra(a, b): metres more that the step from node a to node b costs (a barricade across it, say) */
+  path(from: Node, to: Node, noise = 0, extra?: (a: number, b: number) => number): Node[] {
     if (from === to) return [to];
     const N = this.nodes.length;
     const g = new Float32Array(N).fill(1e9), came = new Int32Array(N).fill(-1);
@@ -130,7 +136,7 @@ export class Nav {
       for (const k of n.next) {
         const m = this.nodes[k];
         const step = Math.hypot(m.x - n.x, m.z - n.z) * (1 + noise * ((k * 2654435761) % 97) / 97) + (m.cover ? 0 : 0.12);
-        const c = g[cur] + step;
+        const c = g[cur] + step + (extra ? extra(cur, k) : 0);
         if (c < g[k]) {
           g[k] = c;
           came[k] = cur;

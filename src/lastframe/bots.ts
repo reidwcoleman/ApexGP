@@ -1,15 +1,29 @@
 import type { Match } from './match.ts';
-import { F, WEAPONS, WEAPON_LIST, type NadeKind, type WeaponId } from './shared.ts';
+import { BUILD_T, CHARGE_T, F, WEAPONS, WEAPON_LIST, type NadeKind, type WeaponId } from './shared.ts';
 import { move, type Mover } from './collide.ts';
 import type { Node } from './nav.ts';
 import { angleDiff } from './soldier.ts';
+import { barPassable } from './fort.ts';
+import type { Order } from './tactics.ts';
 
 interface Vec { x: number; y: number; z: number }
 
 const NAMES = ['Mercer', 'Dolan', 'Rook', 'Vega', 'Haas', 'Okafor', 'Reyes', 'Sato', 'Novak', 'Bishop', 'Kane', 'Ortiz', 'Lund', 'Grady', 'Tran', 'Pike'];
 export const botName = (i: number) => NAMES[i % NAMES.length];
 
-/** One computer player. Thinks ten times a second, walks and aims every frame, sees what a person would. */
+/**
+ * One computer player. It sees what a person would, ten times a second; walks and aims every frame.
+ *
+ * Three layers, the upper ones giving way to the lower:
+ *   orders    what its side's commander has it doing (tactics.ts): hold a corner, board a doorway, breach, go in, roam
+ *   habits    with no orders: stay with its partner, go where the side last saw someone, or where the shooting was,
+ *             or to a part of the building nobody on the side is covering; stop and hold an angle when it hears something
+ *   the fight someone in its sights: shoot in bursts, sidestep or lean out of cover, get out of the line when hit or
+ *             empty, throw something round the corner they went behind, and either wait for them there or go after
+ *             them by another way, as its nerve has it
+ * What it knows about the other side it shares: a sighting goes into its side's picture (Match.intel), and that is what
+ * the others walk toward. Nobody knows where anyone is who hasn't been seen or heard.
+ */
 export class Bot {
   /** the map is dark: lights stay on */
   static night = false;
@@ -25,11 +39,15 @@ export class Bot {
   reload = 0;
   cool = 0;
   burst = 0;
+  target = -1;
+  /** temperament: near 0 it sits and waits for you to come round the corner, near 1 it comes for you, and by another way */
+  readonly nerve = Math.random();
+
   private path: Node[] = [];
   private pi = 0;
   private think = Math.random() * 0.1;
   private goalAt = 0;
-  target = -1;
+  private goalNode: Node | null = null;
   private seenAt = -9;
   private seenPos: Vec = { x: 0, y: 0, z: 0 };
   private react = 0;
@@ -40,6 +58,10 @@ export class Bot {
   private strafe = 0;
   private strafeT = 0;
   private stuck = 0;
+  private jams = 0;
+  private jamX = 0;
+  private jamZ = 0;
+  private detourT = 0;
   private lastX = 0;
   private lastZ = 0;
   private heardAt = -9;
@@ -48,7 +70,6 @@ export class Bot {
   private coverT = 0;
   private likesLight = Math.random() < 0.55;
   private t = 0;
-  private pending = false;
   /** rounds still to put through the corner someone just went behind */
   private supp = 0;
   /** caught on a corner: a step to one side, then the other, before trying the way again */
@@ -58,20 +79,33 @@ export class Bot {
   private lamp: Vec | null = null;
   private lampShots = 0;
   private lampAt = 4 + Math.random() * 20;
-  /** temperament: near 0 it sits and waits for you to come round the corner, near 1 it comes for you, and by another way */
-  readonly nerve = Math.random();
   /** a flash went off in its face: until then it sees nothing */
   private blindT = 0;
   private nades: Record<NadeKind, number> = { frag: 1, flash: 1 };
   private nadeAt = 6 + Math.random() * 10;
-  /** the person on its side it stays with (-1: nobody, it hunts on its own) */
+  /** who it stays with (-1: nobody) */
   private buddy = -1;
   private hurry = false;
-  /** with nothing to do beside its person: which way it watches, and until when */
+  /** moving up on a room that is waiting for it: slowly, sights first */
+  private careful = false;
+  /** standing somewhere: which way it watches, and until when it keeps to that */
   private watch = 0;
   private watchT = 0;
   private greeted = false;
   private lightAt = 0;
+  /** at a doorway: nailing boards up, setting a charge, putting the boot in */
+  private workT = 0;
+  private kickT = 0;
+  /** walking backwards off something about to go off, until then */
+  private backT = 0;
+  private backX = 0;
+  private backZ = 0;
+  /** leaning out of cover: which way, and when to change */
+  private leanTo = 0;
+  private leanT = 0;
+  /** heard something and stopped to cover it, until then */
+  private holdT = 0;
+  private lastOrder: Order | null = null;
 
   constructor(private match: Match, readonly slot: number, readonly skill: number) {}
 
@@ -93,13 +127,27 @@ export class Bot {
     this.path = [];
     this.pi = 0;
     this.crouch = false;
+    this.lean = 0;
     this.goalAt = 0;
+    this.goalNode = null;
     this.seenAt = -9;
+    this.heardAt = -9;
     this.coverT = 0;
     this.blindT = 0;
-    this.nades = { frag: 1, flash: 1 };
+    this.backT = 0;
+    this.holdT = 0;
+    this.workT = 0;
+    this.kickT = 0;
+    this.lastOrder = null;
+    // the side breaking in carries more to throw through a doorway
+    this.nades = { frag: 1, flash: this.match.cfg.mode === 'siege' && !this.match.isDefender(this.slot) ? 2 : 1 };
     this.hurry = false;
     this.buddy = this.match.buddyFor(this.slot);
+  }
+
+  /** how much a long burst has opened its aim up, degrees */
+  sprayErr() {
+    return Math.min(1.5, this.burst * 0.17) * (1 - this.skill * 0.45);
   }
 
   /** a flash, k from 0 (far off, or behind it) to 1 (in its face) */
@@ -118,7 +166,9 @@ export class Bot {
     if (d > loud || this.target >= 0) return;
     this.heard = { x: p.x, y: p.y, z: p.z };
     this.heardAt = this.t;
-    this.goalAt = 0;
+    // with a job to do it looks that way and gets on with it; with none it goes to see
+    const o = this.order();
+    if (!o || o.kind === 'hunt') this.goalAt = 0;
   }
 
   hurt(from: Vec) {
@@ -141,6 +191,27 @@ export class Bot {
     }
   }
 
+  /** something thrown at a spot, if it carries one and has the line. For the commander: a flash through a doorway */
+  throwAt(kind: NadeKind, at: Vec) {
+    if (this.nades[kind] <= 0 || this.t < this.blindT || this.reload > 0) return false;
+    if (!this.match.botNade(this, kind, at)) return false;
+    this.nades[kind]--;
+    this.nadeAt = this.t + 8;
+    return true;
+  }
+
+  /** one off the belt, if there is one and it can see to throw */
+  spend(kind: NadeKind) {
+    if (this.nades[kind] <= 0 || this.t < this.blindT) return false;
+    this.nades[kind]--;
+    this.nadeAt = this.t + 8;
+    return true;
+  }
+
+  private order(): Order | null {
+    return this.match.tactics.orderFor(this.slot);
+  }
+
   update(dt: number, live: boolean) {
     this.t += dt;
     const M = this.match, m = this.m;
@@ -154,13 +225,18 @@ export class Bot {
     if (this.think <= 0 && live) {
       this.think = 0.1;
       this.sense();
-      this.plan();
+      this.decide();
     }
     // ---- walking
     let wx = 0, wz = 0, speed = 0;
     if (live) {
       const engaged = this.target >= 0 && this.t - this.seenAt < 0.4;
-      if (this.lamp && !engaged) {
+      if (this.t < this.backT) {
+        // off the charge, backwards, quickly
+        wx = this.backX;
+        wz = this.backZ;
+        speed = 3.6;
+      } else if (this.lamp && !engaged) {
         // stood still to take the shot
       } else if (this.path.length && this.pi < this.path.length && (!engaged || this.t < this.coverT || this.weapon === 'shotgun')) {
         const n = this.path[this.pi];
@@ -169,8 +245,7 @@ export class Bot {
           this.pi++;
           // there: think again now, not when the clock says
           if (this.pi >= this.path.length) this.goalAt = 0;
-        }
-        else {
+        } else {
           wx = dx / (d || 1);
           wz = dz / (d || 1);
           if (this.t < this.nudgeT) {
@@ -178,18 +253,27 @@ export class Bot {
             wx = -wz * this.nudgeS * 0.9 - ox * 0.3;
             wz = ox * this.nudgeS * 0.9 - wz * 0.3;
           }
-          const indoors = n.indoors;
-          speed = engaged ? 2.4 : this.t < this.coverT || this.hurry ? 5 : indoors ? 2.5 + this.skill * 0.6 : 4.2;
+          speed = engaged ? 2.4 : this.t < this.coverT || this.hurry ? 5 : this.careful ? 2.05 : n.indoors ? 2.5 + this.skill * 0.6 : 4.2;
           M.openDoorsNear(m.x, m.y, m.z, wx, wz);
+          // boards across the way: stop at them and deal with them
+          const prev = this.path[this.pi - 1];
+          const bar = prev ? M.barOnStep(prev.i, n.i) : -1;
+          const bo = bar >= 0 ? M.openings[bar] : null;
+          if (bo && Math.abs(bo.alongX ? bo.z - m.z : bo.x - m.x) < 1.2) {
+            speed = 0;
+            this.atBar(bar, dt, wx, wz);
+          } else this.kickT = Math.max(0, this.kickT - dt);
         }
       } else if (engaged) {
-        // sidestep while shooting
+        // sidestep while shooting; from a spot it has been given it leans out instead and keeps its feet where they are
         this.strafeT -= dt;
         if (this.strafeT <= 0) {
           this.strafe = Math.random() < 0.3 ? 0 : Math.random() < 0.5 ? -1 : 1;
           this.strafeT = 0.5 + Math.random() * 1.1;
         }
-        const s = this.strafe;
+        const ord = this.order();
+        const rooted = ord?.kind === 'hold' || ord?.kind === 'build';
+        const s = rooted ? this.strafe * 0.35 : this.strafe;
         wx = Math.cos(this.yaw) * s;
         wz = -Math.sin(this.yaw) * s;
         speed = this.crouch ? 0.9 : 2;
@@ -202,6 +286,27 @@ export class Bot {
     move(M.world, m, dt);
     // ---- turning
     if (live) this.aimAndFire(dt, wx, wz, speed);
+    else this.lean += (0 - this.lean) * Math.min(1, dt * 6);
+  }
+
+  /** stopped at a barricade that is in the way */
+  private atBar(bar: number, dt: number, wx: number, wz: number) {
+    const M = this.match;
+    if (M.chargeOn(bar)) {
+      // somebody's charge is on it: not the place to stand
+      this.backT = this.t + 1.3;
+      this.backX = -wx;
+      this.backZ = -wz;
+      return;
+    }
+    const ord = this.order();
+    if (ord?.kind === 'breach' && ord.bar === bar) return;
+    this.kickT += dt;
+    // its own side's boards it leaves alone as long as it can
+    if (this.kickT > (M.isDefender(this.slot) ? 2.4 : 0.85)) {
+      this.kickT = -0.3;
+      M.barKick(this.slot, bar);
+    }
   }
 
   private sense() {
@@ -209,8 +314,10 @@ export class Bot {
     const spec0 = WEAPONS[this.weapon];
     let best = -1, bd = 1e9;
     const eye = { x: m.x, y: m.y + (this.crouch ? 1.05 : 1.6), z: m.z };
+    const team = Math.min(2, M.teamOf(this.slot));
     for (const p of M.players) {
-      if (this.t < this.blindT) break;
+      // nobody is fought before the round is on
+      if (this.t < this.blindT || M.phase === 'prep') break;
       if (p.slot === this.slot || !p.alive || !M.foes(this.slot, p.slot)) continue;
       const b = M.bodies[p.slot];
       const dx = b.x - m.x, dz = b.z - m.z, d = Math.hypot(dx, dz);
@@ -235,6 +342,8 @@ export class Bot {
           if (d > reach) continue;
         }
       } else if (!lit && d > 26 && Math.random() < 0.5) continue;
+      // seen: the whole side knows where that one is now
+      M.intel[team].set(p.slot, { x: b.x, y: b.y, z: b.z, t: M.elapsed });
       if (d < bd) {
         bd = d;
         best = p.slot;
@@ -247,14 +356,18 @@ export class Bot {
           const b = M.bodies[best];
           M.callout(this.slot, { x: b.x, y: b.y, z: b.z });
           const up = b.y - m.y;
-          M.say(this.slot, bd < 7 ? pick(['Contact, close!', 'Right here!', "He's on top of me!"]) : up > 2 ? pick(['Contact, above us!', 'Movement upstairs.']) : up < -2 ? pick(['Contact, below!', "They're under us."])
+          const room = M.cfg.mode === 'siege' && M.inObj(b.x, b.y, b.z);
+          M.say(this.slot, room ? pick(['Contact in the room!', "They're on the objective!"]) : bd < 7 ? pick(['Contact, close!', 'Right here!', "He's on top of me!"]) : up > 2 ? pick(['Contact, above us!', 'Movement upstairs.']) : up < -2 ? pick(['Contact, below!', "They're under us."])
             : (b.flags & F.light) ? pick(['I see a light.', 'Torch, straight ahead.']) : pick(['Contact!', 'Got eyes on one.', 'Movement, ahead.', 'Contact front!']), 0.8);
         }
-        this.react = 0.68 - this.skill * 0.5 + Math.random() * 0.22 + (bd > 25 ? 0.15 : 0);
+        this.react = 0.66 - this.skill * 0.5 + Math.random() * 0.22 + (bd > 25 ? 0.15 : 0);
+        // already watching that way with the sights up: the shot comes sooner
+        const ord = this.order();
+        if (ord?.kind === 'hold' && M.inObj(m.x, m.y, m.z) && Math.abs(angleDiff(Math.atan2(-(M.bodies[best].x - m.x), -(M.bodies[best].z - m.z)), this.yaw)) < 0.35) this.react *= 0.6;
         this.err = (5.5 - this.skill * 4.2) * (0.7 + Math.random() * 0.6);
         this.errYaw = (Math.random() - 0.5) * 2;
         this.errPitch = (Math.random() - 0.5) * 2;
-        this.headShot = Math.random() < 0.08 + this.skill * 0.3;
+        this.headShot = Math.random() < 0.05 + this.skill * 0.2;
         this.burst = 0;
         // some of them will shoot the wall you went behind, the way people do
         this.supp = spec0.auto && Math.random() < 0.3 + this.skill * 0.35 ? 3 + Math.floor(Math.random() * 5) : this.weapon === 'pistol' && Math.random() < 0.3 ? 2 : 0;
@@ -263,25 +376,61 @@ export class Bot {
       this.seenAt = this.t;
       const b = M.bodies[best];
       this.seenPos = { x: b.x, y: b.y, z: b.z };
-      this.crouch = bd > 7 && this.weapon !== 'shotgun' ? (this.crouch || Math.random() < 0.05) : false;
+      this.crouch = bd > 7 && this.weapon !== 'shotgun' ? (this.crouch || Math.random() < 0.05) : this.order()?.kind === 'hold' ? this.crouch : false;
     } else if (this.target >= 0 && this.t - this.seenAt > 3.5) {
       this.target = -1;
       this.goalAt = 0;
-      this.crouch = false;
+      if (this.order()?.kind !== 'hold') this.crouch = false;
     }
   }
 
-  private plan() {
+  /** walk to a node, by a way that costs what the boards across it cost this side */
+  private walkTo(goal: Node | null, wander = 0.4, soon = 0) {
+    const M = this.match, m = this.m;
+    const node = M.nav.nearest(m.x, m.y, m.z);
+    if (!node || !goal) return false;
+    // already on its way there: it keeps the way it chose. Planning again from every few steps on lets two ways of
+    // nearly the same length take turns at being the shorter, and the walker turns round on the stairs for ever
+    if (goal === this.goalNode && this.path.length && this.pi < this.path.length) {
+      this.goalAt = Math.max(this.goalAt, this.t + 0.5);
+      return true;
+    }
+    this.path = M.nav.path(node, goal, this.t < this.detourT ? 3.5 : wander, M.stepCost(this.slot));
+    this.pi = 1;
+    this.goalNode = goal;
+    // nowhere to walk (it is there already, or there is no way): think again at once, not in five seconds
+    this.goalAt = this.t + (this.path.length < 2 ? 0.4 : soon || 3 + Math.random() * 5);
+    return this.path.length > 0;
+  }
+
+  private stand(until = 0.5) {
+    this.path = [];
+    this.goalNode = null;
+    this.goalAt = this.t + until;
+  }
+
+  private decide() {
     const M = this.match, m = this.m;
     // stuck on something
     const moved = Math.hypot(m.x - this.lastX, m.z - this.lastZ);
     this.lastX = m.x;
     this.lastZ = m.z;
-    if (this.path.length && this.pi < this.path.length && moved < 0.02) {
+    if (this.path.length && this.pi < this.path.length && moved < 0.02 && (this.pi < 1 || M.barOnStep(this.path[this.pi - 1].i, this.path[this.pi].i) < 0)) {
       this.stuck++;
       if (this.stuck > 8) {
         this.stuck = 0;
         this.goalAt = 0;
+        this.goalNode = null;
+        // caught in the same place again and again: another way round, whatever it costs
+        if (Math.hypot(m.x - this.jamX, m.z - this.jamZ) > 1.5) {
+          this.jamX = m.x;
+          this.jamZ = m.z;
+          this.jams = 0;
+        }
+        if (++this.jams >= 3) {
+          this.jams = 0;
+          this.detourT = this.t + 8;
+        }
         this.nudgeT = this.t + 0.45;
         this.nudgeS = -this.nudgeS;
         M.openDoorsNear(m.x, m.y, m.z, 0, 0);
@@ -299,13 +448,16 @@ export class Bot {
     const node = M.nav.nearest(m.x, m.y, m.z);
     // in the dark map everyone needs one; in a fight half of them still keep it on
     // a torch stays as it is for a good while: one going on and off in a fight is a strobe in everyone's lens
-    const wantLight = Bot.night ? this.likesLight || this.target < 0 : this.likesLight && !!node?.indoors && this.target < 0;
+    const ord = this.order();
+    // someone holding a corner in the dark keeps its light off: the light is what gives the corner away
+    const hides = ord?.kind === 'hold' && M.cfg.mode === 'siege';
+    const wantLight = hides ? false : Bot.night ? this.likesLight || this.target < 0 : this.likesLight && !!node?.indoors && this.target < 0;
     if (wantLight !== this.light && this.t > this.lightAt) {
       this.light = wantLight;
       this.lightAt = this.t + 9 + Math.random() * 6;
     }
     // standing in a pool of light with nobody in sight: some of them shoot the lamp out, as people do
-    if (Bot.night && this.target < 0 && !this.lamp && this.t > this.lampAt && this.ammo > 8) {
+    if (Bot.night && this.target < 0 && !this.lamp && this.t > this.lampAt && this.ammo > 8 && (!ord || ord.kind === 'hunt' || ord.kind === 'hold')) {
       this.lampAt = this.t + 14 + Math.random() * 30;
       if (Math.random() < 0.3 + this.skill * 0.3) {
         const eye = { x: m.x, y: m.y + 1.5, z: m.z };
@@ -320,53 +472,213 @@ export class Bot {
         }
       }
     }
-    if (this.t < this.goalAt || this.pending) return;
     if (!node) return;
-    let goal: Node | null = null;
+    if (ord !== this.lastOrder) {
+      // new orders: drop whatever it was doing
+      this.lastOrder = ord;
+      this.goalAt = 0;
+      this.goalNode = null;
+      this.workT = 0;
+      this.holdT = 0;
+    }
+    this.hurry = false;
+    this.careful = ord?.kind === 'go' && !ord.fast && M.cfg.mode === 'siege';
+    // ---- the fight comes first
+    if (this.fight(node, ord)) return;
+    // ---- then what it has been told
+    if (ord && ord.kind !== 'hunt') {
+      this.follow(ord);
+      return;
+    }
+    // ---- then its own habits
+    if (this.t < this.goalAt) return;
+    this.roam(node);
+  }
+
+  /** someone seen, or just lost, or rounds coming in: what to do about it. True if that settles what it does now */
+  private fight(node: Node, ord: Order | null): boolean {
+    const M = this.match, m = this.m;
     if (this.t < this.coverT) {
+      if (this.t < this.goalAt && this.path.length) return true;
       // break line of sight: a nearby node the threat can't see
       const threat = this.target >= 0 ? M.bodies[this.target] : this.heard;
       for (let k = 0; k < 14; k++) {
         const n = M.nav.nodes[node.i + Math.floor((Math.random() - 0.5) * 240)] ?? null;
         if (!n || Math.hypot(n.x - m.x, n.z - m.z) > 11) continue;
+        // someone holding a room stays in it
+        if (ord && ord.kind !== 'hunt' && ord.kind !== 'go' && M.cfg.mode === 'siege' && M.inObj(m.x, m.y, m.z) && !M.inObj(n.x, n.y, n.z)) continue;
         if (!M.world.sees({ x: n.x, y: n.y + 1.2, z: n.z }, { x: threat.x, y: threat.y + 1.3, z: threat.z })) {
-          goal = n;
-          break;
+          this.hurry = true;
+          this.walkTo(n, 0.4, 1.2);
+          return true;
         }
       }
     }
-    const lost = this.target >= 0 ? this.t - this.seenAt : 0;
-    let wander = 0.4, soon = 0;
-    this.hurry = false;
+    if (this.target < 0) return false;
+    const lost = this.t - this.seenAt;
     // they went round a corner: something through after them first, from the ones who carry it
-    if (this.target >= 0 && lost > 1 && lost < 4 && this.t > this.nadeAt && this.reload <= 0 && this.t >= this.blindT) {
+    if (lost > 1 && lost < 4 && this.t > this.nadeAt && this.reload <= 0 && this.t >= this.blindT) {
       this.nadeAt = this.t + 9 + Math.random() * 14;
       const d = Math.hypot(this.seenPos.x - m.x, this.seenPos.z - m.z);
       const kind: NadeKind = this.nades.flash > 0 && (Math.random() < 0.55 || this.nades.frag <= 0) ? 'flash' : 'frag';
       if (d > 6 && d < 20 && this.nades[kind] > 0 && Math.random() < 0.2 + this.skill * 0.45 && M.botNade(this, kind, this.seenPos)) this.nades[kind]--;
     }
-    if (!goal && this.target >= 0 && lost > 0.5) {
-      if (this.nerve > 0.45 || lost > 2.6 || this.weapon === 'shotgun') {
-        goal = M.nav.nearest(this.seenPos.x, this.seenPos.y, this.seenPos.z);
-        // the bold ones don't come through the door you're watching
-        if (this.nerve > 0.75) wander = 2.4;
-      } else {
-        // the careful ones get low and keep their sights on the corner
-        this.crouch = true;
-        this.path = [];
-        this.goalAt = this.t + 0.5;
+    if (lost <= 0.5) return true;       // in its sights: the walking code sidesteps
+    // lost them. Whoever has a place to keep, keeps it, sights on where they went
+    const rooted = ord && (ord.kind === 'hold' || ord.kind === 'secure' || ord.kind === 'build' || ord.kind === 'breach');
+    if (rooted) return lost < 1.6;
+    const chase = this.nerve > 0.45 || lost > 2.6 || this.weapon === 'shotgun';
+    if (ord?.kind === 'go' && (lost > 2.2 || !chase)) return false;      // on its way somewhere: a look, then on
+    if (chase) {
+      // the bold ones don't come through the door you're watching
+      this.walkTo(M.nav.nearest(this.seenPos.x, this.seenPos.y, this.seenPos.z), this.nerve > 0.75 ? 2.4 : 0.4);
+      return true;
+    }
+    // the careful ones get low and keep their sights on the corner
+    this.crouch = true;
+    this.stand(0.5);
+    return true;
+  }
+
+  /** doing what the commander said */
+  private follow(ord: Exclude<Order, { kind: 'hunt' }>) {
+    const M = this.match, m = this.m;
+    const at = (n: Node, r = 0.75) => Math.hypot(n.x - m.x, n.z - m.z) < r && Math.abs(n.y - m.y) < 1.2;
+    const face = (x: number, z: number, hold = 0.8) => {
+      this.watch = Math.atan2(-(x - m.x), -(z - m.z));
+      this.watchT = this.t + hold;
+    };
+    switch (ord.kind) {
+      case 'hold': {
+        if (!at(ord.node)) {
+          this.hurry = M.phase === 'prep';
+          this.walkTo(ord.node);
+          return;
+        }
+        this.stand(0.4);
+        this.crouch = !!ord.crouch;
+        // eyes on what it was told to watch, with a glance to either side now and then; a noise takes the glance
+        if (this.t - this.heardAt < 2.5) face(this.heard.x, this.heard.z, 0.6);
+        else if (this.t > this.watchT) {
+          const base = Math.atan2(-(ord.look.x - m.x), -(ord.look.z - m.z));
+          this.watch = base + (Math.random() < 0.7 ? 0 : (Math.random() - 0.5) * 0.9);
+          this.watchT = this.t + 1.2 + Math.random() * 2.2;
+        }
+        return;
+      }
+      case 'go': {
+        if (!at(ord.node, 0.9)) {
+          this.hurry = !!ord.fast;
+          this.walkTo(ord.node);
+          return;
+        }
+        this.stand(0.4);
+        if (ord.look && this.t > this.watchT) face(ord.look.x, ord.look.z, 1.5);
+        return;
+      }
+      case 'secure': {
+        if (!at(ord.node, 0.9)) {
+          this.hurry = true;
+          this.walkTo(ord.node, 0.4, 1.5);
+          return;
+        }
+        this.stand(0.4);
+        // in the room: watch its doorways, one after another
+        if (this.t > this.watchT && M.obj) {
+          const d = M.openings[M.obj.doors[Math.floor(Math.random() * M.obj.doors.length)]];
+          if (d) face(d.x, d.z, 1.4 + Math.random() * 1.6);
+        }
+        return;
+      }
+      case 'build': {
+        const o = M.openings[ord.bar];
+        if (!o || M.bars[ord.bar]) {
+          this.stand(0.3);
+          return;
+        }
+        if (!at(ord.node, 0.8)) {
+          this.hurry = true;
+          this.workT = 0;
+          this.walkTo(ord.node, 0.2, 1.5);
+          return;
+        }
+        this.stand(0.2);
+        face(o.x, o.z, 0.5);
+        if (M.tactics.holdBuild) return;
+        this.workT += 0.1;
+        if (this.workT >= BUILD_T) {
+          this.workT = M.build(this.slot, ord.bar) ? 0 : BUILD_T - 0.5;
+        }
+        return;
+      }
+      case 'breach': {
+        const o = M.openings[ord.bar];
+        if (!o || barPassable(M.bars[ord.bar])) {
+          this.stand(0.3);
+          return;
+        }
+        const d = Math.hypot(o.x - m.x, o.z - m.z);
+        if (M.chargeOn(ord.bar)) {
+          // set: get out of its way, to one side
+          if (d < 3.4 && this.t > this.backT) {
+            const along = o.alongX ? Math.sign(m.x - o.x) || 1 : 0, alongZ = o.alongX ? 0 : Math.sign(m.z - o.z) || 1;
+            const away = o.alongX ? [along * 0.8, 0, Math.sign(m.z - o.z) * 0.6] : [Math.sign(m.x - o.x) * 0.6, 0, alongZ * 0.8];
+            const l = Math.hypot(away[0], away[2]) || 1;
+            this.backT = this.t + 1.2;
+            this.backX = away[0] / l;
+            this.backZ = away[2] / l;
+          }
+          this.stand(0.3);
+          face(o.x, o.z, 0.5);
+          return;
+        }
+        if (d > 1.7 || Math.abs(o.y - m.y) > 1) {
+          this.workT = 0;
+          this.walkTo(ord.node, 0.2, 1.5);
+          return;
+        }
+        this.stand(0.2);
+        face(o.x, o.z, 0.5);
+        this.workT += 0.1;
+        if (M.chargesOf(this.slot) > 0) {
+          if (this.workT >= CHARGE_T) {
+            this.workT = 0;
+            const side = o.alongX ? Math.sign(m.z - o.z) : Math.sign(m.x - o.x);
+            if (M.setCharge(this.slot, ord.bar, side || 1)) M.say(this.slot, pick(['Charge set! Stand clear!', 'Fire in the hole!', 'Breaching, breaching!']));
+          }
+        } else if (this.workT >= 0.8) {
+          this.workT = 0;
+          M.barKick(this.slot, ord.bar);
+        }
         return;
       }
     }
-    if (!goal && this.t - this.heardAt < 7) {
+  }
+
+  /** nobody to shoot and nothing it has been told: where next */
+  private roam(node: Node) {
+    const M = this.match, m = this.m;
+    let goal: Node | null = null;
+    let wander = 0.4, soon = 0;
+    // heard something: go to where it can see the place, then stop and cover it before walking in
+    if (this.t - this.heardAt < 7) {
+      const d = Math.hypot(this.heard.x - m.x, this.heard.z - m.z);
+      const sees = M.world.sees({ x: m.x, y: m.y + 1.5, z: m.z }, { x: this.heard.x, y: this.heard.y + 1.2, z: this.heard.z });
+      if (sees && d > 5 && this.nerve < 0.7 && this.t > this.holdT + 6) this.holdT = this.t + 1.5 + (1 - this.nerve) * 2.5;
+      if (this.t < this.holdT) {
+        this.crouch = this.nerve < 0.45;
+        this.stand(0.4);
+        return;
+      }
       goal = M.nav.nearest(this.heard.x, this.heard.y, this.heard.z);
       if (this.nerve > 0.75) wander = 1.6;
     }
-    // nothing doing: the ones told off to it stay with their person, a few steps off, watching the way they aren't
+    // the ones told off to it stay with their partner, a few steps off, watching the way the partner isn't
     if (!goal && this.buddy >= 0 && M.players.find((p) => p.slot === this.buddy)?.alive) {
       const b = M.bodies[this.buddy];
       const d = Math.hypot(b.x - m.x, b.z - m.z);
-      if (!this.greeted) {
+      const person = !M.players.find((p) => p.slot === this.buddy)?.bot;
+      if (!this.greeted && person) {
         this.greeted = true;
         M.say(this.slot, pick(['On you.', "I'm with you.", 'Lead on, I got your back.', 'Right behind you.']), 0.8);
       }
@@ -375,21 +687,19 @@ export class Bot {
         this.hurry = d > 9;
         soon = 0.7 + Math.random() * 0.6;
       } else {
-        this.path = [];
-        this.goalAt = this.t + 0.7 + Math.random() * 0.8;
+        this.stand(0.7 + Math.random() * 0.8);
         if (this.t > this.watchT) {
           this.watch = b.yaw + Math.PI * (0.55 + Math.random() * 0.9);
           this.watchT = this.t + 2 + Math.random() * 3;
-          if (Math.random() < 0.04) M.say(this.slot, pick(['Clear this side.', 'Nothing here.', 'Quiet. Too quiet.', 'Watching our back.', 'Which way?']));
+          if (person && Math.random() < 0.04) M.say(this.slot, pick(['Clear this side.', 'Nothing here.', 'Quiet. Too quiet.', 'Watching our back.', 'Which way?']));
         }
         return;
       }
     }
+    this.crouch = false;
     if (!goal) goal = M.objective(this.slot);
     if (!goal) return;
-    this.path = M.nav.path(node, goal, wander);
-    this.pi = 1;
-    this.goalAt = this.t + (soon || 3 + Math.random() * 5);
+    this.walkTo(goal, wander, soon);
   }
 
   private aimAndFire(dt: number, wx: number, wz: number, speed: number) {
@@ -414,21 +724,31 @@ export class Bot {
       const dx = this.lamp.x - m.x, dz = this.lamp.z - m.z;
       ty = Math.atan2(-dx, -dz);
       tp = Math.atan2(this.lamp.y - (m.y + 1.5), Math.hypot(dx, dz) || 1);
-    } else if (speed > 0.1) {
+    } else if (speed > 0.1 && this.t >= this.backT) {
       // eyes on where the way leads: the doorway two steps on, not the floor in front
       const far = this.path[Math.min(this.path.length - 1, this.pi + 2)];
       const fx = far ? far.x - m.x : 0, fz = far ? far.z - m.z : 0;
       const ahead = far && Math.hypot(fx, fz) > 1.2 && fx * wx + fz * wz > 0;
       ty = ahead ? Math.atan2(-fx, -fz) : Math.atan2(-wx, -wz);
       tp = far && ahead ? clamp(Math.atan2(far.y - m.y, Math.hypot(fx, fz)), -0.5, 0.5) : 0;
-    } else if (this.t - this.heardAt < 4) {
-      ty = Math.atan2(-(this.heard.x - m.x), -(this.heard.z - m.z));
     } else if (this.t < this.watchT) ty = this.watch;
+    else if (this.t - this.heardAt < 4) ty = Math.atan2(-(this.heard.x - m.x), -(this.heard.z - m.z));
     const rate = engaged ? 2.6 + this.skill * 7 : 3.4;
     const dy = angleDiff(ty, this.yaw);
     this.yaw += Math.sign(dy) * Math.min(Math.abs(dy), rate * dt);
     this.pitch += (tp - this.pitch) * Math.min(1, dt * rate * 1.3);
-    this.ads = engaged;
+    // sights up in a fight, and when holding an angle
+    const holding = this.order()?.kind === 'hold' && speed < 0.2;
+    this.ads = engaged || (holding && M.cfg.mode === 'siege');
+    // from a corner it leans out to shoot and comes back in between bursts
+    this.leanT -= dt;
+    if (engaged && speed < 0.4 && this.target >= 0 && Math.hypot(M.bodies[this.target].x - m.x, M.bodies[this.target].z - m.z) > 4) {
+      if (this.leanT <= 0) {
+        this.leanTo = Math.random() < 0.35 ? 0 : Math.random() < 0.5 ? -1 : 1;
+        this.leanT = 0.9 + Math.random() * 1.6;
+      }
+    } else this.leanTo = 0;
+    this.lean += (this.leanTo - this.lean) * Math.min(1, dt * 7);
     if (this.lamp && (this.target >= 0 || this.lampShots <= 0 || !M.pools.some((q) => Math.abs(q[0] - this.lamp!.x) < 0.01 && Math.abs(q[2] - this.lamp!.z) < 0.01))) this.lamp = null;
     if (this.lamp && this.cool <= 0 && this.reload <= 0 && Math.abs(dy) < 0.03 && Math.abs(tp - this.pitch) < 0.03) {
       this.lampShots--;
@@ -437,7 +757,8 @@ export class Bot {
       M.botFire(this, WEAPON_LIST.indexOf(this.weapon));
     }
     if (!engaged) {
-      // lost them a moment ago: a few rounds at where they were. Thin walls don't stop those
+      this.burst = 0;
+      // lost them a moment ago: a few rounds at where they were. Thin walls, and boards, don't stop those
       const since = this.t - this.seenAt;
       if (this.target >= 0 && this.supp > 0 && since > 0.8 && since < 2.4 && this.cool <= 0 && this.reload <= 0 && this.ammo > 2 && Math.abs(dy) < 0.12) {
         const d = Math.hypot(this.seenPos.x - m.x, this.seenPos.z - m.z);
@@ -458,8 +779,9 @@ export class Bot {
     this.ammo--;
     this.burst++;
     this.cool = spec.cycle * (spec.auto ? 1 : 1.25);
-    const pause = spec.auto && this.burst >= 3 + Math.floor(this.skill * 5 + Math.random() * 3);
-    if (pause) {
+    // short bursts at range, longer close in: the pattern climbs, and they know it
+    const len = dd > 18 ? 2 + Math.floor(this.skill * 2 + Math.random() * 2) : 3 + Math.floor(this.skill * 5 + Math.random() * 3);
+    if (spec.auto && this.burst >= len) {
       this.burst = 0;
       this.cool = 0.25 + Math.random() * 0.45 - this.skill * 0.15;
     }

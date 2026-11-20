@@ -96,6 +96,8 @@ if WARD:
     out['night'] = 1
     # old blood: where, which way the surface faces, how big (game axes)
     out['stains'] = [[round(s_[0], 3), round(s_[2], 3), round(-s_[1], 3), s_[3], s_[5], -s_[4], s_[6]] for s_ in wm.stains]
+    # doorways with nothing hung in them: where a barricade can be nailed up (game axes: x, y, z, width, along x?)
+    out['openings'] = [[round(o[0], 3), round(o[2], 3), round(-o[1], 3), round(o[3], 3), 1 if o[4] == 'x' else 0] for o in wm.openings if 0.8 <= o[3] <= 2.7]
     if getattr(wm, 'signs', None):
         out['signs'] = [[round(g[0], 3), round(g[2], 3), round(-g[1], 3), g[3], -g[4], g[5], g[6]] for g in wm.signs]
 if MOTEL:

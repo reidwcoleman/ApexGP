@@ -226,6 +226,8 @@ export interface MapData {
   zones: { a: number[]; b: number[]; kind: string }[];
   lights: { kind: string; pos: number[]; color: number[]; power: number; flicker?: number; size?: number[]; reach?: number; aim?: number[] }[];
   rooms: { name: string; a: number[]; b: number[] }[];
+  /** doorways with nothing in them: x, y, z, width, 1 if the wall runs along x */
+  openings?: number[][];
   lm: { logr: number; k: number; size: number };
   /** facade modules: id, where, and which tile of the second lightmap (none: a far building) */
   units: { id: string; pos: number[]; rot: number; sc: number[]; tint: number[]; tile?: number[]; float?: number }[];
@@ -514,6 +516,8 @@ export interface Loaded {
   /** the props nobody bolted down, ready to be given bodies */
   loose: { obj: THREE.Object3D; def: NonNullable<MapData['props'][number]['loose']>; x: number; y: number; z: number; rot: number }[];
   glassMat: THREE.Material;
+  /** rough boards, lit by the room they are in: what a barricade is nailed up from */
+  plankMat: THREE.Material;
   /** what the street's reflection never needs to draw */
   indoors: THREE.Object3D[];
   grass: Grass | null;
@@ -1115,7 +1119,8 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   const deco = new THREE.Group();
   group.add(deco);
   progress(0.92, 'Light');
-  return { group, world, map, doors, panes, sky: skyT, loose, glassMat, indoors, grass, floats, vegCells, flicks };
+  const plankMat = applyLF(new THREE.MeshStandardMaterial({ map: texs.get('tex/distressed_painted_planks_c.webp') ?? null, normalMap: texs.get('tex/distressed_painted_planks_n.webp') ?? null, color: 0x8f8170, roughness: 0.86, metalness: 0 }));
+  return { group, world, map, doors, panes, sky: skyT, loose, glassMat, plankMat, indoors, grass, floats, vegCells, flicks };
 }
 
 /** the ambient cubes; flat until a capture has been shipped */

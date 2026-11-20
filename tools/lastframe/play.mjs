@@ -56,6 +56,8 @@ if (process.env.AUTO) await p.evaluate(() => {
         me.pitch = 0;
         g.input.keys.add('KeyW');
         g.match.openDoorsNear(m.x, m.y, m.z, dx, dz);
+        // boards in the way: the boot
+        if (Math.hypot(m.vx, m.vz) < 0.3 && g.forts?.some((f) => f.boards && Math.hypot(f.o.x - m.x, f.o.z - m.z) < 1.8)) g.input.pressed.add('KeyZ');
       }
     }
   }, 50);

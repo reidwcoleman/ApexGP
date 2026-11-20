@@ -17,7 +17,11 @@ import { Input, LocalPlayer, type PlayerCtx } from './player.ts';
 import { Soldier, angleDiff, loadGear, loadGuns, preparePeople } from './soldier.ts';
 import { stepNade, type NadeSim } from './nade.ts';
 import { Rats } from './vermin.ts';
-import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow } from './shared.ts';
+import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow , BOARDS, SIEGE , oneLife } from './shared.ts';
+import { Barricade, openingsOf } from './fort.ts';
+
+/** how far from the room its defenders may go before the round is on, metres */
+const PREP_LEASH = 20;
 import { Guest_, Host, type Down } from './net.ts';
 import { Hud } from './ui.ts';
 import { Shafts } from './shafts.ts';
@@ -363,6 +367,10 @@ export class Game {
     this.buildPhysics();
     this.kit = kit as PeopleKit;
     this.scene.add(L.group);
+    // every doorway that can take boards has them ready, switched off
+    this.forts = openingsOf(L.map.openings, L.world).map((o) => new Barricade(o, L.world, L.plankMat));
+    for (const f of this.forts) this.scene.add(f.group);
+    this.ctx.forts = this.forts;
     // only a field with star shells pays for their lights in every shader
     if (L.map.flares) this.scene.add(...this.flareLights, ...this.flareSprites);
     L.group.traverse((o) => {
@@ -739,7 +747,7 @@ export class Game {
     h.send(id, { t: 'welcome', slot: p.slot, cfg: m.cfg, players: m.players, inGame: true, code: h.code });
     h.send(id, { t: 'start', cfg: m.cfg, players: m.players });
     m.emit({ t: 'roster', players: m.players });
-    m.emit({ t: 'phase', phase: m.phase, round: m.round, clock: m.clock, score: m.score, hold: m.holdZone });
+    m.resync();
     window.setTimeout(() => m.joinNow(p), 600);
   }
 
@@ -787,6 +795,15 @@ export class Game {
     this.round = 1;
     this.dead = -1;
     this.frozen = false;
+    // no boards left over from the last match
+    for (const f of this.forts) {
+      f.set(0);
+      if (f.charge) this.scene.remove(f.charge);
+      f.charge = null;
+    }
+    this.obj = null;
+    this.secureProg = 0;
+    this.secureN = [0, 0];
     for (const a of this.actors.values()) a.soldier?.dispose();
     this.actors.clear();
     this.mySoldier = null;
@@ -1027,7 +1044,7 @@ export class Game {
           this.dropLight = this.me.light ? { x: this.me.lightPos.x, y: this.me.lightPos.y, z: this.me.lightPos.z, vy: 0, yaw: Math.atan2(-this.me.barrel.x, -this.me.barrel.z) + (Math.random() - 0.5) * 1.4, pitch: Math.asin(Math.max(-1, Math.min(1, this.me.barrel.y))) } : null;
           this.killYaw = Math.atan2(e.dir[0], e.dir[2]);
           this.killer = by && e.by !== e.s ? by.info.name : 'yourself';
-          this.hud.down(this.killer, ZONE_NAME[e.zone], e.dist, e.w, this.cfg?.mode === 'rounds');
+          this.hud.down(this.killer, ZONE_NAME[e.zone], e.dist, e.w, oneLife(this.cfg?.mode));
           this.sound.deafen(1.2);
         }
         break;
@@ -1098,7 +1115,65 @@ export class Game {
         this.score = [e.score[0], e.score[1]];
         this.round = e.round;
         if (e.hold !== undefined) this.holdZone = e.hold;
+        if (e.atk !== undefined) this.siegeAtk = e.atk;
+        if (e.obj) {
+          this.obj = e.obj;
+          this.objName = e.objName ?? '';
+        }
+        if (e.phase === 'warmup') {
+          this.myCharges = SIEGE.charges;
+          this.secureProg = 0;
+        }
         this.hud.phase(e);
+        break;
+      case 'bar': {
+        const f = this.forts[e.i];
+        if (!f) break;
+        const was = f.boards;
+        const gone = f.set(e.boards);
+        const at = new THREE.Vector3(f.o.x, f.o.y + 1.1, f.o.z);
+        if (e.boards && !was) {
+          // nailed up
+          this.sound.door(at, false);
+          this.sound.impact(at, 'wood');
+        }
+        if (f.charge && (e.blast || !e.boards)) {
+          this.scene.remove(f.charge);
+          f.charge = null;
+        }
+        // each board that went: splinters either side of the doorway, and the noise of it
+        const nx = f.o.alongX ? 0 : 1, nz = f.o.alongX ? 1 : 0;
+        for (let k = 0; k < BOARDS; k++) {
+          if (!(gone >> k & 1)) continue;
+          const c = f.centre(k, new THREE.Vector3());
+          for (let n = 0; n < (e.blast ? 5 : 3); n++) {
+            const off = (Math.random() - 0.5) * f.o.w * 0.8;
+            const px = c.x + (f.o.alongX ? off : 0), pz = c.z + (f.o.alongX ? 0 : off), sd = n % 2 ? 1 : -1;
+            this.fx.impact(px + nx * sd * 0.04, c.y, pz + nz * sd * 0.04, nx * sd, 0.2, nz * sd, 'wood');
+          }
+          this.sound.impact(c, 'wood');
+        }
+        if (gone && !e.blast) this.sound.tink(at);
+        break;
+      }
+      case 'charge': {
+        const f = this.forts[e.i];
+        if (!f) break;
+        if (e.s === this.mySlot) this.myCharges = Math.max(0, this.myCharges - 1);
+        if (f.charge) this.scene.remove(f.charge);
+        const m = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 0.05), new THREE.MeshStandardMaterial({ color: 0x23261f, roughness: 0.7, emissive: 0x3a0500, emissiveIntensity: 0.8 }));
+        m.position.set(f.o.x + (f.o.alongX ? 0 : e.side * 0.05), f.o.y + 1.15, f.o.z + (f.o.alongX ? e.side * 0.05 : 0));
+        if (!f.o.alongX) m.rotation.y = Math.PI / 2;
+        f.charge = m;
+        this.scene.add(m);
+        // it counts itself down
+        const at = m.position.clone();
+        for (let k = 0; k < 5; k++) window.setTimeout(() => { if (f.charge === m) this.sound.tink(at); }, (e.fuse * 1000 * k) / 5);
+        break;
+      }
+      case 'secure':
+        this.secureProg = e.prog;
+        this.secureN = [e.n[0], e.n[1]];
         break;
       case 'arm': {
         const a = this.actors.get(e.s);
@@ -1462,6 +1537,15 @@ export class Game {
       heal: () => this.req({ t: 'heal' }),
       pane: (i, at) => this.req({ t: 'pane', i, at }),
       nade: (kind, o, v, fuse) => this.req({ t: 'nade', kind, o, v, fuse }),
+      bar: (i) => this.req({ t: 'bar', i }),
+      barhit: (ids, k) => this.req({ t: 'barhit', ids, k }),
+      barkick: (i) => this.req({ t: 'barkick', i }),
+      charge: (i, side) => this.req({ t: 'charge', i, side }),
+    },
+    forts: [],
+    siege: () => {
+      const on = this.cfg?.mode === 'siege', attacker = this.attacking();
+      return { on, attacker, act: this.phase === 'live' || (this.phase === 'prep' && !attacker), charges: this.myCharges };
     },
     muzzleLight: (p) => this.muzzleLight(p),
     prompt: (s) => this.hud.prompt(s),
@@ -1471,6 +1555,34 @@ export class Game {
   // ------------------------------------------------------------------ the frame
   /** bench tools stop the loop and call tick themselves */
   halt = false;
+  // ---- the attack-and-defend game, as this screen knows it
+  forts: Barricade[] = [];
+  siegeAtk = 0;
+  obj: number[] | null = null;
+  objName = '';
+  secureProg = 0;
+  secureN: [number, number] = [0, 0];
+  private myCharges = SIEGE.charges;
+  /** is this player on the attacking side this round? */
+  attacking() {
+    return (this.player(this.mySlot)?.team ?? 0) === this.siegeAtk;
+  }
+  /** where the objective is on the screen (0..1), whether it is in front, and how far off */
+  objMark(out: { x: number; y: number; on: boolean; dist: number; inside: boolean }) {
+    out.on = false;
+    const o = this.obj;
+    if (!o || this.cfg?.mode !== 'siege') return out;
+    const c = this.cam.position;
+    out.inside = c.x > o[0] && c.x < o[3] && c.z > o[2] && c.z < o[5] && c.y > o[1] - 0.5 && c.y < o[1] + 2.8;
+    const v = new THREE.Vector3((o[0] + o[3]) / 2, o[1] + 1.4, (o[2] + o[5]) / 2);
+    out.dist = v.distanceTo(c);
+    v.project(this.cam);
+    if (v.z > 1) return out;
+    out.x = Math.min(0.96, Math.max(0.04, v.x * 0.5 + 0.5));
+    out.y = Math.min(0.92, Math.max(0.1, -v.y * 0.5 + 0.5));
+    out.on = true;
+    return out;
+  }
   private loop = () => {
     requestAnimationFrame(this.loop);
     if (this.halt) return;
@@ -1584,8 +1696,25 @@ export class Game {
     if (this.inMatch && mine) {
       if (me.alive) {
         const sol = this.body(mine);
-        const freeze = this.phase === 'warmup' && this.cfg?.mode === 'rounds' || this.phase === 'over';
+        const freeze = this.phase === 'warmup' && oneLife(this.cfg?.mode) || this.phase === 'over' || (this.phase === 'prep' && this.attacking());
+        // damage sticks in the attack-and-defend game: nothing to bandage with
+        if (this.cfg?.mode === 'siege') me.wraps = 0;
         me.update(dt, this.input, this.ctx, this.cam, sol, freeze);
+        // getting the room ready is done at the room: nobody goes to wait where the other side comes in
+        if (this.phase === 'prep' && this.cfg?.mode === 'siege' && !this.attacking() && this.obj) {
+          const o = this.obj, cx = (o[0] + o[3]) / 2, cz = (o[2] + o[5]) / 2;
+          const dx = me.m.x - cx, dz = me.m.z - cz, d = Math.hypot(dx, dz);
+          if (d > PREP_LEASH) {
+            me.m.x = cx + (dx / d) * PREP_LEASH;
+            me.m.z = cz + (dz / d) * PREP_LEASH;
+            const out = (me.m.vx * dx + me.m.vz * dz) / d;
+            if (out > 0) {
+              me.m.vx -= (dx / d) * out;
+              me.m.vz -= (dz / d) * out;
+            }
+            this.hud.prompt('Stay by the room until they come');
+          }
+        }
         mine.x = me.m.x;
         mine.y = me.m.y;
         mine.z = me.m.z;
@@ -2307,7 +2436,7 @@ export class Game {
     }
     if (t >= 4.45) {
       this.frozen = true;
-      if (this.cfg?.mode === 'rounds' && t > 6) this.spectate(dt);
+      if (oneLife(this.cfg?.mode) && t > 6) this.spectate(dt);
     }
   }
 

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { move, type Mover, type World } from './collide.ts';
-import { F, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, zoneK, type NadeKind, type WeaponId } from './shared.ts';
+import { F, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, zoneK, type NadeKind, type WeaponId , BUILD_T, CHARGE_T, hitDamage, recoilAt } from './shared.ts';
 import { trace, type Tracer } from './ballistics.ts';
 import type { Soldier } from './soldier.ts';
 import type { Sound } from './audio.ts';
@@ -142,7 +142,15 @@ export interface PlayerCtx {
     heal(): void;
     pane(i: number, at?: [number, number, number]): void;
     nade(kind: NadeKind, o: [number, number, number], v: [number, number, number], fuse: number): void;
+    bar(i: number): void;
+    barhit(ids: number[], k: number): void;
+    barkick(i: number): void;
+    charge(i: number, side: number): void;
   };
+  /** the doorways that take a barricade, and which boards each has up */
+  forts: { o: { i: number; x: number; y: number; z: number; w: number; alongX: boolean }; boards: number; charge: unknown }[];
+  /** the attack-and-defend game: is it on, may this one act now, is it attacking, charges left */
+  siege(): { on: boolean; act: boolean; attacker: boolean; charges: number };
   muzzleLight(p: THREE.Vector3): void;
   prompt(s: string): void;
   hitMark(kill: boolean): void;
@@ -202,6 +210,12 @@ export class LocalPlayer {
   private climb = 0;
   private climbY = 0;
   private sinceShot = 9;
+  /** which shot of the burst the next one is, and the spread the burst has gathered, degrees */
+  private spray = 0;
+  private bloomV = 0;
+  /** nailing boards or setting a charge: seconds into it (below zero: just done) */
+  private workT = 0;
+  private fortNear: PlayerCtx['forts'][number] | null = null;
   private trauma = 0;
   private coyote = 0;
   private jumpBuf = 0;
@@ -468,7 +482,8 @@ export class LocalPlayer {
     this.bobK += ((speed > 0.3 && m.grounded ? Math.min(1.25, speed / WALK) : 0) - this.bobK) * Math.min(1, dt * 9);
     // ---- stance easing
     const adsWant = i.ads && !this.switchT && !run ? 1 : 0;
-    const adsRate = this.weapon === 'rifle' ? 6.5 : 9;
+    // the sights come up in the time the weapon takes: a pistol at once, a long rifle not
+    const adsRate = 2.6 / this.spec.adsT;
     this.adsK += (adsWant - this.adsK) * Math.min(1, dt * adsRate);
     this.crouchK += ((this.crouch ? 1 : 0) - this.crouchK) * Math.min(1, dt * 11);
     this.sprintK += ((run && speed > 3.6 ? 1 : 0) - this.sprintK) * Math.min(1, dt * 8);
@@ -897,7 +912,41 @@ export class LocalPlayer {
     const lying = c.phys.gunNear(this.eye.x, this.eye.y, this.eye.z, fw.x, fw.y, fw.z, 2.1);
     const gunId = lying?.gun as WeaponId | undefined;
     const closer = lying && !near;
-    c.prompt(this.healT > 0 ? 'Bandaging' : closer ? `F  Take ${WEAPONS[gunId!].name}` : near ? (near.want > 0 ? 'F  Close' : 'F  Open') : '');
+    // ---- a doorway that takes boards: nail them up, or get them out
+    const sg = c.siege();
+    let fort: PlayerCtx['forts'][number] | null = null;
+    if (sg.on && sg.act) {
+      let fd = 2.1;
+      for (const f of c.forts) {
+        const dx = f.o.x - this.m.x, dz = f.o.z - this.m.z, dist = Math.hypot(dx, dz);
+        if (dist < fd && Math.abs(f.o.y - this.m.y) < 1.2 && (dx * fw.x + dz * fw.z) / (dist || 1) > 0.25) {
+          fd = dist;
+          fort = f;
+        }
+      }
+    }
+    this.fortNear = fort;
+    let work = '';
+    const canCharge = !!fort && fort.boards !== 0 && sg.attacker && sg.charges > 0 && !fort.charge;
+    if (fort && !near && !closer && !this.busy && this.healT <= 0 && (fort.boards === 0 || canCharge)) {
+      const need = fort.boards === 0 ? BUILD_T : CHARGE_T;
+      if (i.keys.has('KeyF')) {
+        const b = this.workT;
+        this.workT += dt;
+        if (fort.boards === 0 && Math.floor(b / 0.4) !== Math.floor(this.workT / 0.4)) c.sound.clack(null, 'pump_b');
+        if (this.workT >= need) {
+          this.workT = -0.6;
+          if (fort.boards === 0) c.send.bar(fort.o.i);
+          else c.send.charge(fort.o.i, fort.o.alongX ? Math.sign(this.m.z - fort.o.z) || 1 : Math.sign(this.m.x - fort.o.x) || 1);
+        }
+      } else this.workT = Math.min(0, this.workT + dt);
+      const bar = (k: number) => '\u25ae'.repeat(Math.round(Math.max(0, k) * 8)) + '\u25af'.repeat(8 - Math.round(Math.max(0, k) * 8));
+      work = this.workT > 0 ? `${fort.boards === 0 ? 'Barricading' : 'Setting charge'}  ${bar(this.workT / need)}` : fort.boards === 0 ? 'Hold F  Barricade' : `Hold F  Breaching charge (${sg.charges})   Z  Kick`;
+    } else {
+      this.workT = Math.min(0, this.workT + dt);
+      if (fort && fort.boards !== 0 && !near && !closer) work = fort.charge ? 'Charge set. Stand clear' : 'Z  Kick the boards out';
+    }
+    c.prompt(this.healT > 0 ? 'Bandaging' : closer ? `F  Take ${WEAPONS[gunId!].name}` : near ? (near.want > 0 ? 'F  Close' : 'F  Open') : work);
     if (closer && i.take('KeyF') && !this.busy) this.takeGun(lying.i, gunId!, c, sol, fw);
     if (near && i.take('KeyF')) c.send.door(near.id, [this.m.x, this.m.y, this.m.z]);
     // ---- a boot: through a door, into a chest
@@ -918,7 +967,7 @@ export class LocalPlayer {
       this.boot(c, near, fw);
     }
     // ---- the trigger
-    if (this.busy || this.sprintK > 0.35 || this.retract > 0.72 || this.mantle || this.slideT > 0.5 || this.healT > 0 || this.kickT > 0) return;
+    if (this.busy || this.sprintK > 0.35 || this.retract > 0.72 || this.mantle || this.slideT > 0.5 || this.healT > 0 || this.kickT > 0 || this.workT > 0) return;
     const trig = spec.auto ? i.fire : i.firePressed;
     if (!trig || this.cool > 0 || this.cycleT > 0) return;
     if (am.mag <= 0) {
@@ -964,6 +1013,11 @@ export class LocalPlayer {
     let hit = false;
     if (door) {
       c.send.kick(door.id, [m.x, m.y, m.z]);
+      hit = true;
+    }
+    const f = this.fortNear;
+    if (f && f.boards !== 0 && Math.hypot(f.o.x - m.x, f.o.z - m.z) < 1.9) {
+      c.send.barkick(f.o.i);
       hit = true;
     }
     for (const [slot, b] of c.bodies()) {
@@ -1042,7 +1096,11 @@ export class LocalPlayer {
     const spec = this.spec;
     const wi = WEAPON_LIST.indexOf(this.weapon);
     const speed = Math.hypot(this.m.vx, this.m.vz);
-    const base = (THREE.MathUtils.lerp(spec.hip, spec.ads, this.adsK) + speed * spec.move * (1 - this.adsK * 0.6) + (this.m.grounded ? 0 : 3) + this.arm * 0.9 * (1 - this.adsK * 0.7)) * (1 + this.supK * 0.7);
+    // a new burst starts the pattern again; what a burst has gathered in spread goes as fast as it came
+    if (this.sinceShot > 0.3) this.spray = 0;
+    this.bloomV = Math.max(0, this.bloomV - this.sinceShot * 2.2);
+    const base = (THREE.MathUtils.lerp(spec.hip, spec.ads, this.adsK * this.adsK) + this.bloomV * (1 - this.adsK * 0.45) + speed * spec.move * (1 - this.adsK * 0.6) + (this.m.grounded ? 0 : 3) + this.arm * 0.9 * (1 - this.adsK * 0.7)) * (1 + this.supK * 0.7);
+    this.bloomV = Math.min(spec.bloomMax, this.bloomV + spec.bloom);
     const crouchK = this.crouch ? 0.72 : 1;
     const muz = this.v.set(...spec.muzzle).applyQuaternion(this.gunQuat).add(this.gunPos).clone();
     // shots come from the barrel unless the barrel is through a wall
@@ -1062,11 +1120,12 @@ export class LocalPlayer {
       trace(c.world, bodies, o.x, o.y, o.z, dir.x, dir.y, dir.z, spec, this.slot, out);
     }
     out.panes.forEach((i, n) => c.send.pane(i, out.paneAt?.[n]));
+    if (out.bars?.length) c.send.barhit(out.bars, spec.wreck);
     c.send.shot(wi, [muz.x, muz.y, muz.z], out.e, out.surf);
     // sum the pellets on each body
     const per = new Map<number, { dmg: number; zone: number; dist: number; at: [number, number, number] }>();
     for (const h of out.hits) {
-      const d = spec.dmg * h.k * (h.zone === ZONE.head ? spec.headX : zoneK(h.zone));
+      const d = hitDamage(spec, h.zone, h.k);
       const e = per.get(h.slot);
       if (e) {
         e.dmg += d;
@@ -1075,15 +1134,22 @@ export class LocalPlayer {
     }
     for (const [to2, h] of per) c.send.hit(to2, Math.round(h.dmg), h.zone, wi, [h.at[0] - o.x, h.at[1] - o.y, h.at[2] - o.z], h.dist);
     // ---- kick
-    const k = spec.kick * (Math.PI / 180) * (1 - this.adsK * 0.42) * crouchK;
-    const side = (Math.random() - 0.5) * 2 * spec.wander * (Math.PI / 180);
+    // the kick is the weapon's own pattern, shot by shot: the same climb and the same wander every burst, so it can be
+    // learned and pulled against. From the hip there is more of it, low there is less
+    const [pu, ps] = recoilAt(spec, this.spray++);
+    const hold = (1.25 - this.adsK * 0.25) * crouchK;
+    const k = pu * (Math.PI / 180) * hold;
+    const side = (ps + (Math.random() - 0.5) * 0.1) * (Math.PI / 180) * hold;
     this.recP += k * 0.6;
     this.recY += side * 0.6;
-    const up = k * 0.34, drift = side * 0.3;
+    const up = k * 0.5, drift = side * 0.55;
     this.pitch += up;
     this.yaw += drift;
-    this.climb += up * 0.72;
-    this.climbY += drift * 0.72;
+    // some of the climb comes back by itself when the trigger is let go; the rest is the shooter's to bring down
+    // (a gun fired a shot at a time comes back nearly all the way)
+    const give = spec.auto ? 0.55 : this.weapon === 'pistol' ? 0.72 : 0.88;
+    this.climb += up * give;
+    this.climbY += drift * Math.min(0.9, give + 0.05);
     this.sinceShot = 0;
     this.heat = Math.min(1, this.heat + (this.weapon === 'shotgun' ? 0.3 : this.weapon === 'rifle' ? 0.25 : 0.09));
     // from the hip the arms take it, and the muzzle walks inside the frame

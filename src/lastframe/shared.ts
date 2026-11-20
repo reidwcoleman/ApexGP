@@ -1,6 +1,8 @@
 /** What both ends of a match agree on: weapons, teams, messages. */
 
-export type Mode = 'tdm' | 'ffa' | 'rounds' | 'hold' | 'gun';
+export type Mode = 'tdm' | 'ffa' | 'rounds' | 'hold' | 'gun' | 'siege';
+/** one life a round */
+export const oneLife = (m?: Mode) => m === 'rounds' || m === 'siege';
 /** everyone for themselves */
 export const solo = (m?: Mode) => m === 'ffa' || m === 'gun';
 export type WeaponId = 'carbine' | 'shotgun' | 'rifle' | 'pistol';
@@ -44,23 +46,55 @@ export interface WeaponSpec {
   /** push on what it hits, newton-seconds, and the size of its brass */
   shove: number;
   brass: number;
+  /** seconds for the sights to come up */
+  adsT: number;
+  /** the recoil of a burst, shot by shot: degrees up and to the side. It is the same every time, so it can be learned
+   *  and pulled against; past its end the last six go round again */
+  pat: [number, number][];
+  /** spread a burst gathers, degrees a shot, and where it stops */
+  bloom: number;
+  bloomMax: number;
+  /** the share an arm or a leg takes */
+  limb: number;
+  /** what one hit does to a barricade's board (a board stands two) */
+  wreck: number;
+}
+
+/** the kick of shot n of a burst */
+export function recoilAt(spec: WeaponSpec, n: number): [number, number] {
+  const p = spec.pat;
+  return n < p.length ? p[n] : p[p.length - 6 + ((n - p.length) % 6)] ?? p[p.length - 1];
+}
+/** a round in the head ends it, whatever fired it (a pellet is not a round) */
+export const HEAD_KILL = 260;
+export function hitDamage(spec: WeaponSpec, zone: number, k: number): number {
+  if (zone === 0) return spec.pellets > 1 ? spec.dmg * k * spec.headX : HEAD_KILL;
+  return spec.dmg * k * (zone === 2 || zone === 4 ? spec.limb : 1);
 }
 
 export const WEAPONS: Record<WeaponId, WeaponSpec> = {
   carbine: {
-    name: 'Carbine', cycle: 0.083, auto: true, dmg: 46, pellets: 1, headX: 3.2, mag: 30, reserve: 90, reload: 2.5, hip: 1.5, ads: 0.1, move: 0.35, kick: 0.62, wander: 0.34, settle: 11,
+    name: 'Carbine', cycle: 0.083, auto: true, dmg: 36, pellets: 1, headX: 8, mag: 30, reserve: 150, reload: 2.4, hip: 3.4, ads: 0.03, move: 0.5, kick: 0.62, wander: 0.34, settle: 11,
+    adsT: 0.3, bloom: 0.035, bloomMax: 0.5, limb: 0.75, wreck: 1,
+    pat: [[0.95, 0.0], [0.9, 0.08], [0.82, -0.1], [0.74, 0.16], [0.62, 0.28], [0.52, 0.32], [0.46, 0.12], [0.42, -0.22], [0.4, -0.36], [0.38, -0.3], [0.36, 0.06], [0.36, 0.3], [0.34, 0.26], [0.34, -0.14], [0.34, -0.3]],
     range: 70, falloff: 0.7, pen: 1, hipPos: [0.13, -0.105, 0.3], adsPos: [0, -0.112, 0.14], adsFov: 72, muzzle: [0, 0.043, 0.695], support: [0, 0.012, 0.29], eject: [0.02, 0.05, 0.02], loud: 70, speed: 1, shove: 7, brass: 1,
   },
   shotgun: {
-    name: 'Pump gun', cycle: 0.92, auto: false, dmg: 17, pellets: 9, headX: 1.8, mag: 6, reserve: 24, reload: 3.6, hip: 2.6, ads: 2.1, move: 0.15, kick: 3.6, wander: 0.5, settle: 7,
+    name: 'Pump gun', cycle: 0.88, auto: false, dmg: 16, pellets: 9, headX: 1.8, mag: 6, reserve: 36, reload: 3.4, hip: 3.0, ads: 2.3, move: 0.15, kick: 3.6, wander: 0.5, settle: 7,
+    adsT: 0.34, bloom: 0, bloomMax: 0, limb: 0.8, wreck: 2,
+    pat: [[4.2, 0.4], [4.0, -0.5], [4.2, 0.3], [4.0, -0.3], [4.2, 0.5], [4.0, -0.4], [4.2, 0.3]],
     range: 13, falloff: 0.28, pen: 0.5, hipPos: [0.13, -0.105, 0.29], adsPos: [0, -0.086, 0.27], adsFov: 76, muzzle: [0, 0.036, 0.68], support: [0, 0.012, 0.34], eject: [0.02, 0.04, 0.02], loud: 85, speed: 1, shove: 3.2, brass: 1.9,
   },
   rifle: {
-    name: 'Bolt rifle', cycle: 1.3, auto: false, dmg: 110, pellets: 1, headX: 3.5, mag: 5, reserve: 20, reload: 3.4, hip: 3.2, ads: 0.02, move: 0.6, kick: 3.0, wander: 0.4, settle: 6,
+    name: 'Bolt rifle', cycle: 1.25, auto: false, dmg: 105, pellets: 1, headX: 8, mag: 5, reserve: 30, reload: 3.4, hip: 5.0, ads: 0.0, move: 0.9, kick: 3.0, wander: 0.4, settle: 6,
+    adsT: 0.42, bloom: 0, bloomMax: 0, limb: 0.8, wreck: 2,
+    pat: [[3.4, 0.3], [3.4, -0.3], [3.4, 0.2], [3.4, -0.2], [3.4, 0.3], [3.4, -0.3], [3.4, 0.2]],
     range: 120, falloff: 0.85, pen: 2.1, hipPos: [0.13, -0.1, 0.29], adsPos: [0, -0.104, 0.09], adsFov: 19, muzzle: [0, 0.075, 0.93], support: [0, 0.02, 0.3], eject: [0.02, 0.07, 0.03], loud: 100, speed: 0.94, shove: 15, brass: 1.5,
   },
   pistol: {
-    name: 'Service pistol', cycle: 0.14, auto: false, dmg: 38, pellets: 1, headX: 3.0, mag: 15, reserve: 45, reload: 1.9, hip: 1.1, ads: 0.25, move: 0.3, kick: 1.5, wander: 0.5, settle: 12,
+    name: 'Service pistol', cycle: 0.13, auto: false, dmg: 30, pellets: 1, headX: 8, mag: 15, reserve: 60, reload: 1.8, hip: 2.2, ads: 0.08, move: 0.3, kick: 1.5, wander: 0.5, settle: 12,
+    adsT: 0.2, bloom: 0.12, bloomMax: 0.9, limb: 0.75, wreck: 1,
+    pat: [[1.05, 0.08], [1.1, -0.16], [1.15, 0.22], [1.2, -0.2], [1.2, 0.26], [1.25, -0.24], [1.25, 0.2]],
     range: 35, falloff: 0.6, pen: 0.56, hipPos: [0.1, -0.17, 0.42], adsPos: [0, -0.078, 0.34], adsFov: 78, muzzle: [0, 0.058, 0.19], support: [0, -0.02, 0.0], eject: [0.02, 0.07, 0.05], loud: 55, speed: 1.06, shove: 4, brass: 0.7,
   },
 };
@@ -150,14 +184,20 @@ export type Ev =
   | { t: 'pane'; i: number; at?: [number, number, number] }
   | { t: 'nade'; s: number; kind: NadeKind; o: [number, number, number]; v: [number, number, number]; fuse: number; id: number }
   | { t: 'boom'; id: number; kind: NadeKind; p: [number, number, number] }
-  | { t: 'phase'; phase: Phase; round: number; clock: number; score: [number, number]; msg?: string; winner?: number; hold?: number }
+  | { t: 'phase'; phase: Phase; round: number; clock: number; score: [number, number]; msg?: string; winner?: number; hold?: number; atk?: number; obj?: number[]; objName?: string }
+  /** a barricade: which boards of doorway i are up (a bit each, the lowest first); by: who built it or broke the last one */
+  | { t: 'bar'; i: number; boards: number; by?: number; blast?: boolean }
+  /** a breaching charge set on barricade i, from this side of it, going off in fuse seconds */
+  | { t: 'charge'; i: number; s: number; side: number; fuse: number }
+  /** the objective: how far the attackers have got with it, who is in the room (attackers, defenders) */
+  | { t: 'secure'; prog: number; n: [number, number] }
   | { t: 'hold'; zone: number; owner: number; prog: number; score: [number, number] }
   /** Gun Game: this one's next gun, and how far up the ladder that is */
   | { t: 'arm'; s: number; primary: WeaponId; step: number }
   /** team: a side's radio, heard by that side only */
   | { t: 'chat'; from: string; text: string; team?: number };
 
-export type Phase = 'warmup' | 'live' | 'between' | 'over';
+export type Phase = 'warmup' | 'prep' | 'live' | 'between' | 'over';
 
 /** guest to host */
 export type Req =
@@ -172,6 +212,14 @@ export type Req =
   | { t: 'pane'; i: number; at?: [number, number, number] }
   | { t: 'nade'; kind: NadeKind; o: [number, number, number]; v: [number, number, number]; fuse: number }
   | { t: 'chat'; text: string }
+  /** nail a barricade up in doorway i */
+  | { t: 'bar'; i: number }
+  /** boards hit by this one's rounds (doorway * 8 + board), each with what it did */
+  | { t: 'barhit'; ids: number[]; k: number }
+  /** a boot into barricade i */
+  | { t: 'barkick'; i: number }
+  /** a breaching charge on barricade i, set from this side (the sign along the doorway's normal) */
+  | { t: 'charge'; i: number; side: number }
   | { t: 'respawn' };
 
 export const ZONE = { head: 0, torso: 1, limb: 2, blast: 3, leg: 4 };
@@ -179,5 +227,15 @@ export const ZONE_NAME = ['head', 'chest', 'arm', 'blast', 'leg'];
 /** weapon ids that aren't guns */
 export const W_BLAST = -1, W_BOOT = -2;
 export const zoneK = (zone: number) => (zone === ZONE.limb || zone === ZONE.leg ? 0.72 : 1);
+
+/** a barricade is this many boards, and a body gets through once the lowest of them are out */
+export const BOARDS = 6;
+export const BOARDS_ALL = (1 << BOARDS) - 1;
+/** the boards a body has to have out to get through (all but the top one) */
+export const BOARDS_WAY = (1 << (BOARDS - 1)) - 1;
+/** seconds to nail one up, to set a charge, and its fuse */
+export const BUILD_T = 1.6, CHARGE_T = 1.1, CHARGE_FUSE = 2.6;
+/** the attack-and-defend game: seconds of preparation, of action, to secure the room; charges a life */
+export const SIEGE = { prep: 28, live: 180, secure: 9, charges: 2 };
 
 export const fmtClock = (s: number) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;

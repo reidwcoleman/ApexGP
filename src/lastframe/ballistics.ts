@@ -23,6 +23,8 @@ export interface Tracer {
   panes: number[];
   /** where each pane was hit */
   paneAt?: [number, number, number][];
+  /** barricade boards hit (doorway * 8 + board) */
+  bars?: number[];
 }
 
 /**
@@ -96,6 +98,7 @@ export function trace(w: World, bodies: Iterable<[number, Body]>, ox: number, oy
       z = pz + dz * 0.02;
       continue;
     }
+    if (h.box.tag === 'bar' && h.box.id !== undefined) (out.bars ??= []).push(h.box.id);
     if (!h.box.pen || spec.pen <= 0) return;
     // through it, if it has enough left for the thickness at this angle
     const thick = Math.min(1.6, exitOf(h.box, px, py, pz, dx, dy, dz));

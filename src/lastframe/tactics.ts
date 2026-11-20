@@ -1,0 +1,495 @@
+import type { Match } from './match.ts';
+import type { Node } from './nav.ts';
+import type { Opening } from './fort.ts';
+import { barPassable } from './fort.ts';
+import { BOARDS_ALL } from './shared.ts';
+
+/**
+ * What a side's computer players have been told to do. A bot in a fight fights; the rest of the time it does this.
+ *
+ *   hold     stand at a spot and watch a point (a doorway, a corridor), low if told to
+ *   go       walk to a spot and wait there
+ *   build    nail a barricade across a doorway
+ *   breach   get a barricade out of a doorway: a charge if it has one, its boot if not
+ *   secure   into the room and stay in it
+ *   hunt     nothing in particular: go and find them
+ */
+export type Order =
+  | { kind: 'hold'; node: Node; look: { x: number; z: number }; crouch?: boolean }
+  | { kind: 'go'; node: Node; look?: { x: number; z: number }; fast?: boolean }
+  | { kind: 'build'; bar: number; node: Node }
+  | { kind: 'breach'; bar: number; node: Node }
+  | { kind: 'secure'; node: Node }
+  | { kind: 'hunt' };
+
+interface Group {
+  door: number;
+  slots: number[];
+  stage: Map<number, Node>;
+  /** when it was first all there */
+  readyAt: number;
+  /** told to go in */
+  entered: boolean;
+  flashed: boolean;
+  /** not before the bang */
+  enterAt: number;
+  breacher: number;
+}
+
+/**
+ * The commander of each side's bots in the attack-and-defend game. Defenders: most of them board the room up and then
+ * anchor in it, each watching a different doorway from a corner the doorway doesn't see first; one or two roam, out on
+ * the way the attackers will come, and fall back when it gets late. Attackers: two groups to two doorways as far apart
+ * as the room has, a stack beside each, the boards out (a charge, or a boot), a flash through, and in together.
+ */
+export class Tactics {
+  private orders = new Map<number, Order>();
+  private tick = 0;
+  private planned = [false, false];
+  /** live seconds */
+  private liveT = 0;
+  private role = new Map<number, 'anchor' | 'roam'>();
+  private buildList = new Map<number, number[]>();
+  private spot = new Map<number, { node: Node; look: { x: number; z: number } }>();
+  private groups: Group[] = [];
+  private retake = false;
+  /** both sides in the room and neither seeing the other: how long, and when each one next moves */
+  private contestT = 0;
+  private sweepAt = new Map<number, number>();
+
+  constructor(private M: Match) {}
+
+  orderFor(slot: number): Order | null {
+    return this.orders.get(slot) ?? null;
+  }
+
+  newRound() {
+    this.orders.clear();
+    this.planned = [false, false];
+    this.liveT = 0;
+    this.role.clear();
+    this.buildList.clear();
+    this.spot.clear();
+    this.groups = [];
+    this.retake = false;
+    this.contestT = 0;
+    this.sweepAt.clear();
+  }
+
+  update(dt: number) {
+    const M = this.M;
+    if (M.cfg.mode !== 'siege' || !M.obj) return;
+    if (M.phase === 'live') this.liveT += dt;
+    this.tick -= dt;
+    if (this.tick > 0 || (M.phase !== 'prep' && M.phase !== 'live')) return;
+    this.tick = 0.35;
+    this.contestT = M.secureN[0] > 0 && M.secureN[1] > 0 ? this.contestT + 0.35 : 0;
+    this.defend();
+    if (M.phase === 'live') this.attack();
+  }
+
+  private bots(team: number) {
+    const M = this.M;
+    return M.players.filter((p) => p.bot && p.alive && p.team === team).map((p) => p.slot);
+  }
+
+  private door(i: number): Opening {
+    return this.M.openings[i];
+  }
+
+  /** which way is into the room through this doorway: +1 or -1 along its normal (z if the wall runs along x) */
+  private inward(o: Opening) {
+    const b = this.M.obj!.box;
+    const mid = o.alongX ? (b[2] + b[5]) / 2 : (b[0] + b[3]) / 2;
+    return Math.sign(mid - (o.alongX ? o.z : o.x)) || 1;
+  }
+
+  /** a spot in the room that watches a doorway without standing in front of it */
+  private watchSpot(o: Opening, taken: Node[]): Node | null {
+    const M = this.M, box = M.obj!.box;
+    let best: Node | null = null, bs = -1e9;
+    for (const n of M.nav.nodes) {
+      if (!M.inBox(box, n.x, n.y, n.z, -0.35)) continue;
+      const dx = n.x - o.x, dz = n.z - o.z, d = Math.hypot(dx, dz);
+      if (d < 2.2) continue;
+      let s = -Math.abs(d - 5.5) * 0.8 + (n.cover ? 2.5 : 0) + Math.random() * 1.5;
+      // off the line the doorway looks down: the first round through it should not find anyone
+      const across = Math.abs(o.alongX ? dx : dz);
+      s += Math.min(across, 3) * 1.4;
+      if (M.world.open(n.x, n.y + 1.4, n.z, o.x, o.y + 1.2, o.z)) s += 9;
+      // and not in the eye of another doorway either
+      for (const k of M.obj!.doors) {
+        const q = this.door(k);
+        if (q !== o && Math.abs(q.alongX ? n.x - q.x : n.z - q.z) < 0.9) s -= 3;
+      }
+      for (const t of taken) if (Math.hypot(t.x - n.x, t.z - n.z) < 1.6) s -= 12;
+      if (s > bs) {
+        bs = s;
+        best = n;
+      }
+    }
+    return best;
+  }
+
+  /** the node just this side of a doorway, to build from or to break in from. side: +1/-1 along the doorway's normal */
+  private doorNode(o: Opening, side: number, back = 1.1): Node | null {
+    const key = `${o.i}|${side}|${back}`;
+    const hit = this.doorNodes.get(key);
+    if (hit !== undefined) return hit;
+    const M = this.M;
+    const x = o.x + (o.alongX ? 0 : side * back), z = o.z + (o.alongX ? side * back : 0);
+    // on that side of the wall, and with the doorway in plain view: never the nearest point through the wall
+    let best: Node | null = null, bd = 2.2;
+    for (const n of M.nav.nodes) {
+      if (Math.abs(n.y - o.y) > 0.8) continue;
+      const d = Math.hypot(n.x - x, n.z - z);
+      if (d >= bd || ((o.alongX ? n.z - o.z : n.x - o.x) * side) < 0.45) continue;
+      if (!M.world.open(n.x, n.y + 1.2, n.z, o.x, o.y + 1.2, o.z)) continue;
+      bd = d;
+      best = n;
+    }
+    this.doorNodes.set(key, best);
+    return best;
+  }
+  private doorNodes = new Map<string, Node | null>();
+  /** the boards wait until the ones who are leaving have left */
+  holdBuild = false;
+
+  private defend() {
+    const M = this.M, obj = M.obj!;
+    const team = 1 - M.atk;
+    const bots = this.bots(team);
+    if (!bots.length) return;
+    if (!this.planned[team]) {
+      this.planned[team] = true;
+      // the bold ones roam
+      const by = [...bots].sort((a, b) => (M.bots.get(b)?.nerve ?? 0) - (M.bots.get(a)?.nerve ?? 0));
+      const nRoam = bots.length >= 5 ? 2 : bots.length >= 3 ? 1 : 0;
+      by.forEach((s, k) => this.role.set(s, k < nRoam ? 'roam' : 'anchor'));
+      this.doorNodes.clear();
+      const anchors = by.slice(nRoam), roamers = by.slice(0, nRoam);
+      // doorways to board, shared out among the anchors, nearest first
+      const doors = [...obj.doors];
+      anchors.forEach((s) => this.buildList.set(s, []));
+      doors.forEach((d, k) => {
+        if (!anchors.length) return;
+        this.buildList.get(anchors[k % anchors.length])!.push(d);
+      });
+      // and where each will stand after: a different doorway each, as far as they go round
+      const taken: Node[] = [];
+      anchors.forEach((s, k) => {
+        const o = this.door(doors[k % doors.length]);
+        const n = this.watchSpot(o, taken) ?? obj.c;
+        taken.push(n);
+        this.spot.set(s, { node: n, look: { x: o.x, z: o.z } });
+      });
+      // the roamers: out on the way the attackers will come, to one side of it, where they can see it
+      const from = M.nav.nearest(...this.anchorOf(M.atk));
+      const way = from ? M.nav.path(from, obj.c) : [];
+      roamers.forEach((s, k) => {
+        let pick: Node | null = null, look = { x: obj.c.x, z: obj.c.z };
+        if (way.length > 12) {
+          const P = way[Math.floor(way.length * (0.62 + 0.16 * k))];
+          let bs = -1e9;
+          for (const n of M.nav.nodes) {
+            const d = Math.hypot(n.x - P.x, n.z - P.z);
+            if (d > 8 || d < 2.5 || Math.abs(n.y - P.y) > 0.8 || M.inBox(obj.box, n.x, n.y, n.z)) continue;
+            if (!M.world.open(n.x, n.y + 1.4, n.z, P.x, P.y + 1.2, P.z)) continue;
+            let sc = (n.cover ? 3 : 0) + Math.random() * 2 - Math.abs(d - 5);
+            for (const w of way) if (Math.hypot(w.x - n.x, w.z - n.z) < 1.2) sc -= 4;
+            if (sc > bs) {
+              bs = sc;
+              pick = n;
+            }
+          }
+          look = { x: P.x, z: P.z };
+        }
+        if (pick) {
+          this.spot.set(s, { node: pick, look });
+          this.orders.set(s, { kind: 'go', node: pick, look, fast: true });
+        } else this.role.set(s, 'anchor');
+      });
+      const who = M.players.find((p) => p.slot === anchors[0]);
+      if (who) M.say(who.slot, pick([`Board up the ${M.objName()}.`, 'Get those doors shut.', 'Barricades up, then find a corner.']));
+    }
+    // a roamer still in the room: nobody nails it in
+    this.holdBuild = M.phase === 'prep' && M.clock > 16 && bots.some((s) => this.role.get(s) === 'roam' && M.inObj(M.bodies[s].x, M.bodies[s].y, M.bodies[s].z));
+    const attackersIn = M.secureN[0] > 0;
+    const anchorsUp = bots.filter((s) => this.role.get(s) === 'anchor').length;
+    const late = M.phase === 'live' && (M.clock < 45 || anchorsUp <= 1);
+    for (const s of bots) {
+      const role = this.role.get(s) ?? 'anchor';
+      const spot = this.spot.get(s);
+      const b = M.bodies[s];
+      if (attackersIn && this.contestT > 4 && M.inObj(b.x, b.y, b.z)) {
+        // in the room with them and nobody has a shot: it is their room, they know where the noise is. Go and look
+        if (this.liveT >= (this.sweepAt.get(s) ?? 0)) {
+          this.sweepAt.set(s, this.liveT + 3 + Math.random() * 2);
+          let near: Node | null = null, nd = 1e9;
+          for (const p of M.players) {
+            if (!p.alive || p.team !== M.atk) continue;
+            const q = M.bodies[p.slot];
+            const d = Math.hypot(q.x - b.x, q.z - b.z);
+            if (M.inObj(q.x, q.y, q.z) && d < nd) {
+              nd = d;
+              near = M.nav.nearest(q.x + (Math.random() - 0.5) * 2, q.y, q.z + (Math.random() - 0.5) * 2);
+            }
+          }
+          if (near) this.orders.set(s, { kind: 'go', node: near });
+        }
+        continue;
+      }
+      if (attackersIn && !M.inObj(b.x, b.y, b.z)) {
+        // they are in the room: everyone back to it
+        const cur = this.orders.get(s);
+        if (cur?.kind !== 'secure') this.orders.set(s, { kind: 'secure', node: this.insideNode(s) });
+        if (!this.retake) {
+          this.retake = true;
+          M.say(s, pick(["They're in the room!", 'Get them off the objective!', 'Back to the room, now!']));
+        }
+        continue;
+      }
+      if (role === 'anchor') {
+        const list = this.buildList.get(s) ?? [];
+        // boards first: the next doorway on its list that has none (and nobody already at it)
+        while (list.length && (M.bars[list[0]] === BOARDS_ALL || (M.bars[list[0]] && M.phase === 'live'))) list.shift();
+        // a doorway that's been opened up again gets boarded again, if nobody is shooting through it
+        if (!list.length && M.phase === 'prep') for (const d of obj.doors) if (!M.bars[d] && ![...this.buildList.values()].some((l) => l.includes(d))) list.push(d);
+        if (list.length && (M.phase === 'prep' || this.liveT < 8)) {
+          const o = this.door(list[0]);
+          const n = this.doorNode(o, this.inward(o));
+          if (n) {
+            const cur = this.orders.get(s);
+            if (cur?.kind !== 'build' || cur.bar !== list[0]) this.orders.set(s, { kind: 'build', bar: list[0], node: n });
+            continue;
+          }
+          list.shift();
+        }
+        if (spot) {
+          const cur = this.orders.get(s);
+          if (cur?.kind !== 'hold' || cur.node !== spot.node) this.orders.set(s, { kind: 'hold', node: spot.node, look: spot.look, crouch: M.bots.get(s)!.nerve < 0.55 });
+          // the doorway they are coming through is the one to watch
+          const hot = this.hotDoor();
+          if (hot && cur?.kind === 'hold' && Math.random() < 0.3) cur.look = { x: hot.x, z: hot.z };
+        }
+      } else {
+        if (late) {
+          const cur = this.orders.get(s);
+          if (cur?.kind !== 'secure') {
+            this.orders.set(s, { kind: 'secure', node: this.insideNode(s) });
+            M.say(s, pick(['Falling back to the room.', 'Coming back in. Hold fire.', 'Roamer coming home.']), 0.8);
+          }
+          continue;
+        }
+        // an attacker known close by: the roamer goes for them, from where they aren't looking
+        const near = this.knownNear(team, b, 16, 6);
+        if (near && M.phase === 'live') {
+          if (this.orders.get(s)?.kind !== 'hunt') this.orders.set(s, { kind: 'hunt' });
+        } else if (spot) {
+          const cur = this.orders.get(s);
+          if (cur?.kind === 'hunt' || !cur) this.orders.set(s, { kind: 'hold', node: spot.node, look: spot.look, crouch: true });
+          else if (cur.kind === 'go' && Math.hypot(b.x - spot.node.x, b.z - spot.node.z) < 1) this.orders.set(s, { kind: 'hold', node: spot.node, look: spot.look, crouch: true });
+        }
+      }
+    }
+  }
+
+  private anchorOf(team: number): [number, number, number] {
+    // where that side started: the middle of whoever is alive on it
+    const M = this.M;
+    const ps = M.players.filter((p) => p.team === team && p.alive);
+    if (!ps.length) return [M.obj!.c.x, M.obj!.c.y, M.obj!.c.z];
+    let x = 0, y = 0, z = 0;
+    for (const p of ps) {
+      const b = M.bodies[p.slot];
+      x += b.x; y += b.y; z += b.z;
+    }
+    return [x / ps.length, y / ps.length, z / ps.length];
+  }
+
+  /** a doorway of the room with its boards coming off, or an attacker seen at it */
+  private hotDoor(): Opening | null {
+    const M = this.M;
+    for (const d of M.obj!.doors) {
+      const o = this.door(d);
+      if (M.bars[d] && M.bars[d] !== BOARDS_ALL) return o;
+      if (M.chargeOn(d)) return o;
+    }
+    const team = 1 - M.atk;
+    for (const [, k] of M.intel[team]) {
+      if (M.elapsed - k.t > 6) continue;
+      let best: Opening | null = null, bd = 7;
+      for (const d of M.obj!.doors) {
+        const o = this.door(d);
+        const dist = Math.hypot(o.x - k.x, o.z - k.z);
+        if (dist < bd && Math.abs(o.y - k.y) < 1.5) {
+          bd = dist;
+          best = o;
+        }
+      }
+      if (best) return best;
+    }
+    return null;
+  }
+
+  private knownNear(team: number, b: { x: number; y: number; z: number }, reach: number, age: number) {
+    const M = this.M;
+    for (const [slot, k] of M.intel[team]) {
+      if (M.elapsed - k.t > age || !M.players.find((p) => p.slot === slot)?.alive) continue;
+      if (Math.hypot(k.x - b.x, k.z - b.z) < reach && Math.abs(k.y - b.y) < 3) return k;
+    }
+    return null;
+  }
+
+  /** somewhere in the room for this one: its own each time it is asked, well in from the doorways */
+  private insideNode(slot: number): Node {
+    const M = this.M, obj = M.obj!;
+    const inside = M.nav.nodes.filter((n) => M.inBox(obj.box, n.x, n.y, n.z, -0.5));
+    if (!inside.length) return obj.c;
+    let best = inside[0], bs = -1e9;
+    for (let k = 0; k < 14; k++) {
+      const n = inside[Math.floor(Math.random() * inside.length)];
+      let s = (n.cover ? 2 : 0) + Math.random() * 2;
+      for (const d of obj.doors) {
+        const o = this.door(d);
+        s += Math.min(4, Math.hypot(o.x - n.x, o.z - n.z)) * 0.5;
+      }
+      for (const [other, ord] of this.orders) if (other !== slot && ord.kind === 'secure' && Math.hypot(ord.node.x - n.x, ord.node.z - n.z) < 1.5) s -= 6;
+      if (s > bs) {
+        bs = s;
+        best = n;
+      }
+    }
+    return best;
+  }
+
+  /** places to stand beside a doorway, outside the room, out of its line */
+  private stageNodes(o: Opening, n: number): Node[] {
+    const M = this.M, obj = M.obj!;
+    const out = -this.inward(o);
+    const cands: [number, Node][] = [];
+    for (const q of M.nav.nodes) {
+      if (Math.abs(q.y - o.y) > 0.8 || M.inBox(obj.box, q.x, q.y, q.z, 0.1)) continue;
+      const along = o.alongX ? q.x - o.x : q.z - o.z, across = (o.alongX ? q.z - o.z : q.x - o.x) * out;
+      const d = Math.hypot(along, across);
+      if (across < 0.4 || d > 6.5 || d < 1.3) continue;
+      // beside the doorway, not in front of it
+      const beside = Math.abs(along) > o.w / 2 + 0.3;
+      cands.push([-Math.abs(d - 3) + (beside ? 4 : 0) + (q.cover ? 1.5 : 0) + Math.random(), q]);
+    }
+    cands.sort((a, b) => b[0] - a[0]);
+    const pickd: Node[] = [];
+    for (const [, q] of cands) {
+      if (pickd.every((p) => Math.hypot(p.x - q.x, p.z - q.z) >= 1)) pickd.push(q);
+      if (pickd.length >= n) break;
+    }
+    return pickd;
+  }
+
+  /** the first step outside the room on the way out of it toward where the attackers started: outside its door, whatever
+   *  shape the room and its landing are */
+  private wayOut(o: Opening): Node | null {
+    const M = this.M, obj = M.obj!;
+    const near = this.doorNode(o, -this.inward(o), 1.15) ?? this.doorNode(o, -this.inward(o), 2);
+    if (near) return near;
+    const to = M.nav.nearest(...this.anchorOf(M.atk));
+    const path = to ? M.nav.path(obj.c, to) : [];
+    return path.find((n) => !M.inBox(obj.box, n.x, n.y, n.z, 0.3)) ?? null;
+  }
+
+  private attack() {
+    const M = this.M, obj = M.obj!;
+    const team = M.atk;
+    const bots = this.bots(team);
+    if (!bots.length) return;
+    if (!this.planned[team]) {
+      this.planned[team] = true;
+      const [ax, ay, az] = this.anchorOf(team);
+      const doors = obj.doors.map((d) => this.door(d));
+      // the nearest doorway, and the one farthest round the room from it
+      const d1 = doors.reduce((b, o) => (Math.hypot(o.x - ax, o.z - az) + Math.abs(o.y - ay) * 4 < Math.hypot(b.x - ax, b.z - az) + Math.abs(b.y - ay) * 4 ? o : b), doors[0]);
+      const d2 = doors.reduce((b, o) => (Math.hypot(o.x - d1.x, o.z - d1.z) > Math.hypot(b.x - d1.x, b.z - d1.z) ? o : b), d1);
+      const two = d2 !== d1 && bots.length >= 3;
+      const n1 = two ? Math.ceil(bots.length * 0.6) : bots.length;
+      const mk = (o: Opening, slots: number[]): Group => {
+        const st = this.stageNodes(o, slots.length);
+        const stage = new Map<number, Node>();
+        slots.forEach((s, k) => stage.set(s, st[k % Math.max(1, st.length)] ?? this.wayOut(o) ?? obj.c));
+        return { door: o.i, slots, stage, readyAt: -1, entered: false, flashed: false, enterAt: 0, breacher: -1 };
+      };
+      this.groups = [mk(d1, bots.slice(0, n1))];
+      if (two) this.groups.push(mk(d2, bots.slice(n1)));
+      for (const g of this.groups) for (const s of g.slots) this.orders.set(s, { kind: 'go', node: g.stage.get(s)!, look: { x: this.door(g.door).x, z: this.door(g.door).z } });
+      M.say(bots[0], pick([`Two ways in. Stack up on the ${M.objName()}.`, `Moving on the ${M.objName()}.`, 'On me. Quiet until we breach.']));
+    }
+    const rush = M.clock < 38;
+    const anyEntered = this.groups.some((g) => g.entered);
+    for (const g of this.groups) {
+      g.slots = g.slots.filter((s) => bots.includes(s));
+      if (!g.slots.length) continue;
+      const o = this.door(g.door);
+      if (g.entered) {
+        // in: anyone still outside follows; anyone in stays in
+        for (const s of g.slots) {
+          const sweep = this.contestT > 4 && this.liveT >= (this.sweepAt.get(s) ?? 0);
+          if (sweep) this.sweepAt.set(s, this.liveT + 4 + Math.random() * 3);
+          if (this.orders.get(s)?.kind !== 'secure' || sweep) this.orders.set(s, { kind: 'secure', node: this.insideNode(s) });
+        }
+        continue;
+      }
+      if (rush) {
+        g.entered = true;
+        M.say(g.slots[0], pick(['No time. Go, go, go!', 'Clock is running out. Push!', 'Everybody in, now!']));
+        continue;
+      }
+      // there?
+      const there = g.slots.filter((s) => {
+        const b = M.bodies[s], n = g.stage.get(s)!;
+        return Math.hypot(b.x - n.x, b.z - n.z) < 2.2 && Math.abs(b.y - n.y) < 1;
+      }).length;
+      if (g.readyAt < 0 && (there >= Math.ceil(g.slots.length * 0.6) || this.liveT > 55)) g.readyAt = this.liveT;
+      if (g.readyAt < 0) continue;
+      // wait a little for the other group, not for ever
+      const others = this.groups.filter((q) => q !== g && q.slots.length);
+      const wait = others.some((q) => q.readyAt < 0) && this.liveT - g.readyAt < 14 && !anyEntered;
+      // a breath at the door first: everyone in place, a word on the radio
+      if (wait || this.liveT - g.readyAt < 4) continue;
+      if (!barPassable(M.bars[g.door])) {
+        // the boards have to come out first
+        if (!g.slots.includes(g.breacher)) {
+          g.breacher = g.slots.reduce((b, s) => (Math.hypot(M.bodies[s].x - o.x, M.bodies[s].z - o.z) < Math.hypot(M.bodies[b].x - o.x, M.bodies[b].z - o.z) ? s : b), g.slots[0]);
+          const n = this.wayOut(o);
+          if (n) this.orders.set(g.breacher, { kind: 'breach', bar: g.door, node: n });
+          M.say(g.breacher, pick(['Breaching!', 'Setting the charge.', 'Taking the door.']));
+        }
+        // boards that will not come out are not a reason to stand there all day: through them, boots first
+        if (this.liveT - g.readyAt > 26) g.entered = true;
+        continue;
+      }
+      // open: something bright through it, then in
+      if (!g.flashed) {
+        g.flashed = true;
+        // whoever is nearest the frame tosses one round it; the rest go on the bang
+        const inw = this.inward(o);
+        const by = [...g.slots].sort((a, b) => Math.hypot(M.bodies[a].x - o.x, M.bodies[a].z - o.z) - Math.hypot(M.bodies[b].x - o.x, M.bodies[b].z - o.z));
+        for (const s of by) {
+          const q = M.bodies[s];
+          if (Math.hypot(q.x - o.x, q.z - o.z) > 7 || !M.bots.get(s)?.spend('flash')) continue;
+          const ox = o.x - (o.alongX ? 0 : inw * 0.25), oz = o.z - (o.alongX ? inw * 0.25 : 0);
+          const side = (Math.random() - 0.5) * 2.4;
+          M.toss(s, 'flash', [ox, o.y + 1.3, oz], [o.alongX ? side : inw * 6.5, 1.6, o.alongX ? inw * 6.5 : side]);
+          g.enterAt = this.liveT + 1.85;
+          break;
+        }
+        continue;
+      }
+      if (this.liveT < g.enterAt) continue;
+      g.entered = true;
+      M.say(g.slots[0], pick(['Going in!', 'Move, move!', 'Entry!']));
+    }
+  }
+}
+
+function pick<T>(a: T[]): T {
+  return a[Math.floor(Math.random() * a.length)];
+}
