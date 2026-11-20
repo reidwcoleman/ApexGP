@@ -2,7 +2,6 @@ import type { Marble } from './physics.ts';
 import type { Course } from './courses.ts';
 import * as THREE from 'three';
 import { CALL, shownTiles } from './course-modes.ts';
-import { Pop, popValue, type Balloon } from './course-bounce.ts';
 import { dodge } from './course-strikes.ts';
 import { KEEP, type KeepArena } from './course-crown.ts';
 
@@ -80,65 +79,6 @@ export class CallBrain {
     return best;
   }
 }
-
-/**
- * Bounce House: it picks the balloon that's worth the steering, keeps clear of the thunder ones, and
- * times a super bounce for a high one (how often it gets that right is how good it is).
- */
-export class BounceBrain {
-  private target: Balloon | null = null;
-  private next = 0;
-  private hx: number;
-  private hz: number;
-  constructor(
-    readonly m: Marble,
-    readonly skill: number,
-    private rnd: () => number,
-  ) {
-    const a = rnd() * Math.PI * 2, r = 3 + rnd() * 9;
-    this.hx = Math.cos(a) * r;
-    this.hz = Math.sin(a) * r;
-  }
-  update(_dt: number, t: number, c: Course, live: Balloon[], popped: Set<number>, ease: number) {
-    const m = this.m, A = c.bounce!;
-    const x = t - c.state.go;
-    if (t >= this.next || !this.target || popped.has(this.target.k)) {
-      this.next = t + 0.3 + (1 - this.skill) * 0.5 + ease * 0.5;
-      let bs = -Infinity;
-      this.target = null;
-      for (const q of live) {
-        if (q.kind === Pop.Thunder || popped.has(q.k) || q.t + 0.5 > x) continue;
-        A.at(q, x, BP);
-        const d = Math.hypot(BP.x - m.pos.x, BP.z - m.pos.z);
-        const sc = popValue(q.kind) ** 0.6 / (d + 2.5) + this.rnd() * (0.14 - 0.1 * this.skill);
-        if (sc > bs) (bs = sc), (this.target = q);
-      }
-    }
-    let gx = A.center.x + this.hx, gz = A.center.z + this.hz, high = false;
-    if (this.target) {
-      A.at(this.target, x, BP);
-      gx = BP.x;
-      gz = BP.z;
-      high = this.target.h > 3.3;
-    }
-    let dx = gx - m.pos.x, dz = gz - m.pos.z;
-    // (round a thunder balloon in the way)
-    for (const q of live) {
-      if (q.kind !== Pop.Thunder || popped.has(q.k)) continue;
-      A.at(q, x, BP);
-      const ox = m.pos.x - BP.x, oz = m.pos.z - BP.z, od = Math.hypot(ox, oz);
-      if (od < 2.6 && Math.abs(m.pos.y - BP.y) < 2.4 && this.rnd() < 0.4 + 0.6 * this.skill) {
-        dx += (ox / (od + 0.1)) * 5;
-        dz += (oz / (od + 0.1)) * 5;
-      }
-    }
-    const d = Math.hypot(dx, dz);
-    if (d > 0.2) m.input.set(dx / d, 0, dz / d).multiplyScalar(Math.min(1, d / 2 + 0.2));
-    // the super bounce: pressed on the way down, as it nears the floor
-    if (high && m.vel.y < -6 && m.pos.y - A.center.y < 2.2 && this.rnd() < (0.1 + 0.3 * this.skill) * (1 - 0.5 * ease)) m.jump = true;
-  }
-}
-const BP = new THREE.Vector3();
 
 /**
  * Crown Keeper. With it: get up to the throne if the way's clear (its clock runs double), else keep

@@ -2,11 +2,9 @@ import * as THREE from 'three';
 import { courseAI, hzDist, type CourseAI } from './ai-course.ts';
 import { PlateBrain } from './ai-plate.ts';
 import { StormBrain } from './ai-arena.ts';
-import { BounceBrain, CallBrain, KeepBrain } from './ai-modes.ts';
+import { CallBrain, KeepBrain } from './ai-modes.ts';
 import { CupBrain, RocketBrain } from './ai-play.ts';
-import { BumpBrain } from './ai-bash.ts';
 import { KartBrain } from './ai-kart.ts';
-import type { BouncePlay } from './modes.ts';
 import { CrumbleBrain } from './ai-crumble.ts';
 import { TeamBrain } from './ai-team.ts';
 import { STYLES, type Style } from './ai-style.ts';
@@ -92,16 +90,12 @@ export class Bot {
   private plate: PlateBrain | null = null;
   private stormB: StormBrain | null = null;
   private callB: CallBrain | null = null;
-  private bounceB: BounceBrain | null = null;
-  private bumpB: BumpBrain | null = null;
   private kartB: KartBrain | null = null;
   private rocketB: RocketBrain | null = null;
   private cupB: CupBrain | null = null;
   private keepB: KeepBrain | null = null;
   /** 0..1: how much it's holding back for the people in the round (set by the game each frame) */
   ease = 0;
-  /** Bounce House: what's in the air */
-  bounce: BouncePlay | null = null;
   private crumbleB: CrumbleBrain | null = null;
   private team: TeamBrain | null = null;
   /** riding round the outside wall of a bend too fast to hold the line in */
@@ -201,12 +195,6 @@ export class Bot {
       this.callB.update(dt, t, c, all, this.ease);
       return void m.input.multiplyScalar(1 - 0.2 * this.ease);
     }
-    if (c.bump) {
-      this.bumpB ??= new BumpBrain(m, this.skill, this.rnd, this.aggr);
-      if (t < c.state.go + this.react) return;
-      this.bumpB.update(dt, t, c, all, this.ease);
-      return;
-    }
     if (c.kart) {
       const A = c.kart, me = A.racer(m.id);
       if (!me) return;
@@ -221,12 +209,6 @@ export class Bot {
       if (t < c.state.go + this.react) return;
       this.rocketB.update(dt, t, c, all, this.ease);
       return void m.input.multiplyScalar(1 - 0.12 * this.ease);
-    }
-    if (c.bounce) {
-      this.bounceB ??= new BounceBrain(m, this.skill, this.rnd);
-      if (t < c.state.go + this.react || !this.bounce) return;
-      this.bounceB.update(dt, t, c, this.bounce.live, this.bounce.popped, this.ease);
-      return void m.input.multiplyScalar(1 - 0.14 * this.ease);
     }
     if (c.keep) {
       this.keepB ??= new KeepBrain(m, this.skill, this.rnd);

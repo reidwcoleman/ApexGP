@@ -808,10 +808,9 @@ and bots; the contestants are original bean characters, not marbles.
     ice creams, stars; some turn and bob), and grandstands of instanced beans bouncing and waving.
     The survival and team arenas are ringed with grandstands and toy islands too (`dressArena`).
   - **Survival**: Bar Hop (hop the low bar, never into the high one; the bars speed up, reverse,
-    and the plate's rings crumble), Tilt-a-Dish (a dish that tips further and further), Cookie
-    Crumble (`course-crumble.ts`, `ai-crumble.ts`: six floors of cookie tiles, each dropping a
-    moment after it's stood on, so you fall floor to floor; the tiles are cheap `World.pads`, the
-    host sends the drop times), Meltdown (one ice floe melting in from the edge with holes
+    and the plate's rings crumble), Tilt-a-Dish (a dish that tips further and further), Meltdown
+    (`course-crumble.ts`, `ai-crumble.ts`: tiles that drop a moment after they're stood on, cheap
+    `World.pads`, the host sending the drop times; one ice floe melting in from the edge with holes
     opening in it, the same on every screen; push the others in), Storm Deck (`course-storm.ts`: a
     raft in a thunderstorm; a ring of light marks each lightning strike before it blasts everyone
     near it overboard, more and faster as it goes, from a seeded schedule every browser shares).
@@ -825,10 +824,17 @@ and bots; the contestants are original bean characters, not marbles.
     once a second, never over what a guest has just painted itself. Paint
     Party (a walled square, a turntable, bumpers) or Splat Ring (a round arena swept by one long
     bar that speeds up: hop it).
+  - **Ball games** (`course-soccer.ts` builds the pitch from a `CupCfg`, `soccer.ts` runs the balls
+    on the host, `CupBrain` in `ai-play.ts` plays them): two teams, half the field goes home.
+    Bean Cup (soccer: goals, a second ball late on, golden goal), Big Push (one giant beach ball,
+    no kicking, everyone shoves; push it over the other team's end line, the team piles in) and
+    Over the Fence (eight small balls and a net down the middle with glass above it for the
+    beans: a dive lobs a ball over; when the clock stops the yard with more balls in it goes
+    home, level is sudden death).
   - **Final**: Crown Peak, the longest platform course; first across the line takes the crown.
   - The old downhill chutes (Timber Tumble, Paint Mill, Rickety Ridge, Crown Summit) are out of the
     rotation but still built for the test links: `?round=N` indexes `DEFAULT_SHOW` in `courses.ts`.
-    `?lineup=colourcall,bumperbash` plays those rounds, in that order, as the show.
+    `?lineup=colourcall,bigpush` plays those rounds, in that order, as the show.
   - Out of the show, start a new one or watch the rest (←/→ switches bean, ENTER skips the round).
 - **The beans** (`bean.ts`): party-game proportions (from what the genre's own developers describe:
   round "baked bean" bodies, low hips, stubby feet, big arms) with our own art — a chunky,

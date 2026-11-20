@@ -33,6 +33,46 @@ export const CUP = {
   second: 32,
   over: 45,
 };
+export type CupRule = 'cup' | 'push' | 'fence';
+/** one pitch's numbers: Bean Cup's, or a variant's */
+export interface CupCfg {
+  rule: CupRule;
+  HW: number;
+  HL: number;
+  cut: number;
+  /** 0: no goals (the ends are walls) */
+  goalHalf: number;
+  goalH: number;
+  goalD: number;
+  R: number;
+  g: number;
+  ceil: number;
+  T: number;
+  restart: number;
+  /** seconds left when the second ball drops in (0: never) */
+  second: number;
+  over: number;
+  /** how many balls there are */
+  balls: number;
+  /** a dive's shot speed, its lift, and the dribble's push (1: Bean Cup's) */
+  kick: number;
+  loft: number;
+  push: number;
+  /** Over the Fence: the fence's height (the ball has to clear it) */
+  fenceH: number;
+  /** the words */
+  call: string;
+  goalLine: string;
+  goalWord: string;
+  extra: string;
+}
+export const CUP_CFG: Record<CupRule, CupCfg> = {
+  cup: { rule: 'cup', ...CUP, balls: 2, kick: 1, loft: 6.5, push: 1, fenceH: 0, call: 'RUN INTO THE BALL · DIVE TO SHOOT', goalLine: 'The team with the most goals stays in the show', goalWord: 'GOAL!', extra: 'GOLDEN GOAL' },
+  // one ball as tall as three of you: nobody kicks it, everybody shoves it
+  push: { rule: 'push', ...CUP, HW: 22, HL: 30, goalHalf: 15, goalH: 9.5, goalD: 9, R: 3.4, ceil: 13, second: 0, balls: 1, kick: 0.42, loft: 2.5, push: 0.55, fenceH: 0, call: 'PUSH THE BALL OVER THEIR LINE · DIVE TO SHOVE', goalLine: 'Push the giant ball over their line. Most points stays in', goalWord: 'OVER THE LINE!', extra: 'NEXT POINT WINS' },
+  // eight small balls and a fence down the middle: lob them over
+  fence: { rule: 'fence', ...CUP, HW: 20, HL: 27, cut: 6, goalHalf: 0, goalH: 0, goalD: 0, R: 1.05, T: 90, second: 0, over: 20, balls: 8, kick: 0.8, loft: 11.5, push: 1, fenceH: 1.5, call: 'DIVE INTO A BALL TO LOB IT OVER THE FENCE', goalLine: 'When the clock runs out, the yard with more balls goes home', goalWord: '', extra: 'SUDDEN DEATH' },
+};
 export const CUP_COLORS = [0xff4f9a, 0x2f9bff];
 export const CUP_NAMES = ['PINK', 'BLUE'];
 
@@ -52,6 +92,7 @@ export interface CupBall {
 }
 export interface CupArena {
   center: THREE.Vector3;
+  cfg: CupCfg;
   /** each bean's team */
   of: Map<number, number>;
   balls: CupBall[];
@@ -66,8 +107,9 @@ export interface CupArena {
   goal(team: number, o: THREE.Vector3): THREE.Vector3;
 }
 
-function pitchArt() {
-  const { HW, HL, goalHalf } = CUP;
+function pitchArt(C: CupCfg) {
+  const { HW, HL, goalHalf } = C;
+  const fence = C.rule === 'fence';
   const c = document.createElement('canvas');
   c.width = 1024;
   c.height = 1536;
@@ -86,8 +128,10 @@ function pitchArt() {
     x.fillStyle = g;
     x.fillRect(0, Math.min(Z(z0), Z(z1)), 1024, Math.abs(Z(z1) - Z(z0)));
   };
-  end(-HL, -HL + 20, 'rgba(255,79,154,0.55)');
-  end(HL, HL - 20, 'rgba(47,155,255,0.55)');
+  // (Over the Fence: each yard is its team's; Big Push: a fat end zone each)
+  const deep = fence ? HL : C.rule === 'push' ? 14 : 20;
+  end(-HL, -HL + deep, 'rgba(255,79,154,0.55)');
+  end(HL, HL - deep, 'rgba(47,155,255,0.55)');
   x.strokeStyle = '#fffdf2';
   x.lineWidth = 9;
   x.strokeRect(X(-HW + 0.7), Z(-HL + 0.7), (HW * 2 - 1.4) * sx, (HL * 2 - 1.4) * sz);
@@ -95,6 +139,12 @@ function pitchArt() {
   x.moveTo(0, Z(0));
   x.lineTo(1024, Z(0));
   x.stroke();
+  if (fence) {
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    return t;
+  }
   x.beginPath();
   x.arc(X(0), Z(0), 8 * sx, 0, 7);
   x.stroke();
@@ -102,6 +152,19 @@ function pitchArt() {
   x.beginPath();
   x.arc(X(0), Z(0), 12, 0, 7);
   x.fill();
+  if (C.rule === 'push') {
+    // the two lines to get it over, fat and checked
+    for (const s of [-1, 1]) {
+      for (let k = 0; k < 16; k++) {
+        x.fillStyle = k % 2 ? '#ffffff' : '#1d1d2b';
+        x.fillRect((k * 1024) / 16, Z(s * HL) - (s < 0 ? 0 : 24), 1024 / 16 + 1, 24);
+      }
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    return t;
+  }
   for (const s of [-1, 1]) {
     const w = goalHalf + 5, d = 11;
     x.strokeRect(X(-w), Z(s < 0 ? -HL : HL - d), w * 2 * sx, d * sz);
@@ -164,10 +227,54 @@ export function cupBallArt() {
   return t;
 }
 
-export function beanCup(info: { name: string; blurb: string }): Course {
+/** Big Push's ball: a giant beach ball, six gores round it */
+export function pushBallArt() {
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 512;
+  const x = c.getContext('2d')!;
+  const cols = ['#ff4f9a', '#fffaf0', '#2f9bff', '#ffc21f', '#fffaf0', '#37c25a'];
+  for (let k = 0; k < 6; k++) {
+    x.fillStyle = cols[k];
+    x.fillRect((k * 1024) / 6, 0, 1024 / 6 + 1, 512);
+  }
+  x.fillStyle = '#fffaf0';
+  x.fillRect(0, 0, 1024, 40);
+  x.fillRect(0, 472, 1024, 40);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+/** Over the Fence's balls: bright yellow, a white seam round them */
+export function fenceBallArt() {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 256;
+  const x = c.getContext('2d')!;
+  x.fillStyle = '#d8f53a';
+  x.fillRect(0, 0, 512, 256);
+  x.strokeStyle = '#ffffff';
+  x.lineWidth = 16;
+  x.beginPath();
+  for (let i = 0; i <= 64; i++) {
+    const u = (i / 64) * 512, v = 128 + Math.sin((i / 64) * Math.PI * 4) * 60;
+    if (i) x.lineTo(u, v);
+    else x.moveTo(u, v);
+  }
+  x.stroke();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
+export function beanCup(info: { name: string; blurb: string }, rule: CupRule = 'cup'): Course {
   const b = new CourseBuilder();
   const center = new THREE.Vector3(0, 118, 0);
-  const { HW, HL, cut, goalHalf: gh, goalH, goalD, ceil } = CUP;
+  const C = CUP_CFG[rule];
+  const { HW, HL, cut, goalHalf: gh, goalH, goalD, ceil } = C;
+  const fence = rule === 'fence';
   const y0 = center.y;
   b.lakeY = y0 - 30;
   const state = { go: 1e9 };
@@ -176,7 +283,7 @@ export function beanCup(info: { name: string; blurb: string }): Course {
   {
     const g = new THREE.BoxGeometry(HW * 2 + 4, 1, (HL + goalD) * 2 + 4).translate(center.x, y0 - 0.5, center.z);
     b.world.statics.addGeometry(g, Mat.Felt);
-    const art = new THREE.Mesh(new THREE.PlaneGeometry(HW * 2, HL * 2).rotateX(-Math.PI / 2).translate(center.x, y0 + 0.01, center.z), new THREE.MeshStandardMaterial({ map: pitchArt(), roughness: 0.82 }));
+    const art = new THREE.Mesh(new THREE.PlaneGeometry(HW * 2, HL * 2).rotateX(-Math.PI / 2).translate(center.x, y0 + 0.01, center.z), new THREE.MeshStandardMaterial({ map: pitchArt(C), roughness: 0.82 }));
     art.receiveShadow = true;
     b.group.add(art);
     const base = new THREE.Mesh(new THREE.BoxGeometry(HW * 2 + 5, 3, (HL + goalD) * 2 + 5).translate(center.x, y0 - 1.52, center.z), new THREE.MeshPhysicalMaterial({ color: 0x2a6ae0, roughness: 0.4, clearcoat: 0.7 }));
@@ -193,6 +300,7 @@ export function beanCup(info: { name: string; blurb: string }): Course {
   const topLine = glowMat(0xfff4c0, 1.6);
   const wall = (x0: number, z0: number, x1: number, z1: number, o: { ball?: boolean; h?: number; low?: number; pad?: boolean } = {}) => {
     const len = Math.hypot(x1 - x0, z1 - z0), a = Math.atan2(-(z1 - z0), x1 - x0);
+    if (len < 0.05) return;
     const mx = center.x + (x0 + x1) / 2, mz = center.z + (z0 + z1) / 2;
     const low = o.low ?? 0, h = (o.h ?? ceil + 1) - low;
     b.world.statics.addGeometry(new THREE.BoxGeometry(len + 0.5, h, 0.5).rotateY(a).translate(mx, y0 + low + h / 2, mz), Mat.Bumper);
@@ -217,12 +325,34 @@ export function beanCup(info: { name: string; blurb: string }): Course {
     wall(s * (HW - cut), -HL, s * gh, -HL);
   }
 
+  // ---- Over the Fence: the fence down the middle. A low net the ball has to clear, and above it
+  // glass all the way up for the beans (nobody climbs over into their yard)
+  if (fence) {
+    b.world.statics.addGeometry(new THREE.BoxGeometry(HW * 2, ceil + 1, 0.5).translate(center.x, y0 + (ceil + 1) / 2, center.z), Mat.Bumper);
+    const net = netArt();
+    net.repeat.set((HW * 2) / 1.1, C.fenceH / 1.1);
+    const fenceMat = new THREE.MeshBasicMaterial({ map: net, transparent: true, side: THREE.DoubleSide, depthWrite: false, color: 0xffffff });
+    b.group.add(new THREE.Mesh(new THREE.PlaneGeometry(HW * 2, C.fenceH).translate(center.x, y0 + C.fenceH / 2, center.z), fenceMat));
+    const rail = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, HW * 2, 6, 12).rotateZ(Math.PI / 2).translate(center.x, y0 + C.fenceH, center.z), new THREE.MeshPhysicalMaterial({ color: 0xffc21f, roughness: 0.3, clearcoat: 1 }));
+    rail.castShadow = true;
+    b.group.add(rail);
+    const postM = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.3, clearcoat: 1 });
+    for (let k = -3; k <= 3; k++) {
+      const p = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, C.fenceH, 12).translate(center.x + (k / 3) * (HW - 0.4), y0 + C.fenceH / 2, center.z), postM);
+      p.castShadow = true;
+      b.group.add(p);
+    }
+    const pane = new THREE.Mesh(new THREE.PlaneGeometry(HW * 2, ceil + 1 - C.fenceH).translate(center.x, y0 + C.fenceH + (ceil + 1 - C.fenceH) / 2, center.z), glass);
+    b.group.add(pane);
+    b.group.add(new THREE.Mesh(new THREE.BoxGeometry(HW * 2, 0.12, 0.12).translate(center.x, y0 + ceil + 1, center.z), topLine));
+  }
+
   // ---- the goals
   const nets: THREE.Group[] = [];
   const see: THREE.Material[][] = [[], []];
   const hit = [-9, -9];
   const netTex = netArt();
-  for (const team of [0, 1]) {
+  for (const team of gh > 0 ? [0, 1] : []) {
     // (team 0 defends the -z end)
     const s = team === 0 ? -1 : 1;
     const z = s * HL, zb = s * (HL + goalD);
@@ -270,7 +400,7 @@ export function beanCup(info: { name: string; blurb: string }): Course {
 
   // ---- the two big bumpers on the halfway line: a wall that throws it back
   const rounds: CupArena['rounds'] = [];
-  for (const s of [-1, 1]) {
+  for (const s of fence ? [] : [-1, 1]) {
     const px = center.x + s * (HW + 0.2), pz = center.z, r = 2.6, H = 2.2;
     rounds.push({ x: px, z: pz, r, kick: 6 });
     const k = new Kin({ type: 'cyl', r, hh: H / 2 }, Mat.Bumper, (_t, p, q) => {
@@ -305,7 +435,7 @@ export function beanCup(info: { name: string; blurb: string }): Course {
       }
   }
 
-  const balls: CupBall[] = [0, 1].map(() => ({ pos: new THREE.Vector3(center.x, y0 + CUP.R, center.z), vel: new THREE.Vector3(), quat: new THREE.Quaternion(), live: false, backAt: 0, last: -1, prev: -1, kickT: -9 }));
+  const balls: CupBall[] = Array.from({ length: C.balls }, () => ({ pos: new THREE.Vector3(center.x, y0 + C.R, center.z), vel: new THREE.Vector3(), quat: new THREE.Quaternion(), live: false, backAt: 0, last: -1, prev: -1, kickT: -9 }));
   b.animators.push((t) => {
     nets.forEach((n, i) => {
       const f = Math.max(0, 1 - (t - hit[i]) * 1.4);
@@ -316,6 +446,7 @@ export function beanCup(info: { name: string; blurb: string }): Course {
   });
   const arena: CupArena = {
     center,
+    cfg: C,
     of: new Map(),
     balls,
     segs,
@@ -334,11 +465,11 @@ export function beanCup(info: { name: string; blurb: string }): Course {
       return o.set(center.x, y0, center.z + (team === 0 ? 1 : -1) * HL);
     },
   };
-  title(b, info, 'Most goals stays in the show', 0xff4f9a, new THREE.Vector3(center.x, y0 + 15, center.z - HL - goalD - 3));
+  title(b, info, rule === 'cup' ? 'Most goals stays in the show' : rule === 'push' ? 'Push it over their line' : 'Keep your yard clear', 0xff4f9a, new THREE.Vector3(center.x, y0 + 15, center.z - HL - goalD - 3));
   dressArena(b, new THREE.Vector3(center.x, y0 - 3, center.z), HL + 10, 29);
   b.finish();
   return {
-    id: 'beancup',
+    id: rule === 'cup' ? 'beancup' : rule === 'push' ? 'bigpush' : 'overfence',
     name: info.name,
     kind: 'team',
     blurb: info.blurb,
@@ -355,7 +486,8 @@ export function beanCup(info: { name: string; blurb: string }): Course {
       const out: { pos: THREE.Vector3; yaw: number }[] = [];
       for (let k = 0; k < n; k++) {
         const s = k % 2 ? 1 : -1, i = Math.floor(k / 2), col = i % 6, row = Math.floor(i / 6);
-        const pos = new THREE.Vector3(center.x + (col - 2.5) * 6.2 + row * 2.4, y0 + 0.6, center.z + s * (11 + row * 7));
+        const near = rule === 'push' ? 9 : fence ? 7 : 11;
+        const pos = new THREE.Vector3(center.x + (col - 2.5) * (fence ? 5.6 : 6.2) + row * 2.4, y0 + 0.6, center.z + s * (near + row * (fence ? 6 : 7)));
         out.push({ pos, yaw: s > 0 ? Math.PI : 0 });
       }
       return out;

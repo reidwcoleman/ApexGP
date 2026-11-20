@@ -2,9 +2,8 @@ import * as THREE from 'three';
 import { Mode, type Marble } from './physics.ts';
 import type { Course } from './courses.ts';
 import { ROCKET } from './course-rocket.ts';
-import { CUP } from './course-soccer.ts';
 
-/** The bots for Rocket Rumble and Bean Cup. */
+/** The bots for Rocket Rumble and the ball games (Bean Cup, Big Push, Over the Fence). */
 
 /**
  * Rocket Rumble: it keeps an eye on the tank. Plenty in it, it goes hunting for a ring or a bean to
@@ -132,8 +131,10 @@ export class CupBrain {
     readonly skill: number,
     private rnd: () => number,
   ) {}
-  update(_dt: number, t: number, c: Course, all: Marble[], ease: number) {
-    const m = this.m, A = c.cup!;
+  update(dt: number, t: number, c: Course, all: Marble[], ease: number) {
+    const m = this.m, A = c.cup!, CUP = A.cfg;
+    if (CUP.rule === 'fence') return this.fence(dt, t, c, all, ease);
+    const push = CUP.rule === 'push';
     const team = A.of.get(m.id) ?? 0, dir = team === 0 ? 1 : -1;
     const y0 = A.center.y;
     let ball = null, bd = Infinity;
@@ -147,12 +148,13 @@ export class CupBrain {
       const mates = all.filter((o) => o.active && (A.of.get(o.id) ?? 0) === team).sort((p, q) => p.id - q.id);
       this.n = mates.length;
       this.slot = mates.indexOf(m);
-      this.keeper = this.n >= 4 && this.slot === 0;
+      this.keeper = !push && this.n >= 4 && this.slot === 0;
       if (ball) {
         const mine = bd;
         let closer = 0;
         for (const o of mates) if (o !== m && o.pos.distanceToSquared(ball.pos) < mine) closer++;
-        this.chase = closer < (this.n >= 9 ? 3 : this.n >= 5 ? 2 : 1);
+        // (Big Push: it takes a crowd to move it, so most of the team piles in)
+        this.chase = closer < (push ? Math.max(2, Math.ceil(this.n * 0.7)) : this.n >= 9 ? 3 : this.n >= 5 ? 2 : 1);
       }
     }
     A.goal(team, G);
@@ -174,7 +176,7 @@ export class CupBrain {
       W.multiplyScalar((CUP.R + 1.1) / l).add(ball.pos);
       // (on the wrong side of it: round, not through)
       const wrong = (ball.pos.z - m.pos.z) * dir < -0.5;
-      if (wrong) W.x += (m.pos.x > ball.pos.x ? 1 : -1) * 3.2;
+      if (wrong) W.x += (m.pos.x > ball.pos.x ? 1 : -1) * (CUP.R + 1.9);
       const dW = Math.hypot(W.x - m.pos.x, W.z - m.pos.z);
       // (lined up: straight through it at the goal)
       if (dW < 1.5 && !wrong) W.copy(G);
@@ -193,16 +195,77 @@ export class CupBrain {
     if (!ball || m.mode !== Mode.Run) return;
     const bx = ball.pos.x - m.pos.x, bz = ball.pos.z - m.pos.z, bdist = Math.hypot(bx, bz);
     const height = ball.pos.y - y0 - CUP.R;
-    if (bdist < 3.4 && height > 1.4 && height < 4.5 && this.rnd() < 0.2 * this.skill) m.jump = true;
-    if (t < this.shotT || bdist > 3 || height > 1.6) return;
+    if (!push && bdist < 3.4 && height > 1.4 && height < 4.5 && this.rnd() < 0.2 * this.skill) m.jump = true;
+    if (t < this.shotT || bdist > CUP.R + 1.7 || height > 1.6) return;
     // a shot or a clearance: heading at the ball, the ball's between it and somewhere useful
     const toGoal = Math.hypot(G.x - ball.pos.x, G.z - ball.pos.z);
-    const lined = (bz * dir > 0.2 && Math.abs(bx) < 2.4 + 1.2 * this.skill);
+    const lined = bz * dir > 0.2 && Math.abs(bx) < CUP.R + 1 + 1.2 * this.skill;
     const panic = Math.abs(ball.pos.z - own) < 16;
     if (lined && (toGoal < 26 || panic) && this.rnd() < 0.3 + 0.5 * this.skill - ease * 0.2) {
-      this.shotT = t + 1.6 + this.rnd() * 1.4;
+      this.shotT = t + (push ? 0.9 : 1.6) + this.rnd() * 1.4;
       m.input.set(bx / (bdist || 1), 0, bz / (bdist || 1));
       m.dash = true;
     }
+  }
+
+  /**
+   * Over the Fence: every ball in its own yard is a job. It takes the nearest one nobody else on the
+   * team is closer to (two at most on any one), comes round behind it so the fence is on the far
+   * side, and dives through it to lob it over. Nothing to do: it waits in its lane, half way back.
+   */
+  private target = -1;
+  private fence(_dt: number, t: number, c: Course, all: Marble[], ease: number) {
+    const m = this.m, A = c.cup!, C = A.cfg;
+    const team = A.of.get(m.id) ?? 0, dir = team === 0 ? 1 : -1;
+    const y0 = A.center.y, cz = A.center.z;
+    const mine = (z: number) => (z - cz) * dir < -C.R * 0.5;
+    if (t > this.think) {
+      this.think = t + 0.2 + (1 - this.skill) * 0.3 + ease * 0.25 + this.rnd() * 0.12;
+      const mates = all.filter((o) => o.active && (A.of.get(o.id) ?? 0) === team).sort((p, q) => p.id - q.id);
+      this.n = mates.length;
+      this.slot = mates.indexOf(m);
+      let best = -1, bd = Infinity;
+      A.balls.forEach((b, i) => {
+        if (!b.live || !mine(b.pos.z) || b.pos.y > y0 + C.R + 2.5) return;
+        const d = b.pos.distanceToSquared(m.pos);
+        let closer = 0;
+        for (const o of mates) if (o !== m && o.pos.distanceToSquared(b.pos) < d) closer++;
+        // (a weaker bot misjudges which is nearest now and then)
+        const cost = d * (1 + closer * 1.5) + this.rnd() * (1 - this.skill) * 60;
+        if (closer < 2 && cost < bd) (bd = cost), (best = i);
+      });
+      this.target = best;
+    }
+    const b = this.target >= 0 ? A.balls[this.target] : null;
+    if (!b || !b.live || !mine(b.pos.z)) {
+      const lanes = Math.max(1, this.n);
+      const lane = ((this.slot + 0.5) / lanes - 0.5) * (C.HW * 1.6);
+      W.set(A.center.x + lane, y0, cz - dir * C.HL * (this.slot % 2 ? 0.35 : 0.65));
+      const dx = W.x - m.pos.x, dz = W.z - m.pos.z, d = Math.hypot(dx, dz);
+      if (d > 0.6) m.input.set(dx / d, 0, dz / d).multiplyScalar(Math.min(1, d / 3));
+      else m.input.set(0, 0, 0);
+      return;
+    }
+    // the spot behind it, on the side away from the fence (a touch off the wall if it's on one)
+    const bx0 = THREE.MathUtils.clamp(b.pos.x, A.center.x - C.HW + 2, A.center.x + C.HW - 2);
+    W.set(bx0, y0, b.pos.z - dir * (C.R + 1.1));
+    const wrong = (b.pos.z - m.pos.z) * dir < -0.3;
+    if (wrong) W.x += (m.pos.x > b.pos.x ? 1 : -1) * 2.8;
+    const dW = Math.hypot(W.x - m.pos.x, W.z - m.pos.z);
+    if (dW < 1.4 && !wrong) W.set(b.pos.x, y0, b.pos.z + dir * 3);
+    const dx = W.x - m.pos.x, dz = W.z - m.pos.z, d = Math.hypot(dx, dz);
+    if (d > 0.4) m.input.set(dx / d, 0, dz / d);
+    else m.input.set(0, 0, 0);
+    if (m.mode !== Mode.Run || t < this.shotT) return;
+    const bx = b.pos.x - m.pos.x, bz = b.pos.z - m.pos.z, bdist = Math.hypot(bx, bz);
+    const height = b.pos.y - y0 - C.R;
+    if (bdist > C.R + 1.6 || height > 1.4 || bz * dir < 0.2) return;
+    if (this.rnd() < 0.35 + 0.45 * this.skill - ease * 0.2) {
+      this.shotT = t + 1.2 + this.rnd() * 1.2;
+      // (aimed over the fence, give or take)
+      const ax = bx / (bdist || 1) + (this.rnd() - 0.5) * (1 - this.skill) * 0.6;
+      m.input.set(ax, 0, dir * Math.max(0.5, Math.abs(bz / (bdist || 1))));
+      m.dash = true;
+    } else this.shotT = t + 0.4;
   }
 }

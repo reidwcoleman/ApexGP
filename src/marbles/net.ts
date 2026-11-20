@@ -63,12 +63,8 @@ export type CtlMsg =
   | { t: 'tiles'; c: string }
   | { t: 'crumble'; k: number[]; at: number[] }
   | { t: 'splat'; k: number; id: number }
-  /** Bumper Bash: a car went off (a guest to the host, then the host's word for everyone: v points to `by`, n and o their totals) */
-  | { t: 'ko'; id: number; by: number; v?: number; n?: number; o?: number; chain?: boolean; crown?: boolean }
   /** Crown Keeper: who has it (-1: loose), where it lies, everyone's time */
   | { t: 'keep'; h: number; x: number; z: number; s: [number, number][]; how?: 'took' | 'stole'; k?: number; home?: boolean }
-  /** Bounce House: a balloon popped (k) by id, worth v at combo c, leaving them on n */
-  | { t: 'pop'; k: number; id: number; v: number; n: number; c: number }
   /** Bean Cup: where the balls are, and the goals; a goal going in */
   | { t: 'cup'; s: number[]; a: number; b: number }
   | { t: 'goal'; team: number; by: number; own: boolean; ball: number; a: number; b: number }
