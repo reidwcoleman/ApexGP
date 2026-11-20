@@ -368,10 +368,10 @@ export class Game {
     L.group.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh && !(m.material as THREE.Material).transparent) {
-        m.castShadow = !m.userData.small && !m.userData.stock;
+        m.castShadow = !m.userData.small && !m.userData.stock && !m.userData.fine;
         m.receiveShadow = true;
         const mt = m.material as THREE.Material;
-        if (!Array.isArray(mt) && mt.alphaTest === 0 && mt.depthWrite && m.name !== 'veg' && m.name !== 'sky' && !m.userData.small) {
+        if (!Array.isArray(mt) && mt.alphaTest === 0 && mt.depthWrite && m.name !== 'veg' && m.name !== 'sky' && !m.userData.small && !m.userData.fine) {
           m.layers.enable(mt.side === THREE.DoubleSide ? PRE + 1 : PRE);
         }
       }

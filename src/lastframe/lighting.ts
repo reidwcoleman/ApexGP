@@ -638,6 +638,8 @@ export interface LfOpts {
   outdoor?: boolean;
   /** lets the sun through from behind */
   leaf?: boolean;
+  /** static geometry on the second lightmap (the modelled joinery) */
+  lm2?: boolean;
 }
 
 export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = {}): T {
@@ -659,7 +661,7 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
   const prevKey = m.customProgramCacheKey?.() ?? '';
   m.onBeforeCompile = (s, r) => {
     prev?.call(m, s, r);
-    s.uniforms.lfLM = o.terrain ? LF.lm3 : o.tile ? LF.lm2 : LF.lm;
+    s.uniforms.lfLM = o.terrain ? LF.lm3 : o.tile || o.lm2 ? LF.lm2 : LF.lm;
     s.uniforms.lfVol = LF.vol;
     s.uniforms.lfVolMin = LF.volMin;
     s.uniforms.lfVolInv = LF.volInv;

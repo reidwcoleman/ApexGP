@@ -10,11 +10,13 @@ sys.path.insert(0, HERE)
 import layout
 from mats import MATS, UNLIT
 import ward_kit
+import arch
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 def opt(k, d):
     return type(d)(argv[argv.index('--' + k) + 1]) if '--' + k in argv else d
 SIZE = opt('size', 2048); SAMPLES = opt('samples', 32); OUT = opt('out', '/tmp/lf_out')
+SIZE2 = opt('size2', 2048)     # the joinery's own lightmap
 NOBAKE = '--nobake' in argv
 ROOT = os.path.abspath(os.path.join(HERE, '..', '..', 'assets-src', 'lf'))
 os.makedirs(OUT, exist_ok=True)
@@ -49,6 +51,11 @@ elif STORE:
 else:
     m = layout.build()
 
+# piers and beams, and where the steel stands: real structure, added to the layout before anything is worked out from it
+if '--noarch' not in argv: arch.structure(m, opt('map', 'block'))
+# a kind of kit piece comes in only so many different ones: each unit is given the one it will really be
+for u_ in m.units:
+    if u_['kit'] == 'ward': u_['parts'] = [ward_kit.canon(u_['parts'][0])]
 # ------------------------------------------------------------------ faces
 class Grid:
     def __init__(s, boxes, cell=4.0):
@@ -71,6 +78,9 @@ def room_of(p):
         if r['a'][0] <= p[0] <= r['b'][0] and r['a'][1] <= p[1] <= r['b'][1] and r['a'][2] - 0.02 <= p[2] <= r['b'][2] + 0.25:
             return r
     return None
+
+# the joinery pass: takes its stand-in boxes out of the map before the faces are made, and plans the holes in the ceilings
+ARCH = arch.prepare(m, grid.inside, room_of, opt('map', 'block')) if '--noarch' not in argv else None
 
 AX = {'-x': (0, -1), '+x': (0, 1), '-y': (1, -1), '+y': (1, 1), '-z': (2, -1), '+z': (2, 1)}
 faces = []     # dict(mat, verts[4], n, uv[4], w, h, dens)
@@ -170,11 +180,22 @@ for b in m.boxes:
             vs_ = sorted({v0, v1, *[e for r in rs for e in (r['a'][v], r['b'][v]) if v0 < e < v1]})
             cells = [(us[i], us[i + 1], vs_[j], vs_[j + 1]) for i in range(len(us) - 1) for j in range(len(vs_) - 1)]
         for (cu0, cu1, cv0, cv1) in cells:
+            if f == '-z' and ARCH is not None:
+                # a suspended ceiling with tiles gone: the face is cut round the holes
+                rr = room_of([(cu0 + cu1) / 2, (cv0 + cv1) / 2, w - 0.06])
+                for (a0, a1, b0, b1) in arch.cut_ceiling(ARCH, rr, (cu0, cu1, cv0, cv1), b.b[2] - b.a[2]):
+                    put(b, f, ax, sg, u, v, w, a0, a1, b0, b1)
+                continue
             put(b, f, ax, sg, u, v, w, cu0, cu1, cv0, cv1)
 
 
-# roofs and hulls: quads that aren't on any box
-for q in getattr(m, 'quads', ()):
+# roofs and hulls: quads that aren't on any box. And the joinery, which is nothing else
+allq = list(getattr(m, 'quads', ()))
+if ARCH is not None:
+    dq, dcount = arch.detail(ARCH)
+    allq += dq
+    log('joinery', len(dq), 'faces:', ', '.join(f'{k} {round(v)}' for k, v in dcount.items()))
+for q in allq:
     v = np.array(q['v'], float)
     e1, e2 = v[1] - v[0], v[3] - v[0]
     n = np.cross(e1, e2)
@@ -185,51 +206,69 @@ for q in getattr(m, 'quads', ()):
     sc = MATS[q['mat']]['scale']
     # anchored to the world, not the quad: a wall cut round its windows has to read as one wall
     uv = [(float(np.dot(p, u_) / sc), float(np.dot(p, b_) / sc)) for p in v]
-    faces.append(dict(mat=q['mat'], v=[list(map(float, p)) for p in v], n=[float(c) for c in n], uv=uv, w=float(w_), h=float(h_), dens=q['dens'], tag='quad', tri=q.get('tri', False)))
+    fq = dict(mat=q['mat'], v=[list(map(float, p)) for p in v], n=[float(c) for c in n], uv=uv, w=float(w_), h=float(h_), dens=q['dens'], tag='quad', tri=q.get('tri', False))
+    if q.get('lm2'):
+        # its own rectangle in the lightmap: the box round it in its own plane, so a mitred end stays inside
+        pu, pb = (v - v[0]) @ u_, (v - v[0]) @ b_
+        fq['w'], fq['h'] = float(pu.max() - pu.min()), float(pb.max() - pb.min())
+        fq['lmuv'] = [(float((a_ - pu.min()) / max(1e-9, fq['w'])), float((c_ - pb.min()) / max(1e-9, fq['h']))) for a_, c_ in zip(pu, pb)]
+        fq['lm2'] = True
+        if 'vn' in q: fq['vn'] = q['vn']
+    faces.append(fq)
 log('faces', len(faces))
 
 # ------------------------------------------------------------------ atlas
 PAD = 2
 lit = [f for f in faces if f['mat'] not in UNLIT]
-def pack(d):
-    rects = []
-    for i, f in enumerate(lit):
-        dd = d * f['dens']
-        rects.append((max(2, math.ceil(f['w'] * dd)) + PAD * 2, max(2, math.ceil(f['h'] * dd)) + PAD * 2, i))
-    rects.sort(key=lambda r: -r[1])
-    x = y = rowh = 0
-    out = {}
-    for w, h, i in rects:
-        if w > SIZE: return None
-        if x + w > SIZE:
-            x = 0; y += rowh; rowh = 0
-        if y + h > SIZE: return None
-        out[i] = (x, y, w, h); x += w; rowh = max(rowh, h)
-    return out
-lo, hi = 1.0, 200.0
-best = None
-for _ in range(16):
-    mid = (lo + hi) / 2
-    r = pack(mid)
-    if r: best, lo = (r, mid), mid
-    else: hi = mid
-rects, dens = best
-log(f'atlas {SIZE} density {dens:.1f} texels/m')
-for i, f in enumerate(lit):
-    x, y, w, h = rects[i]
-    x0, y0, x1, y1 = x + PAD, y + PAD, x + w - PAD, y + h - PAD
-    if f.get('tri'):
-        f['lm'] = [(x0 / SIZE, y0 / SIZE), (x1 / SIZE, y0 / SIZE), ((x0 + x1) / 2 / SIZE, y1 / SIZE), ((x0 + x1) / 2 / SIZE, y1 / SIZE)]
-        continue
-    # corners by the face's own (u,v) order
-    v = np.array(f['v'], float)
-    e = [v[1] - v[0], v[3] - v[0]]
-    uv = []
-    for p in v:
-        a = np.dot(p - v[0], e[0]) / max(1e-9, np.dot(e[0], e[0]))
-        b = np.dot(p - v[0], e[1]) / max(1e-9, np.dot(e[1], e[1]))
-        uv.append(((x0 + a * (x1 - x0)) / SIZE, (y0 + b * (y1 - y0)) / SIZE))
-    f['lm'] = uv
+def atlas(fs, size, name):
+    def pack(d):
+        rects = []
+        for i, f in enumerate(fs):
+            dd = d * f['dens']
+            rects.append((max(2, math.ceil(f['w'] * dd)) + PAD * 2, max(2, math.ceil(f['h'] * dd)) + PAD * 2, i))
+        rects.sort(key=lambda r: -r[1])
+        x = y = rowh = 0
+        out = {}
+        for w, h, i in rects:
+            if w > size: return None
+            if x + w > size:
+                x = 0; y += rowh; rowh = 0
+            if y + h > size: return None
+            out[i] = (x, y, w, h); x += w; rowh = max(rowh, h)
+        return out
+    lo, hi = 1.0, 200.0
+    best = None
+    for _ in range(16):
+        mid = (lo + hi) / 2
+        r = pack(mid)
+        if r: best, lo = (r, mid), mid
+        else: hi = mid
+    if best is None: raise Exception(f'{name}: {len(fs)} faces do not fit in {size}')
+    rects, dens = best
+    log(f'{name} {size} density {dens:.1f} texels/m, {len(fs)} faces')
+    for i, f in enumerate(fs):
+        x, y, w, h = rects[i]
+        x0, y0, x1, y1 = x + PAD, y + PAD, x + w - PAD, y + h - PAD
+        f['rect'] = (x, y, w, h)
+        if 'lmuv' in f:
+            f['lm'] = [((x0 + a * (x1 - x0)) / size, (y0 + b * (y1 - y0)) / size) for a, b in f['lmuv']]
+            continue
+        if f.get('tri'):
+            f['lm'] = [(x0 / size, y0 / size), (x1 / size, y0 / size), ((x0 + x1) / 2 / size, y1 / size), ((x0 + x1) / 2 / size, y1 / size)]
+            continue
+        # corners by the face's own (u,v) order
+        v = np.array(f['v'], float)
+        e = [v[1] - v[0], v[3] - v[0]]
+        uv = []
+        for p in v:
+            a = np.dot(p - v[0], e[0]) / max(1e-9, np.dot(e[0], e[0]))
+            b = np.dot(p - v[0], e[1]) / max(1e-9, np.dot(e[1], e[1]))
+            uv.append(((x0 + a * (x1 - x0)) / size, (y0 + b * (y1 - y0)) / size))
+        f['lm'] = uv
+    return dens
+dens = atlas([f for f in lit if not f.get('lm2')], SIZE, 'atlas')
+lit2 = [f for f in lit if f.get('lm2')]
+dens2 = atlas(lit2, SIZE2, 'joinery atlas') if lit2 else 0.0
 for f in faces:
     f.setdefault('lm', [(0, 0)] * 4)
 
@@ -252,25 +291,32 @@ def blender_mat(name):
         bs.inputs['Roughness'].default_value = 0.8
         bs.inputs['Specular IOR Level'].default_value = 0.2
     return mat
-mesh = bpy.data.meshes.new('world')
-verts, polys, pm = [], [], []
-midx = {n: i for i, n in enumerate(matnames)}
-for f in faces:
-    i = len(verts)
-    verts += [tuple(p) for p in f['v']]
-    polys.append((i, i + 1, i + 2, i + 3))
-    pm.append(midx[f['mat']])
-mesh.from_pydata(verts, [], polys)
-for n in matnames:
-    mesh.materials.append(blender_mat(n))
-mesh.polygons.foreach_set('material_index', pm)
-uvl = mesh.uv_layers.new(name='lm')
-uvd = np.array([c for f in faces for c in f['lm']], np.float32).ravel()
-uvl.data.foreach_set('uv', uvd)
-mesh.update()
-world = bpy.data.objects.new('world', mesh)
+bmats = {}
+def build_mesh(name, fs):
+    me = bpy.data.meshes.new(name)
+    names = sorted({f['mat'] for f in fs})
+    mi = {n: i for i, n in enumerate(names)}
+    verts, polys, pm = [], [], []
+    for f in fs:
+        i = len(verts)
+        verts += [tuple(p) for p in f['v']]
+        polys.append((i, i + 1, i + 2, i + 3))
+        pm.append(mi[f['mat']])
+    me.from_pydata(verts, [], polys)
+    for n in names:
+        if n not in bmats: bmats[n] = blender_mat(n)
+        me.materials.append(bmats[n])
+    me.polygons.foreach_set('material_index', pm)
+    uvl = me.uv_layers.new(name='lm')
+    uvl.data.foreach_set('uv', np.array([c for f in fs for c in f['lm']], np.float32).ravel())
+    me.update()
+    ob = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(ob)
+    return ob
 scene = bpy.context.scene
-scene.collection.objects.link(world)
+world = build_mesh('world', [f for f in faces if not f.get('lm2')])
+mesh = world.data
+detail = build_mesh('detail', [f for f in faces if f.get('lm2')]) if lit2 else None
 
 # ------------------------------------------------------------------ props
 cache, bbox = {}, {}
@@ -448,6 +494,16 @@ for u in m.units:
         placed.append(o)
     units_out.append(e)
 log('units', len(m.units), 'kinds', len(units), 'tiled', len(placed))
+if '--stats' in argv:
+    import collections
+    tk = collections.Counter(); nk = collections.Counter(); per = {}
+    for u in m.units:
+        o_ = unit_obj(u['kit'], u['parts'], u['far'])
+        t_ = sum(len(p.vertices) - 2 for p in o_.data.polygons)
+        k_ = u['parts'][0].split('_')[0]
+        tk[k_] += t_; nk[k_] += 1; per[k_] = max(per.get(k_, 0), t_)
+    log('kit tris', sum(tk.values()))
+    for k_, t_ in tk.most_common(): print(f'   {k_:12s} x{nk[k_]:4d}  max {per[k_]:6d}  total {t_:8d}', flush=True)
 # one mesh: a bake restarts the renderer for every selected object, which is an hour at this count
 if len(placed) > 1:
     bpy.ops.object.select_all(action='DESELECT')
@@ -564,15 +620,17 @@ nt.links.new(mixc.outputs['Result'], bg.inputs['Color'])
 
 # ------------------------------------------------------------------ export the geometry
 buf = bytearray(); meta = []
-for n in matnames:
-    fs = [f for f in faces if f['mat'] == n]
+for n, second in [(n_, sec_) for sec_ in (False, True) for n_ in matnames]:
+    fs = [f for f in faces if f['mat'] == n and bool(f.get('lm2')) == second]
+    if not fs: continue
     pos = np.array([p for f in fs for p in f['v']], np.float32)
     pos = pos[:, [0, 2, 1]] * np.array([1, 1, -1], np.float32)       # z-up to y-up
-    nor = np.array([f['n'] for f in fs for _ in range(4)], np.float32)[:, [0, 2, 1]] * np.array([1, 1, -1], np.float32)
+    nor = np.array([nn for f in fs for nn in (f['vn'] if 'vn' in f else [f['n']] * 4)], np.float32)[:, [0, 2, 1]] * np.array([1, 1, -1], np.float32)
     uv = np.array([c for f in fs for c in f['uv']], np.float32)
     lm = np.array([c for f in fs for c in f['lm']], np.float32)
     idx = np.array([[i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3] for i in range(len(fs))], np.uint32).ravel()
     e = dict(mat=n, verts=len(pos), tris=len(idx) // 3)
+    if second: e['lm2'] = 1
     for k, a in (('pos', pos), ('nor', nor), ('uv', uv), ('lm', lm), ('idx', idx)):
         e[k] = len(buf); buf += a.tobytes()
     meta.append(e)
@@ -603,7 +661,7 @@ for p in m.props:
         e['loose'] = dict(p['loose'], half=[float(v) for v in h])
     props_out.append(e)
 json.dump(dict(stains=getattr(m, 'stains', []), veg=getattr(m, 'veg', []), centre=getattr(m, 'centre', None), flares=getattr(m, 'flares', None), signs=getattr(m, 'signs', None), attract=getattr(m, 'attract', None), mats=meta, colliders=colliders, props=props_out, units=units_out, doors=m.doors, glass=m.glass, spawns=m.spawns, hold=m.hold, zones=m.zones, lights=m.lights, rooms=m.rooms,
-               density=dens, size=SIZE, sun=sun_out), open(f'{OUT}/map_raw.json', 'w'))
+               density=dens, size=SIZE, sun=sun_out, size2=SIZE2 if lit2 else 0), open(f'{OUT}/map_raw.json', 'w'))
 log('geometry written', len(buf) // 1024, 'KB', len(colliders), 'colliders')
 # the sky, small, for the backdrop
 sky = env.image
@@ -706,6 +764,41 @@ np.save(f'{OUT}/lightmap.npy', px.reshape(SIZE, SIZE, 4)[..., :3].astype(np.floa
 img.filepath_raw = f'{OUT}/lightmap.exr'; img.file_format = 'OPEN_EXR'; img.save()
 log('saved', float(px.mean()), float(np.percentile(px, 99)))
 # the same again for the kit, into its own atlas
+if detail is not None:
+    # the joinery, into its own atlas. Each face has its own rectangle there, so the noise is taken out rectangle by
+    # rectangle: a denoiser run over the whole sheet smears one moulding into the next
+    imgd = bpy.data.images.new('lightmapd', SIZE2, SIZE2, alpha=False, float_buffer=True)
+    for mat in detail.data.materials:
+        nd = mat.node_tree.nodes.new('ShaderNodeTexImage'); nd.image = imgd; nd.select = True
+        mat.node_tree.nodes.active = nd
+    bpy.ops.object.select_all(action='DESELECT')
+    detail.select_set(True); bpy.context.view_layer.objects.active = detail
+    keep_s = scene.cycles.samples
+    scene.cycles.samples = max(8, int(SAMPLES * opt('dsamples', 1.0)))
+    log('baking joinery', SIZE2, scene.cycles.samples)
+    bake_light(imgd, 2)
+    scene.cycles.samples = keep_s
+    log('baked joinery')
+    pd = np.empty(SIZE2 * SIZE2 * 4, np.float32); imgd.pixels.foreach_get(pd)
+    pd = pd.reshape(SIZE2, SIZE2, 4)[..., :3].copy()
+    out_d = pd.copy()
+    for f in lit2:
+        x, y, w_, h_ = f['rect']
+        blk = pd[y:y + h_, x:x + w_]
+        # light on a moulding changes slowly along it and hardly at all across it
+        for axis_, n_ in ((0, h_), (1, w_)):
+            r_ = 1 if n_ <= 8 else 3
+            acc = np.zeros_like(blk); cnt = np.zeros(blk.shape[:2] + (1,), np.float32)
+            for o_ in range(-r_, r_ + 1):
+                sl_src = [slice(None), slice(None)]; sl_dst = [slice(None), slice(None)]
+                if o_ > 0: sl_src[axis_] = slice(o_, None); sl_dst[axis_] = slice(None, -o_)
+                elif o_ < 0: sl_src[axis_] = slice(None, o_); sl_dst[axis_] = slice(-o_, None)
+                if n_ - abs(o_) <= 0: continue
+                acc[tuple(sl_dst)] += blk[tuple(sl_src)]; cnt[tuple(sl_dst)] += 1
+            blk = acc / np.maximum(cnt, 1)
+        out_d[y:y + h_, x:x + w_] = blk
+    np.save(f'{OUT}/lightmap2.npy', out_d.astype(np.float16))
+    log('joinery lightmap saved', float(out_d.mean()))
 img2 = bpy.data.images.new('lightmap2', SIZE, SIZE, alpha=False, float_buffer=True)
 seen = set()
 for o in placed:
@@ -722,7 +815,9 @@ if placed:
     log('baking kit', len(placed))
     bake_light(img2, 2)
     log('baked kit')
-img2.filepath_raw = f'{OUT}/lightmap2.exr'; img2.file_format = 'OPEN_EXR'; img2.save()
+if detail is None or placed:
+    if detail is not None: raise Exception('kit tiles and joinery both want the second lightmap')
+    img2.filepath_raw = f'{OUT}/lightmap2.exr'; img2.file_format = 'OPEN_EXR'; img2.save()
 if land is not None:
     img3 = bpy.data.images.new('lightmap3', SIZE, SIZE, alpha=False, float_buffer=True)
     nd = lmat.node_tree.nodes.new('ShaderNodeTexImage'); nd.image = img3; nd.select = True

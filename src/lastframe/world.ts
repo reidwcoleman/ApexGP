@@ -59,6 +59,21 @@ const TRIPLANAR: Record<string, [string, number, number[], number]> = {
   lfmould: ['mossy_stone_wall', 0.4, [2.0, 3.0, 3.0], 1.0],
   lfboard: ['wood_planks_dirt', 0.55, [0.82, 0.8, 0.78], 0.8],
   lfgalv: ['concrete_pavement_02', 1.2, [1.25, 1.5, 1.9], 0.5],
+  // the hospital's kit: stove enamel, gloss paint gone dull, vinyl, and the cloth: linen on the beds and round them
+  lfsheet: ['rough_linen', 0.5, [1.66, 1.16, 0.74], 0.92],
+  lfpillow: ['rough_linen', 0.45, [1.82, 1.26, 0.78], 0.92],
+  lfcurtain: ['rough_linen', 0.6, [1.1, 0.96, 0.61], 0.95],
+  lfmattress: ['painted_plaster_wall', 0.7, [0.7, 0.9, 0.98], 0.55],
+  lfseatp: ['painted_plaster_wall', 0.8, [0.31, 0.64, 0.76], 0.45],
+  lfcream: ['painted_plaster_wall', 1.1, [1.19, 1.28, 1.16], 0.5],
+  lfenamel: ['painted_plaster_wall', 0.9, [1.27, 1.43, 1.38], 0.42],
+  lflocker: ['painted_plaster_wall', 1.0, [0.38, 0.58, 0.58], 0.5],
+  lfredp: ['painted_plaster_wall', 0.9, [0.96, 0.086, 0.067], 0.4],
+  lfgreyp: ['painted_plaster_wall', 0.9, [0.38, 0.45, 0.49], 0.5],
+  lfradpaint: ['painted_plaster_wall', 0.8, [1.19, 1.28, 1.22], 0.55],
+  lfyellow: ['painted_plaster_wall', 0.8, [1.06, 0.86, 0.09], 0.5],
+  lfyellowp: ['painted_plaster_wall', 0.8, [1.16, 1.0, 0.13], 0.5],
+  lfbluep: ['painted_plaster_wall', 0.8, [0.19, 0.43, 0.8], 0.45],
 };
 
 /**
@@ -92,6 +107,8 @@ const WELD_CELL = 40;
 interface Weld {
   mat: THREE.Material;
   small: boolean;
+  /** tube, wire and rod: drawn once, in the picture; it lays no depth first and throws no shadow */
+  fine: boolean;
   parts: { geo: THREE.BufferGeometry; m: THREE.Matrix4; tint: number[] }[];
 }
 /** many small meshes of one material, in place, as one: positions and normals in the world's own space, each one's tint in its colours */
@@ -197,7 +214,7 @@ function triplanar(m: THREE.MeshStandardMaterial, scale: number, local = false, 
 }
 
 export interface MapData {
-  mats: { mat: string; verts: number; tris: number; pos: number; nor: number; uv: number; lm: number; idx: number }[];
+  mats: { mat: string; verts: number; tris: number; pos: number; nor: number; uv: number; lm: number; idx: number; lm2?: number }[];
   materials: Record<string, { tex: string; scale: number; tint: number[]; rough: number; wet: number; metal: number; nrm: number; emit: number[] | null; mono?: number }>;
   textures: string[];
   colliders: [number, number, number, number, number, number, number, string, string][];
@@ -571,7 +588,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   // what is printed on the shop's stock: one sheet for every box, tin and case
   if (MAP_ID === 'store') need.push(['tex/lf_pack_c.webp', true]);
   // and the scans the modelled kit is projected with: the map's own list only has what its walls and floors use
-  for (const n of new Set(Object.values(TRIPLANAR).map((t) => t[0]))) if (MAP_ID === 'store' && !map.textures.includes(n) && !/mud|rusty/.test(n)) need.push([`tex/${n}_c.webp`, true]);
+  for (const n of new Set(Object.values(TRIPLANAR).map((t) => t[0]))) if (!map.textures.includes(n) && !/mud|rusty/.test(n) && (MAP_ID === 'store' || !/mossy/.test(n))) need.push([`tex/${n}_c.webp`, true]);
   if (map.terrain) {
     need.push(['lm3.webp', false], ['splat.webp', false], ['near.webp', false]);
     for (const n of ['leafy_grass', 'seaside_rock']) need.push([`tex/${n}_c.webp`, true], [`tex/${n}_n.webp`, false]);
@@ -615,8 +632,9 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
   const group = new THREE.Group();
   group.add(makeSky(skyT, map.lm, map.weather?.sky));
   const mats = new Map<string, THREE.Material>();
-  const makeMat = (name: string) => {
-    let m = mats.get(name);
+  const makeMat = (name: string, lm2 = false) => {
+    const key = lm2 ? name + '|2' : name;
+    let m = mats.get(key);
     if (m) return m;
     const d = map.materials[name];
     if (d.emit) m = new THREE.MeshBasicMaterial({ color: new THREE.Color(d.emit[0], d.emit[1], d.emit[2]).multiplyScalar(0.5) });
@@ -629,9 +647,10 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
       st.normalScale.set(d.nrm, d.nrm);
       if (st.aoMap) st.aoMap.channel = 0;
       if (d.mono) st.defines = { ...st.defines, LF_MONO: d.mono.toFixed(3) };
-      m = applyLF(st, { lightmap: true, wet: d.wet, outdoor: !!map.terrain });
+      // the joinery is lit from the second lightmap
+      m = applyLF(st, { lightmap: true, lm2, wet: d.wet, outdoor: !!map.terrain });
     }
-    mats.set(name, m);
+    mats.set(key, m);
     return m;
   };
   for (const e of map.mats) {
@@ -641,9 +660,11 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
     g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(bin, e.uv, e.verts * 2), 2));
     g.setAttribute('uvLM', new THREE.BufferAttribute(new Float32Array(bin, e.lm, e.verts * 2), 2));
     g.setIndex(new THREE.BufferAttribute(new Uint32Array(bin, e.idx, e.tris * 3), 1));
-    const mesh = new THREE.Mesh(g, makeMat(e.mat));
+    const mesh = new THREE.Mesh(g, makeMat(e.mat, !!e.lm2));
     mesh.name = e.mat;
-    mesh.userData.arch = true;
+    // the joinery is fine work: it is lit by the bake and throws no shadow of its own that anyone would look for
+    if (e.lm2) mesh.userData.small = true;
+    else mesh.userData.arch = true;
     // after the furniture: its depth is already down, so whatever a shelf covers is never shaded as wall first
     mesh.renderOrder = 1;
     mesh.frustumCulled = false;
@@ -742,14 +763,16 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
     const glass = roomGlass();
     const near = new Map<THREE.Material, THREE.Material>(), far = new Map<THREE.Material, THREE.Material>();
     const matFor = (m0: THREE.MeshStandardMaterial, tiled: boolean) => {
-      if (/glass/i.test(m0.name)) return glass;
+      // (the kit's own dark glass, a screen or a freezer door, is glass you see through, not a window with a room behind it)
+      if (/glass/i.test(m0.name) && m0.name !== 'lfglassd') return glass;
       const table = tiled ? near : far;
       let m = table.get(m0);
       if (!m) {
         const c = m0.clone();
         c.transparent = false;
         c.alphaTest = 0;
-        c.side = THREE.FrontSide;
+        // cloth and paper are one sheet thick: seen from both sides
+        c.side = /^lf(sheet|curtain|bag|paper|paper2|rot)$/.test(m0.name) ? THREE.DoubleSide : THREE.FrontSide;
         for (const t of [c.map, c.normalMap, c.roughnessMap]) if (t) t.anisotropy = 4;
         // plaster takes more light than the scans round it
         if (!map.terrain) c.color.multiplyScalar(tiled ? 0.74 : 0.8);
@@ -774,6 +797,13 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
           c.color.setRGB(0.006, 0.0055, 0.005);
           c.roughness = 0.3;
           c.metalness = 0;
+        }
+        if (m0.name === 'lfglassd') {
+          c.transparent = true;
+          c.opacity = 0.42;
+          c.depthWrite = false;
+          c.roughness = 0.08;
+          c.color.setRGB(0.03, 0.036, 0.04);
         }
         // paper on a floor is the palest thing on it: lit from the cubes it came out darker than the tiles under it
         if (/^lfpaper/.test(m0.name)) c.color.multiplyScalar(1.5);
@@ -878,12 +908,13 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
         const u0 = list[0];
         const ext = [size3.x * u0.sc[0], size3.y * u0.sc[2], size3.z * u0.sc[1]];
         const small = Math.min(ext[0], ext[1], ext[2]) < 0.06 || Math.max(ext[0], ext[1], ext[2]) < 0.3;
+        const fine = /^lf(chrome|steel|cable|wire|blackm|basket)$/.test(m0.name);
         const std = mat as THREE.MeshStandardMaterial;
         if (!tiled && !u0.float && list.length < 5 && std.isMeshStandardMaterial && !std.transparent && (std.vertexColors || list.every((u) => u.tint[0] === 1 && u.tint[1] === 1 && u.tint[2] === 1))) {
           for (const u of list) {
             const wk = `${mat.uuid}@${Math.floor(u.pos[0] / WELD_CELL)},${Math.floor(u.pos[2] / WELD_CELL)}${small ? 's' : ''}`;
             let w = welds.get(wk);
-            if (!w) welds.set(wk, (w = { mat, small, parts: [] }));
+            if (!w) welds.set(wk, (w = { mat, small, fine, parts: [] }));
             q.setFromAxisAngle(UP, u.rot);
             w.parts.push({ geo: mesh.geometry, m: new THREE.Matrix4().compose(v.set(u.pos[0], u.pos[1], u.pos[2]), q, sc.set(u.sc[0], u.sc[2], u.sc[1])).multiply(local), tint: u.tint });
           }
@@ -893,6 +924,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
         const inst = new THREE.InstancedMesh(geo, mat, list.length);
         inst.name = id;
         inst.userData.small = small;
+        inst.userData.fine = fine;
         list.forEach((u, i) => {
           q.setFromAxisAngle(UP, u.rot);
           // sc is along the module, out of it, up it
@@ -914,6 +946,7 @@ export async function loadWorld(r: THREE.WebGLRenderer, progress: (f: number, wh
     for (const w of welds.values()) {
       const mesh = weld(w);
       mesh.userData.small = w.small;
+      mesh.userData.fine = w.fine;
       // what stands on a shelf is in the shelf's own shadow from any lamp that matters: it takes shadows and throws none
       if (/^lf(pack|tin|can|jar|bottle|lab)/.test(w.mat.name)) mesh.userData.stock = true;
       group.add(mesh);

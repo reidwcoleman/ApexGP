@@ -1,4 +1,4 @@
-// Bots only, for a while: is anyone standing on a stair or in a doorway going nowhere?  node tools/lastframe/botwatch.mjs PORT [map] [seconds]
+// Bots only, for a while: is anyone standing on a stair or in a doorway going nowhere?  node tools/lastframe/botwatch.mjs PORT [map] [seconds]   (SEED=n for another match)
 import { chromium } from 'playwright-core';
 import { CHROME, ANGLE } from '../chrome.mjs';
 const [port, map = 'ward', secs = '60'] = process.argv.slice(2);
@@ -7,7 +7,7 @@ const p = await (await b.newContext({ viewport: { width: 640, height: 360 } })).
 p.on('pageerror', (e) => console.log('pageerror', e.message));
 await p.goto(`http://localhost:${port}/lastframe.html?dev=1&map=${map}`);
 await p.waitForFunction(() => window.__lf, null, { timeout: 180000 });
-await p.evaluate(() => { const g = __lf.g; g.autoInput = true; g.startSolo({ mode: 'tdm', bots: 8, skill: 0.5, time: 8, limit: 200, seed: 5 }, 'Tester', 0, 'carbine'); });
+await p.evaluate((seed) => { const g = __lf.g; g.autoInput = true; g.startSolo({ mode: 'tdm', bots: 8, skill: 0.5, time: 8, limit: 200, seed }, 'Tester', 0, 'carbine'); }, +(process.env.SEED ?? 5));
 await p.waitForTimeout(6000);
 // the human out of the way, so it's only them
 await p.evaluate(() => { const g = __lf.g; Object.assign(g.me.m, { x: -12, y: 0, z: 14 }); });

@@ -1977,14 +1977,33 @@ KINDS = dict(bodybag=bodybag, candles=candles, plaster=plaster, blinds=blinds, h
              rack=rack, strips=strips, hooks=hooks, aislesign=aislesign, trussbay=trussbay, cardstack=cardstack, duct=duct, banner=banner, baskets=baskets, promo=promo)
 
 
+def canon(name):
+    """the piece that is really built for this name: a kind has only so many different ones, whatever seeds are asked for"""
+    import kit2
+    kind, _, seed = name.partition('_')
+    n = kit2.VARIANTS.get(kind)
+    if n and seed.isdigit():
+        return f'{kind}_{int(seed) % n + 1}'
+    return name
+
+
 def make(name):
-    """name is kind or kind_N (a seed, for the pieces that vary)"""
+    """name is kind or kind_N (a seed, for the pieces that vary). Pieces remade in kit2.py come from there; every piece is
+    then finished at the bench: hard edges bevelled, normals weighted"""
+    import kit2, forge
     kind, _, seed = name.partition('_')
     b = B('w_' + name)
-    if kind == 'crater':
+    rng = random.Random(sum(map(ord, name)) if not seed else int(seed))
+    if kind in kit2.KINDS:
+        kit2.KINDS[kind](b, rng)
+    elif kind == 'crater':
         crater_dish(b, random.Random(int(seed) * 7), int(seed))
     elif kind in KINDS_EXTRA:
-        KINDS_EXTRA[kind](b, random.Random(sum(map(ord, name)) if not seed else int(seed)))
+        KINDS_EXTRA[kind](b, rng)
     else:
-        KINDS[kind](b, random.Random(sum(map(ord, name)) if not seed else int(seed)))
-    return b.done()
+        KINDS[kind](b, rng)
+    o = b.done()
+    w = kit2.FINISH.get(kind, 0.004)
+    if w is not None:
+        forge.finish(o, width=w, limit=2600)
+    return o

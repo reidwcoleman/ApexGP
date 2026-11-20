@@ -38,6 +38,9 @@ seaside_rock lichen_rock rock_wall_10 worn_asphalt clean_pebbles blue_painted_pl
 MODELS += '''wooden_bucket_01 planter_pot_clay wooden_ladder_02 stone_01 dandelion_01 shrub_sorrel_01 flower_gazania wooden_lantern_01 fishermans_hat'''.split()
 HDRI += ['kloofendal_48d_partly_cloudy_puresky']
 
+# cloth and vinyl for the modelled kit
+TEX += ['rough_linen', 'fabric_leather_02']
+
 
 # the ward
 TEX += '''square_tiled_wall long_white_tiles peeling_painted_wall old_linoleum_flooring_01 worn_tile_floor dirty_concrete'''.split()

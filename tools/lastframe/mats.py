@@ -112,6 +112,10 @@ MATS = {
     'lightbox': M('metal_plate', 1.0, emit=(0.8, 0.95, 1.05)),
     'screenglow': M('metal_plate', 1.0, emit=(0.35, 0.55, 0.9)),
     'rubble': M('dirty_concrete', 1.7, (0.6, 0.58, 0.55), rough=0.95),
+    # scans the modelled kit is projected with (never on a wall: listed so they are fetched and packed)
+    'kit_linen': M('rough_linen', 1.0),
+    # above a suspended ceiling: the slab and the dark
+    'void': M('dirty_concrete', 2.4, (0.3, 0.29, 0.28), rough=0.95),
     'hosp_wall3': M('peeling_painted_wall', 2.4, (0.5, 0.5, 0.42), mono=0.182, nrm=1.2),
     'hosp_dado3': M('peeling_painted_wall', 2.4, (0.3, 0.2, 0.16), rough=0.5, mono=0.182, nrm=1.2),
     'kidwall': M('peeling_painted_wall', 2.4, (0.62, 0.5, 0.3), mono=0.182, nrm=1.2),

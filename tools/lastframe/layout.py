@@ -40,6 +40,8 @@ class Map:
         s.walls = []     # every wall() call, with the boxes it made, so a pass can open it up after
         s.cas = {}       # id(door or window record) -> the frame boxes round it (and the glass)
         s.openings = []  # doorways with no door in them: (x, y, z, width, axis)
+        s.casings = []   # every frame round an opening: where, how big, and the plain boxes that stand in for it (arch.py models it)
+        s.rails = []     # every pipe rail, with its boxes, for the same pass
         s.rng = random.Random(7)
 
     def box(s, a, b, mat, **k):
@@ -104,6 +106,7 @@ class Map:
                 out.append(s.box((p0, c - d, h0), (p1, c + d, h1), mat, collide=False, density=0.4))
             else:
                 out.append(s.box((c - d, p0, h0), (c + d, p1, h1), mat, collide=False, density=0.4))
+        s.casings.append(dict(axis=axis, c=c, a=a, b=b, z0=z0, z1=z1, kind='hatch' if sill else 'door', mat=mat, boxes=list(out)))
         return out
 
     def window(s, axis, c, p, z, w=1.2, h=1.45, sill=0.9, wt=EXT_T, boards=False, glass=True):
@@ -117,11 +120,12 @@ class Map:
         m = (a + b) / 2
         hz = z + sill + h * 0.55
         if axis == 'x':
-            s.box((m - 0.02, c - d, z + sill), (m + 0.02, c + d, z + sill + h), 'trim', collide=False, density=0.3)
-            s.box((a, c - d, hz - 0.02), (b, c + d, hz + 0.02), 'trim', collide=False, density=0.3)
+            bars = [s.box((m - 0.02, c - d, z + sill), (m + 0.02, c + d, z + sill + h), 'trim', collide=False, density=0.3),
+                    s.box((a, c - d, hz - 0.02), (b, c + d, hz + 0.02), 'trim', collide=False, density=0.3)]
         else:
-            s.box((c - d, m - 0.02, z + sill), (c + d, m + 0.02, z + sill + h), 'trim', collide=False, density=0.3)
-            s.box((c - d, a, hz - 0.02), (c + d, b, hz + 0.02), 'trim', collide=False, density=0.3)
+            bars = [s.box((c - d, m - 0.02, z + sill), (c + d, m + 0.02, z + sill + h), 'trim', collide=False, density=0.3),
+                    s.box((c - d, a, hz - 0.02), (c + d, b, hz + 0.02), 'trim', collide=False, density=0.3)]
+        s.casings[-1].update(kind='window', boxes=s.casings[-1]['boxes'] + bars, mull=m, transom=hz, wt=wt)
         if boards:
             for i in range(3):
                 zz = z + sill + 0.2 + i * 0.42 + s.rng.uniform(-0.05, 0.05)
@@ -206,17 +210,19 @@ class Map:
         """a pipe rail: posts and two runs; stops you and little else"""
         d = 0.025
         n = max(1, int(abs(p1 - p0) / 1.6))
+        made = []
         for i in range(n + 1):
             p = p0 + (p1 - p0) * i / n
             if axis == 'x':
-                s.box((p - d, c - d, z), (p + d, c + d, z + h), mat, collide=False, density=0.15)
+                made.append(s.box((p - d, c - d, z), (p + d, c + d, z + h), mat, collide=False, density=0.15))
             else:
-                s.box((c - d, p - d, z), (c + d, p + d, z + h), mat, collide=False, density=0.15)
+                made.append(s.box((c - d, p - d, z), (c + d, p + d, z + h), mat, collide=False, density=0.15))
         for hh in (h, h * 0.55):
             if axis == 'x':
-                s.box((p0, c - d, z + hh - d), (p1, c + d, z + hh + d), mat, collide=False, density=0.15)
+                made.append(s.box((p0, c - d, z + hh - d), (p1, c + d, z + hh + d), mat, collide=False, density=0.15))
             else:
-                s.box((c - d, p0, z + hh - d), (c + d, p1, z + hh + d), mat, collide=False, density=0.15)
+                made.append(s.box((c - d, p0, z + hh - d), (c + d, p1, z + hh + d), mat, collide=False, density=0.15))
+        s.rails.append(dict(axis=axis, c=c, p0=min(p0, p1), p1=max(p0, p1), z=z, h=h, n=n, mat=mat, boxes=made))
         if axis == 'x':
             s.invisible((p0, c - 0.05, z), (p1, c + 0.05, z + h), pen=True)
         else:
