@@ -523,7 +523,6 @@ export function beanCup(info: { name: string; blurb: string }, rule: CupRule = '
   const hoops: THREE.Vector3[] = [];
   if (rule === 'hoops') {
     const rimM = new THREE.MeshPhysicalMaterial({ color: 0xff5a1f, roughness: 0.3, clearcoat: 1, emissive: 0xff3a00, emissiveIntensity: 0.35 });
-    const boardM = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.25, clearcoat: 1, transparent: true, opacity: 0.86 });
     const cord = netArt();
     cord.repeat.set(9, 2);
     for (const team of [0, 1]) {
@@ -531,12 +530,16 @@ export function beanCup(info: { name: string; blurb: string }, rule: CupRule = '
       hoops.push(at);
       // (in the colour of the side defending it)
       const col = CUP_COLORS[team === 0 ? 1 : 0];
+      // (a camera at this end sees through the board and the net: they fade as it comes near, like a goal's)
+      const boardM = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.25, clearcoat: 1, transparent: true, opacity: 0.86 });
+      const netM = new THREE.MeshBasicMaterial({ map: cord, transparent: true, side: THREE.DoubleSide, depthWrite: false, color: 0xffffff });
+      see[s > 0 ? 1 : 0].push(boardM, netM);
       const g = new THREE.Group();
       g.position.copy(at);
       const rim = new THREE.Mesh(new THREE.TorusGeometry(C.hoopR, 0.16, 12, 56).rotateX(Math.PI / 2), rimM);
       rim.castShadow = true;
       g.add(rim);
-      const net = new THREE.Mesh(new THREE.CylinderGeometry(C.hoopR, C.hoopR * 0.62, 2.4, 28, 1, true).translate(0, -1.2, 0), new THREE.MeshBasicMaterial({ map: cord, transparent: true, side: THREE.DoubleSide, depthWrite: false, color: 0xffffff }));
+      const net = new THREE.Mesh(new THREE.CylinderGeometry(C.hoopR, C.hoopR * 0.62, 2.4, 28, 1, true).translate(0, -1.2, 0), netM);
       g.add(net);
       const back = s * (C.hoopIn - 0.4);
       const board = new THREE.Mesh(new THREE.BoxGeometry(8.4, 5.6, 0.3).translate(0, 2, back), boardM);

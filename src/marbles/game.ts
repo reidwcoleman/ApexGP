@@ -2859,11 +2859,17 @@ export class MarbleGame {
     }
     // (the pitch: inside the glass, always)
     if (c.cup) {
-      const C = c.cup.cfg, ctr = c.cup.center, lx = C.HW - 1.2, lz = C.HL + 2;
+      const C0 = c.cup.cfg;
+      // (Bean Hoops: the end wall is a wall, with the board on it: the camera stays this side of it,
+      // and backed up against it comes down behind your shoulder to look up the court, not up over
+      // you to look down at your feet with the ball off the top of the screen)
+      const hoopy = C0.rule === 'hoops';
+      const C = C0, ctr = c.cup.center, lx = C.HW - 1.2, lz = hoopy ? C.HL - 1.4 : C.HL + 2;
       const ox = Math.abs(pos.x - ctr.x) - lx, oz = Math.abs(pos.z - ctr.z) - lz;
       if (ox > 0) pos.x = ctr.x + Math.sign(pos.x - ctr.x) * lx;
       if (oz > 0) pos.z = ctr.z + Math.sign(pos.z - ctr.z) * lz;
-      pos.y += Math.max(0, ox, oz) * 0.45;
+      if (hoopy && oz > 0) pos.y = Math.max(tgt.y + 3.1, pos.y - oz * 0.42) + Math.max(0, ox) * 0.45;
+      else pos.y += Math.max(0, ox, oz) * 0.45;
       // (the final's ring: inside the wall, and up over your shoulder when you're backed against it)
       if (c.cup.gates) {
         const rr = Math.hypot(pos.x - ctr.x, pos.z - ctr.z), lim = c.cup.gates.R - 0.9;
@@ -2886,7 +2892,7 @@ export class MarbleGame {
       const ball = this.cupP.ballNear(m.pos);
       if (ball) {
         const d = Math.hypot(ball.pos.x - m.pos.x, ball.pos.z - m.pos.z);
-        look.lerp(ball.pos, THREE.MathUtils.clamp((d - 3) / 24, 0, 1) * 0.45);
+        look.lerp(ball.pos, THREE.MathUtils.clamp((d - 3) / 24, 0, 1) * (c.cup.cfg.rule === 'hoops' ? 0.62 : 0.45));
         const up = ball.pos.y - c.cup.center.y - c.cup.cfg.R;
         if (up > 0.5) look.y += up * THREE.MathUtils.clamp(1 - d / 34, 0.25, 1) * 0.6;
       }
@@ -2894,7 +2900,9 @@ export class MarbleGame {
       // view up after a high ball, the aim comes back down until you're inside the frame again)
       // (turned, not slid: with the ball far off, sliding the aim along the ground hardly turns the view)
       const toP = this.camTmp.subVectors(tgt, pos), toL = look.clone().sub(pos);
-      const lim = THREE.MathUtils.degToRad(this.camera.fov / 2) * 0.58, a = toP.angleTo(toL);
+      // (Bean Hoops, with your back to the end wall and the camera right over you: the court comes first)
+      const pin = c.cup.cfg.rule === 'hoops' && Math.abs(pos.z - c.cup.center.z) > c.cup.cfg.HL - 1.5;
+      const lim = THREE.MathUtils.degToRad(this.camera.fov / 2) * (pin ? 1.7 : c.cup.cfg.rule === 'hoops' ? 0.82 : 0.58), a = toP.angleTo(toL);
       if (a > lim) {
         const len = toL.length(), k = 1 - lim / a;
         toL.normalize().lerp(toP.normalize(), k).normalize();
