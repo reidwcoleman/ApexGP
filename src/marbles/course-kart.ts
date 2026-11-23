@@ -213,7 +213,7 @@ export function whereOn(tr: KartTrack, at: Where) {
   return best;
 }
 
-export function beanBayGP(info: { name: string; blurb: string }, layout: KartLayout = BEAN_BAY_GP): Course {
+export function beanBayGP(info: { name: string; blurb: string }, layout: KartLayout = BEAN_BAY_GP, final = false): Course {
   const b = new CourseBuilder();
   const y0 = 40, center = new THREE.Vector3(-10, y0, 0);
   b.lakeY = y0 - 13;
@@ -367,9 +367,10 @@ void main() {
   const byId = new Map<number, Racer>();
   const gridAt = tr.point(RACE.start - 20, 0, 1, new THREE.Vector3());
   return {
-    id: layout.id,
+    // (as the final, the Crown Grand Prix: the same circuit, and the first across the line takes the crown)
+    id: final ? 'crowngp' : layout.id,
     name: info.name,
-    kind: 'race',
+    kind: final ? 'final' : 'race',
     blurb: info.blurb,
     b,
     path: null,

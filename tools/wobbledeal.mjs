@@ -1,5 +1,7 @@
 // Wobble Mania: checks the show rules in the real page. Deals thousands of shows and fails if any
-// repeats a round or a kind of game, then checks Colour Call's calls in a built round.
+// repeats a round or a kind of game (two obstacle races are allowed), if a show has the same
+// final, a round or the same five kinds as the one before it, or if the finals and the kinds
+// don't come round evenly. Then checks Colour Call's calls in a built round.
 //   node tools/wobbledeal.mjs [--port 5197]
 import { chromium } from 'playwright-core';
 import { CHROME, ANGLE } from './chrome.mjs';
@@ -14,7 +16,8 @@ await page.waitForFunction(() => window.__ready === true, null, { timeout: 12000
 const res = await page.evaluate(async () => {
   const C = await import('/src/marbles/courses.ts');
   const N = 20000;
-  let badRound = 0, badMode = 0, badLen = 0, teamLate = 0, sameAsLast = 0, prev = [];
+  let badRound = 0, badMode = 0, badLen = 0, teamLate = 0, sameAsLast = 0, sameFinal = 0, sameKinds = 0, racesTogether = 0, twoRaces = 0, prev = [], prevKinds = '';
+  const kindsIn = {};
   const finals = {}, seen = {}, sample = [];
   for (let k = 0; k < N; k++) {
     const ids = C.dealShow();
@@ -22,14 +25,22 @@ const res = await page.evaluate(async () => {
     if (ids.length !== 6) badLen++;
     if (new Set(ids).size !== 6) badRound++;
     const modes = ids.map(C.modeOf);
-    // the final is its own kind, and the crown race never comes with an obstacle race's twin
-    if (new Set(modes).size !== 6) badMode++;
-    if (ids[5] === 'crownpeak' && modes.includes('race')) badMode++;
-    // a team game or a ball game is never one of the two rounds before the final, and every show
-    // has one of each and a kart race
+    // the final is its own kind; no kind twice but the obstacle races (two at most, never side by
+    // side, never with the crown race for a final)
+    const races = modes.filter((m) => m === 'race').length;
+    if (modes[5] !== 'final' || new Set(modes).size !== 6 - Math.max(0, races - 1) || races > 2) badMode++;
+    if (races === 2) twoRaces++;
+    if (races === 2 && ids[5] === 'crownpeak') badMode++;
+    for (let q = 0; q < 4; q++) if (modes[q] === 'race' && modes[q + 1] === 'race') racesTogether++;
+    // a team game or a ball game is never one of the two rounds before the final
     if (['team', 'ball'].includes(modes[3]) || ['team', 'ball'].includes(modes[4])) teamLate++;
-    if (!modes.includes('team') || !modes.includes('ball') || !modes.includes('kart')) badMode++;
-    sameAsLast += ids.filter((x) => prev.includes(x) && x !== 'crownkeep' && x !== 'crownpeak').length;
+    // nothing from the show before: not a round, not the final, not the same five kinds
+    sameAsLast += ids.filter((x) => prev.includes(x)).length;
+    if (ids[5] === prev[5]) sameFinal++;
+    const kinds = [...new Set(modes.slice(0, 5))].sort().join();
+    if (kinds === prevKinds) sameKinds++;
+    prevKinds = kinds;
+    for (const m of new Set(modes.slice(0, 5))) kindsIn[m] = (kindsIn[m] ?? 0) + 1;
     prev = ids;
     finals[ids[5]] = (finals[ids[5]] ?? 0) + 1;
     for (const x of ids) seen[x] = (seen[x] ?? 0) + 1;
@@ -66,11 +77,13 @@ const res = await page.evaluate(async () => {
       if (a.fake >= 0 && (a.fake === a.c || !a.decoy.length || a.drop - a.swap < 1.4)) badTiles++;
     });
   }
-  return { N, badRound, badMode, badLen, teamLate, sameAsLast, finals, never, sample, seq, repeats, unreachable, badTiles, counts };
+  for (const m in kindsIn) kindsIn[m] = Math.round((kindsIn[m] / N) * 100) + '%';
+  return { N, badRound, badMode, badLen, teamLate, sameAsLast, sameFinal, sameKinds, racesTogether, twoRaces: Math.round((twoRaces / N) * 100) + '%', kindsIn, finals, never, sample, seq, repeats, unreachable, badTiles, counts };
 });
 console.log(JSON.stringify(res, null, 1));
 console.log('page errors', errs.length, errs.slice(0, 3));
 await browser.close();
-const ok = !res.badRound && !res.badMode && !res.badLen && !res.teamLate && !res.repeats && !res.unreachable && !res.badTiles && !res.never.length && !errs.length;
+const fin = Object.values(res.finals);
+const ok = !res.badRound && !res.badMode && !res.badLen && !res.teamLate && !res.sameAsLast && !res.sameFinal && !res.sameKinds && !res.racesTogether && fin.length === 4 && Math.max(...fin) - Math.min(...fin) <= 2 && !res.repeats && !res.unreachable && !res.badTiles && !res.never.length && !errs.length;
 console.log(ok ? 'PASS' : 'FAIL');
 process.exit(ok ? 0 : 1);

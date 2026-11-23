@@ -77,7 +77,7 @@ export interface Course {
 }
 
 export type GenId = 'discodash' | 'bigtop' | 'treasuretrail' | 'blockparty' | 'petalpass' | 'ticktock' | 'moonrun' | 'sliprink' | 'lavarush' | 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
-export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'meltdown' | 'stormdeck' | 'rocketrumble' | 'colourcall' | 'beanbaygp' | 'beancup' | 'bigpush' | 'overfence' | 'volleyfolly' | 'spothogs' | 'beanhoops' | 'sundaespeedway' | 'crownkeep' | 'gatecrashers' | GenId;
+export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'meltdown' | 'stormdeck' | 'rocketrumble' | 'colourcall' | 'beanbaygp' | 'beancup' | 'bigpush' | 'overfence' | 'volleyfolly' | 'spothogs' | 'beanhoops' | 'sundaespeedway' | 'crownkeep' | 'gatecrashers' | 'crowngp' | GenId;
 export interface RoundInfo {
   id: RoundId;
   name: string;
@@ -131,6 +131,7 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
   blockparty: { id: 'blockparty', name: 'Block Party', kind: 'race', blurb: 'Through the toy box: stampers, rolling balls, sliders and a jelly bounce.', keep: 0.75 },
   crownpeak: { id: 'crownpeak', name: 'Crown Peak', kind: 'final', blurb: 'The longest course in the show, all the way up. First across takes the crown', keep: 0 },
   gatecrashers: { id: 'gatecrashers', name: 'Gate Crashers', kind: 'final', blurb: 'The final! Every bean has a gate in the wall. A ball through YOUR gate and you are out. Stand in front of it, DIVE into a ball to shoot it at someone else\'s. More balls drop in, the gates grow. Last bean standing takes the crown.', keep: 0 },
+  crowngp: { id: 'crowngp', name: 'Crown Grand Prix', kind: 'final', blurb: 'The final, in go-karts! Two laps, everyone who is left, no second place: the first kart across the line takes the crown. Hold SPACE to drift, let go for a boost.', keep: 0 },
   crownkeep: { id: 'crownkeep', name: 'Crown Keeper', kind: 'final', blurb: 'A castle in the sky and one crown. Hold it for 30 seconds to win. When the throne goes hot your clock runs double, until it blows.', keep: 0 },
 };
 /**
@@ -138,7 +139,7 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
  * host's). The default is every round once, for the test links (?round=N).
  */
 // (the old running order keeps its indexes for the test tools; the team round is 6)
-export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'rocketrumble', 'colourcall', 'discodash', 'bigtop', 'treasuretrail', 'blockparty', 'crownkeep', 'beanbaygp', 'beancup', 'bigpush', 'overfence', 'volleyfolly', 'spothogs', 'beanhoops', 'sundaespeedway', 'gatecrashers'];
+export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'rocketrumble', 'colourcall', 'discodash', 'bigtop', 'treasuretrail', 'blockparty', 'crownkeep', 'beanbaygp', 'beancup', 'bigpush', 'overfence', 'volleyfolly', 'spothogs', 'beanhoops', 'sundaespeedway', 'gatecrashers', 'crowngp'];
 export const SHOW: RoundInfo[] = DEFAULT_SHOW.map((id) => ROUNDS[id]);
 /** the rounds a show is dealt from (the old chute races are kept for the test links only) */
 export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill', 'lavarush', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'discodash', 'bigtop', 'treasuretrail', 'blockparty'];
@@ -147,14 +148,18 @@ export const SURVIVAL_POOL: RoundId[] = ['jumpclub', 'tiptop', 'meltdown', 'stor
 export const PARTY_POOL: RoundId[] = ['paintparty', 'splatring', 'spothogs', 'beancup', 'bigpush', 'overfence', 'volleyfolly', 'beanhoops', 'beanbaygp', 'sundaespeedway'];
 /** the team games played with a ball on a pitch (half the field goes home) */
 export const BALL_ROUNDS: RoundId[] = ['beancup', 'bigpush', 'overfence', 'volleyfolly', 'beanhoops'];
-/** the final: every show ends in it (the old ones, Crown Peak and Crown Keeper, are kept for the test links) */
-export const FINAL: RoundId = 'gatecrashers';
-export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, ...PARTY_POOL, FINAL];
+/**
+ * The finals. A show ends in one of them, and they're dealt like cards: none comes round again
+ * until the others have all had their turn. Gate Crashers (a gate each, balls, lives), Crown
+ * Keeper (hold the crown), the Crown Grand Prix (karts) and Crown Peak (the long race).
+ */
+export const FINALS: RoundId[] = ['gatecrashers', 'crownkeep', 'crowngp', 'crownpeak'];
+export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, ...PARTY_POOL, ...FINALS];
 
 /**
- * The kinds of game a show is dealt from. A show never plays the same one twice: each of its six
- * rounds comes from a different family here, and the final (Gate Crashers) differs from them all.
- * Every show has a team game, a ball game and a kart race in it.
+ * The kinds of game a show is dealt from: five of these seven, a different five from the last
+ * show's (the two that sat out are in), and no kind twice, except that there are so many more
+ * obstacle races than anything else that now and then a show has two of them.
  */
 export const MODES = {
   race: RACE_POOL.filter((id) => id !== 'lavarush'),
@@ -174,6 +179,7 @@ export function modeOf(id: RoundId): ModeId | 'final' {
 }
 export function modeName(id: RoundId) {
   if (id === 'gatecrashers') return 'THE FINAL · LAST BEAN STANDING';
+  if (id === 'crowngp') return 'THE FINAL · GO-KART GRAND PRIX';
   if (id === 'crownkeep') return 'FINAL · CROWN KEEPER';
   if (ROUNDS[id].kind === 'final') return 'FINAL · CROWN RACE';
   if (id === 'beancup') return 'TEAM SOCCER';
@@ -186,27 +192,72 @@ export function modeName(id: RoundId) {
   return m === 'final' ? 'RACE' : MODE_NAME[m];
 }
 
-/** the last show's rounds: the next one steers clear of them where it can */
-let lastShow: RoundId[] = [];
+/**
+ * What's been dealt, so shows keep changing. Every kind of game has a bag of its rounds, and so
+ * do the finals: a round drawn isn't seen again until the bag's empty, which is every other one
+ * of its kind played. The bags are kept between visits (a reload doesn't start the same way).
+ */
+interface Dealt {
+  bags: Record<string, RoundId[]>;
+  last: Record<string, RoundId>;
+  /** the kinds the last show left out: they're in the next one */
+  out: ModeId[];
+  /** the last show's rounds: none of them is in the next one */
+  prev: RoundId[];
+}
+const DEAL_KEY = 'wobble-deal-2';
+function loadDealt(): Dealt {
+  try {
+    const d = JSON.parse(localStorage.getItem(DEAL_KEY) ?? 'null') as Dealt | null;
+    if (d && typeof d.bags === 'object' && typeof d.last === 'object' && Array.isArray(d.out) && Array.isArray(d.prev)) return d;
+  } catch {
+    // (no storage: every visit starts with full bags)
+  }
+  return { bags: {}, last: {}, out: [], prev: [] };
+}
+const dealt = loadDealt();
 export function dealShow(rnd = Math.random) {
   const shuffle = <T,>(a: readonly T[]) => a.map((x) => [rnd(), x] as const).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
-  const pick = (k: ModeId) => {
-    const all = shuffle<RoundId>(MODES[k]);
-    return all.find((id) => !lastShow.includes(id)) ?? all[0];
+  const got: RoundId[] = [];
+  const draw = (key: string, all: readonly RoundId[]) => {
+    let bag = (dealt.bags[key] ?? []).filter((id) => all.includes(id));
+    if (!bag.length) {
+      // (a new bag has the round the old one ended on at the bottom)
+      bag = shuffle(all);
+      const k = bag.indexOf(dealt.last[key]);
+      if (k >= 0 && bag.length > 1) bag.push(...bag.splice(k, 1));
+    }
+    // (the first that wasn't in the last show, and isn't in this one already)
+    let i = bag.findIndex((id) => !got.includes(id) && !dealt.prev.includes(id));
+    if (i < 0) i = Math.max(0, bag.findIndex((id) => !got.includes(id)));
+    const [id] = bag.splice(i, 1);
+    dealt.bags[key] = bag;
+    dealt.last[key] = id;
+    got.push(id);
+    return id;
   };
-  // (every show has a team game, a ball game and the karts; the other two rounds are any two of the rest)
-  const two = shuffle<ModeId>(['race', 'chase', 'floor', 'dodge']).slice(0, 2);
-  // (five families and a final that's none of them)
-  const fams: ModeId[] = shuffle<ModeId>(['team', 'ball', 'kart', ...two]);
-  // (a team game needs a field to split: they're in the first three rounds, never the two before the final)
+  const final = draw('final', FINALS);
+  // five kinds of the seven: the two that sat out last time, then any three of the rest
+  const kinds = Object.keys(MODES) as ModeId[];
+  const owed = shuffle(dealt.out.filter((k) => kinds.includes(k)));
+  const fams: ModeId[] = [...owed, ...shuffle(kinds.filter((k) => !owed.includes(k)))].slice(0, 5);
+  // (now and then a second obstacle race in place of one of them; never when the final's a race too)
+  if (rnd() < 0.3 && final !== 'crownpeak' && fams.includes('race') && fams[4] !== 'race') fams[4] = 'race';
+  dealt.out = kinds.filter((k) => !fams.includes(k));
+  // (a team game needs a field to split: they're in the first three rounds, never the two before
+  // the final; and two races are never one after the other. Any order that does both)
   const teamy = (f: ModeId) => f === 'team' || f === 'ball';
-  for (const late of [4, 3]) {
-    const solo = fams.findIndex((f, k) => k < 3 && !teamy(f));
-    if (teamy(fams[late]) && solo >= 0) [fams[late], fams[solo]] = [fams[solo], fams[late]];
-  }
-  const ids: RoundId[] = [...fams.map(pick), FINAL];
+  const fine = (o: ModeId[]) => !teamy(o[3]) && !teamy(o[4]) && !o.some((f, k) => f === 'race' && o[k + 1] === 'race');
+  let order = shuffle(fams);
+  for (let tries = 0; tries < 200 && !fine(order); tries++) order = shuffle(fams);
+  const ids: RoundId[] = [...order.map((k) => draw(k, MODES[k])), final];
+  dealt.prev = ids;
   setShow(ids);
-  lastShow = ids;
+  try {
+    localStorage.setItem(DEAL_KEY, JSON.stringify(dealt));
+  } catch {
+    // (no storage)
+  }
   return ids;
 }
 export function setShow(ids: RoundId[]) {
@@ -263,6 +314,9 @@ export function buildRound(id: RoundId): Course {
       return beanBayGP(info);
     case 'sundaespeedway':
       return beanBayGP(info, SUNDAE_SPEEDWAY);
+    case 'crowngp':
+      // (the circuit this show hasn't raced on; every browser has the same show, so the same one)
+      return beanBayGP(info, SHOW.some((x) => x.id === 'sundaespeedway') ? undefined : SUNDAE_SPEEDWAY, true);
     case 'crownkeep':
       return crownKeep(info);
     case 'gatecrashers':

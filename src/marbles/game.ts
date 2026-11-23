@@ -1922,6 +1922,7 @@ export class MarbleGame {
     if (r.fin <= this.slots) this.confetti.burst(at, r.c.player ? 260 : 40, r.c.player ? 11 : 8);
     if (r.c.player) {
       if (c.kind === 'final') {
+        if (c.kart) this.kartP?.flagged(m.id, r.fin, true);
         this.ui.banner('CROWNED!', 'gold', 'You win the show!', 0);
         this.sound.crowned();
         this.fireworks.show(at, 14, 36, 26, 0.22);
@@ -2179,7 +2180,7 @@ export class MarbleGame {
       const me = win?.c.player;
       this.ui.results({
         title: me ? 'YOU WIN THE CROWN!' : `${win.c.name} wins the crown`,
-        sub: `${me ? 'Champion of Wobble Mania' : p && !p.c.out ? 'So close. Run it back?' : 'What a show.'}${this.bonks ? ` You bonked ${this.bonks} bean${this.bonks > 1 ? 's' : ''}.` : ''}${this.kos ? ` ${this.kos} KO${this.kos > 1 ? 's' : ''}.` : ''}${this.starCount ? ` ${this.starCount} stars.` : ''}`,
+        sub: `${me ? 'Champion of Wobble Mania.' : p && !p.c.out ? 'So close. Run it back?' : 'What a show.'}${this.bonks ? ` You bonked ${this.bonks} bean${this.bonks > 1 ? 's' : ''}.` : ''}${this.kos ? ` ${this.kos} KO${this.kos > 1 ? 's' : ''}.` : ''}${this.starCount ? ` ${this.starCount} stars.` : ''}`,
         rows,
         next: this.guest ? 'WAITING FOR THE HOST' : 'PLAY AGAIN',
         wait: !!this.guest,

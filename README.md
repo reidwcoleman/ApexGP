@@ -754,11 +754,17 @@ and bots; the contestants are original bean characters, not marbles.
   below (marbled paint, ocean, lava, ice, swamp, a neon grid, sand, cloud; `paintLakeFor`), the
   light, the fog, the scenery round the course, the course's tiles, rails and arches, the obstacles'
   colours and the toys on the islands. `ROUND_BIOME` says which round is in which.
-- **The show**: six rounds dealt fresh every show from 36 (`POOL` / `dealShow` in `courses.ts`):
-  every show has a team game, a ball game and a kart race in it, plus two of the other kinds
-  (obstacle race, outrun it, vanishing floor, dodge it), then the final. The team and ball games
-  come in the first three rounds, while there's a field to split, and a small field is never cut
-  so hard that the final is two beans. A short wheel of round names lands on each one. Rounds are built ahead (`buildAhead` in `game.ts`): the next course, its
+- **The show**: six rounds dealt fresh every show from 39 (`POOL` / `dealShow` in `courses.ts`),
+  and no two shows alike. Five rounds come from five of the seven kinds of game (obstacle race,
+  outrun it, go-karts, vanishing floor, dodge it, team game, team ball game): the two kinds that
+  sat out the last show are always in this one, and no kind comes twice, except that three shows
+  in ten have a second (different) obstacle race, never straight after the first. Every kind has
+  a bag of its rounds and the four finals have one too: a round drawn isn't seen again until
+  every other one of its kind has been played, and nothing from the last show is in the next one
+  (not a round, not the final, not the same five kinds). The bags are kept in `localStorage`, so
+  a reload carries on where it left off. `tools/wobbledeal.mjs` deals 20,000 shows and checks
+  all of that. The team and ball games come in the first three rounds, while there's a field to
+  split, and a small field is never cut so hard that the final is two beans. A short wheel of round names lands on each one. Rounds are built ahead (`buildAhead` in `game.ts`): the next course, its
   bot paths and its shaders go up behind the results, and the first round of the next show behind
   the menu, so nothing waits on a build. Disposing a course keeps its materials, so the shader
   programs stay compiled for the next one.
@@ -861,8 +867,11 @@ and bots; the contestants are original bean characters, not marbles.
     another kart turns you half as hard as it used to, and a held drift is untouched.
     `tools/wobblekart.mjs` races a flat-out, full-lock keyboard driver against the bots and
     counts the spins (24 in six races before the catch, none after).
-  - **Final**: Gate Crashers (`course-gates.ts`, rule `gates` in `soccer.ts`), every show's last
-    round. A round arena, and in its wall a gate for every bean left, in that bean's colour with
+  - **Finals**: four, taken in turn from a shuffled bag (`FINALS`): Gate Crashers, Crown Keeper
+    (hold the crown), the Crown Grand Prix (`crowngp`: a two-lap kart race on whichever circuit
+    the show hasn't used, the first kart across the line takes the crown) and Crown Peak (the
+    longest platform course, first to the top).
+  - **Gate Crashers** (`course-gates.ts`, rule `gates` in `soccer.ts`). A round arena, and in its wall a gate for every bean left, in that bean's colour with
     its name over it (yours says YOUR GATE and its floor beats like a heart). Balls drop in: run
     into one to dribble it, DIVE into it to shoot, stand in front of your gate to keep it out. A
     ball through your gate costs a life (three each with six or fewer beans, two up to ten, sudden
@@ -872,8 +881,7 @@ and bots; the contestants are original bean characters, not marbles.
     the balls moving, and the last bean standing takes the crown. The balls are the host's like
     every ball game's; a gate is an angle round the ring, so the ball's side of it is a few lines
     in `CupPlay.hold`. Bots (`CupBrain.gates`) get between a ball and their gate first, and
-    otherwise get behind the nearest ball and knock it at someone else's. The old finals (Crown
-    Peak, Crown Keeper) are out of the rotation but still built for the test links.
+    otherwise get behind the nearest ball and knock it at someone else's.
   - **Stars, ghosts and revives** (`stars.ts`, `ghost.ts`): stars are kept all through a show
     (never past it). In a race they lie along the risky lines; in every other round one pops up
     every 1.5 s where a bean was standing a moment ago. Knocked out, a person flies on as a ghost
