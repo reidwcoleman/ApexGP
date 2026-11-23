@@ -825,13 +825,11 @@ and bots; the contestants are original bean characters, not marbles.
     your team's colour all round you. Online the host's floor (run-length coded) goes to everyone
     once a second, never over what a guest has just painted itself. Paint
     Party (a walled square, a turntable, bumpers) or Splat Ring (a round arena swept by one long
-    bar that speeds up: hop it). Two more team games are played on the same floor (`TeamGame`):
+    bar that speeds up: hop it). One more team game is played on the same floor (`TeamGame`):
     **Spot Hogs** (three glowing spots; the team with the most beans on their feet in one owns it
     and it pays a point a second, so a dive that knocks a rival over takes them out of the count;
-    the spots blink and move every 17 s to three of nine places, the same in every browser) and
-    **Star Scramble** (a round arena with bumpers; a star drops in every 0.6 s and every 14th is
-    a big one worth five; run into one and it's your team's). In both the fewest points goes
-    home, and the host's points go to everyone once a second.
+    the spots blink and move every 17 s to three of nine places, the same in every browser). The
+    fewest points goes home, and the host's points go to everyone once a second.
   - **Ball games** (`course-soccer.ts` builds the pitch from a `CupCfg`, `soccer.ts` runs the balls
     on the host, `CupBrain` in `ai-play.ts` plays them): two teams, half the field goes home.
     Bean Cup (soccer: goals, a second ball late on, golden goal), Big Push (one giant beach ball,
@@ -841,12 +839,18 @@ and bots; the contestants are original bean characters, not marbles.
     home, level is sudden death) and Volley Folly (volleyball: one big floaty ball and a net;
     run under it and it comes up off your head, lower each time; JUMP or DIVE into it and it goes
     over, on a flight worked out to clear the net and land where you were heading; down in your
-    yard is a point to them). A goal belongs to whoever on the scoring side touched the ball
+    yard is a point to them). And Bean Hoops (basketball, rule `hoops`): a wooden court with a
+    hoop high at each end. Run into the ball to dribble it, DIVE into it to shoot: it's thrown at
+    the hoop on an arc that drops into it, truer the closer you are and the more squarely you
+    were heading at the hoop, and from outside the arc it's worth three. A jump up into it close
+    in is a tip at the rim, facing the wrong way it's a clearance, and from the far end it's a
+    long ball up the court. The rim is iron the ball comes off (it drops through the middle),
+    the end wall is the backboard. A goal belongs to whoever on the scoring side touched the ball
     last (a keeper getting a hand to a shot hasn't scored an own goal), and after one everybody
     goes back to their own half for a kick-off. The ball is held inside the walls, the fence and
     the bumpers after the beans have touched it as well as after it has moved, and a bean eases
     it away rather than throwing it, so it never jumps on the screen. `tools/wobblecup.mjs`
-    plays all four tick by tick and fails on a ball that jumps, lies dead, or leaves the pitch.
+    plays all five tick by tick and fails on a ball that jumps, lies dead, or leaves the pitch.
   - **Go-karts** (`kart-sim.ts`, `kart-race.ts`, `kart-track.ts`, `course-kart.ts`, a
     `KartLayout` per circuit in `kart-layout.ts`): two laps of Bean Bay GP (a figure of eight: the
     hairpin, the Big Bowl, the Hump, the Light Tunnel) or Sundae Speedway (quicker and more open:

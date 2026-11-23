@@ -12,8 +12,6 @@ import type { Sound } from './audio.ts';
  *    and paint bombs drop in to be set off. The least floor goes home.
  *  Spot Hogs: three glowing spots. The team with the most beans on their feet in one owns it, and
  *    it pays them a point a second. The spots move. The fewest points goes home.
- *  Star Scramble: stars rain in, a big one worth five every so often. Run into one and it's your
- *    team's. The fewest goes home.
  *
  * (Online every browser works it out from the beans it sees; the host's count decides.)
  */
@@ -33,19 +31,16 @@ export interface TeamScore {
   label?: string;
 }
 
-/** something lying on the floor to run into: a paint bomb, or a star */
+/** a paint bomb lying on the floor: run into it and it splats your colour all round you */
 interface Pickup {
   k: number;
   pos: THREE.Vector3;
   obj: THREE.Object3D;
   born: number;
-  big: boolean;
 }
 /** the k-th paint bomb drops at GO + FIRST + k·EVERY, and lies there until it's taken or LIFE runs out */
 const BOMBS = { first: 3, every: 2.8, life: 12 };
 const SPLAT_R = 4.4;
-/** Star Scramble: a star every `every` seconds; every `bigN`-th is a big one worth `bigV` */
-export const STARS = { first: 1.5, every: 0.62, life: 13, bigN: 14, bigV: 5 };
 
 /** one of Spot Hogs' spots: the disc, its rim and the light standing on it */
 interface Spot {
@@ -65,8 +60,7 @@ export class TeamPlay {
   private nextK = 0;
   private gone = new Set<number>();
   private bombGeo: THREE.BufferGeometry;
-  private bigGeo: THREE.BufferGeometry | null = null;
-  private bombMat: THREE.Material;
+  private bombMat: THREE.MeshPhysicalMaterial;
   private haloMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75, toneMapped: false });
   private haloGeo = new THREE.TorusGeometry(0.75, 0.06, 8, 40).rotateX(Math.PI / 2);
   private ringGeo = new THREE.TorusGeometry(0.62, 0.07, 8, 32).rotateX(Math.PI / 2);
@@ -88,33 +82,25 @@ export class TeamPlay {
     this.arena.points.fill(0);
     this.arena.zones.length = 0;
     this.mats = TEAM_COLORS.map((c) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.9, toneMapped: false }));
-    if (this.game === 'stars') {
-      // the star: fat, five points, gold
-      this.bombGeo = starGeo(0.74, 0.36, 0.3);
-      this.bigGeo = starGeo(1.15, 0.56, 0.44);
-      this.bombMat = new THREE.MeshPhysicalMaterial({ color: 0xffc928, roughness: 0.22, metalness: 0.35, clearcoat: 1, clearcoatRoughness: 0.1, emissive: 0xffa200, emissiveIntensity: 0.55 });
-      this.haloMat.color.set(0xffe27a);
-    } else {
-      // the bomb: a glossy ball in swirls of every team's colour, a white cap and a fuse
-      const g = new THREE.SphereGeometry(0.6, 32, 20).toNonIndexed();
-      const p = g.getAttribute('position');
-      const col = new Float32Array(p.count * 3);
-      const C = new THREE.Color();
-      for (let i = 0; i < p.count; i += 3) {
-        const y = (p.getY(i) + p.getY(i + 1) + p.getY(i + 2)) / 3, x = (p.getX(i) + p.getX(i + 1) + p.getX(i + 2)) / 3, z = (p.getZ(i) + p.getZ(i + 1) + p.getZ(i + 2)) / 3;
-        if (y > 0.47) C.set(0xffffff);
-        else C.set(TEAM_COLORS[Math.floor(((Math.atan2(z, x) + Math.PI) / (Math.PI * 2)) * 6 + y * 3 + 6) % 3]);
-        for (let k = 0; k < 3; k++) C.toArray(col, (i + k) * 3);
-      }
-      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      g.deleteAttribute('uv');
-      this.bombGeo = g;
-      this.bombMat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.1, emissive: 0xffffff, emissiveIntensity: 0.08 });
+    // the bomb: a glossy ball in swirls of every team's colour, a white cap and a fuse
+    const g = new THREE.SphereGeometry(0.6, 32, 20).toNonIndexed();
+    const p = g.getAttribute('position');
+    const col = new Float32Array(p.count * 3);
+    const C = new THREE.Color();
+    for (let i = 0; i < p.count; i += 3) {
+      const y = (p.getY(i) + p.getY(i + 1) + p.getY(i + 2)) / 3, x = (p.getX(i) + p.getX(i + 1) + p.getX(i + 2)) / 3, z = (p.getZ(i) + p.getZ(i + 1) + p.getZ(i + 2)) / 3;
+      if (y > 0.47) C.set(0xffffff);
+      else C.set(TEAM_COLORS[Math.floor(((Math.atan2(z, x) + Math.PI) / (Math.PI * 2)) * 6 + y * 3 + 6) % 3]);
+      for (let k = 0; k < 3; k++) C.toArray(col, (i + k) * 3);
     }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.deleteAttribute('uv');
+    this.bombGeo = g;
+    this.bombMat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.1, emissive: 0xffffff, emissiveIntensity: 0.08 });
     if (this.game === 'spots') this.makeSpots();
   }
 
-  /** where the k-th bomb or star lands: a tile picked from the round and k (the same in every browser) */
+  /** where the k-th bomb lands: a tile picked from the round and k (the same in every browser) */
   private bombAt(k: number, seed: number) {
     const A = this.arena;
     let h = (k * 2654435761 + seed * 40503 + 17) >>> 0;
@@ -125,48 +111,38 @@ export class TeamPlay {
       A.centreOf(i, out);
       if (A.cellAt(out.x, out.z) < 0 || A.nearWall(out.x, out.z, 2.2)) continue;
       const cx = out.x - A.center.x, cz = out.z - A.center.z;
-      if (this.game === 'paint' && !A.round && cx * cx + cz * cz < 5 * 5) continue;
-      if (A.blocks.some((q) => Math.hypot(out.x - q.x, out.z - q.z) < q.r + 1.5)) continue;
+      if (!A.round && cx * cx + cz * cz < 5 * 5) continue;
       return out;
     }
     return out.set(A.center.x + 4, A.center.y, A.center.z + 4);
   }
 
-  /** what a star is worth */
-  private worth(k: number) {
-    return this.game === 'stars' && k % STARS.bigN === STARS.bigN - 1 ? STARS.bigV : 1;
-  }
-
   /**
-   * The bombs (or the stars): new ones drop on schedule; with `authority` (solo, or the host) a bean
-   * that runs into one sets it off. Returns what went off this frame (the host sends these to the guests).
+   * The bombs: new ones drop on schedule; with `authority` (solo, or the host) a bean that runs
+   * into one sets it off. Returns what went off this frame (the host sends these to the guests).
    */
   bombsUpdate(t: number, go: number, seed: number, authority: boolean): { k: number; id: number }[] {
     const A = this.arena;
     const out: { k: number; id: number }[] = [];
-    if (!(go < 1e8) || this.game === 'spots') return out;
-    const stars = this.game === 'stars';
-    const S = stars ? STARS : BOMBS;
+    if (!(go < 1e8) || this.game !== 'paint') return out;
+    const S = BOMBS;
     while (go + S.first + this.nextK * S.every <= t) {
       const k = this.nextK++;
       const born = go + S.first + k * S.every;
       if (this.gone.has(k) || t - born > S.life) continue;
       const pos = this.bombAt(k, seed);
-      const big = this.worth(k) > 1;
       const obj = new THREE.Group();
-      const ball = new THREE.Mesh(big && this.bigGeo ? this.bigGeo : this.bombGeo, this.bombMat);
+      const ball = new THREE.Mesh(this.bombGeo, this.bombMat);
       ball.castShadow = true;
       ball.position.y = 0.9;
       const fuse = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.22, 8), this.haloMat);
       fuse.position.y = 1.28;
-      fuse.visible = !stars;
       const halo = new THREE.Mesh(this.haloGeo, this.haloMat);
       halo.position.y = 0.05;
-      if (big) halo.scale.setScalar(1.9);
       obj.add(ball, fuse, halo);
       obj.position.copy(pos);
       this.scene.add(obj);
-      this.bombs.push({ k, pos, obj, born, big });
+      this.bombs.push({ k, pos, obj, born });
     }
     for (let q = this.bombs.length - 1; q >= 0; q--) {
       const b = this.bombs[q];
@@ -174,24 +150,19 @@ export class TeamPlay {
       // (dropping in, bobbing, a pulse of the ring on the floor)
       const drop = Math.max(0, 1 - age / 0.5);
       b.obj.position.y = b.pos.y + drop * drop * 8;
-      const up = (b.big ? 1.5 : stars ? 1 : 0.9) + Math.sin(t * 3 + b.k) * 0.12;
-      b.obj.children[0].position.y = up;
-      b.obj.children[1].position.y = up + 0.68;
-      if (stars) b.obj.children[0].rotation.y = t * 2.4 + b.k;
-      else b.obj.rotation.y = t * 1.6 + b.k;
-      b.obj.children[2].scale.setScalar((b.big ? 1.9 : 1) * (1 + 0.15 * Math.sin(t * 6)));
-      // (a star about to go blinks)
-      if (stars) b.obj.visible = age < S.life - 2.5 || Math.floor(t * 9) % 2 === 0;
+      b.obj.children[0].position.y = 0.9 + Math.sin(t * 3 + b.k) * 0.12;
+      b.obj.children[1].position.y = b.obj.children[0].position.y + 0.68;
+      b.obj.rotation.y = t * 1.6 + b.k;
+      b.obj.children[2].scale.setScalar(1 + 0.15 * Math.sin(t * 6));
       if (age > S.life) {
         this.remove(q);
         continue;
       }
       if (!authority || drop > 0) continue;
-      const reach = b.big ? 1.8 : 1.25;
       for (const r of this.who()) {
         const m = r.m;
         if (r.out || r.fell || !m.active) continue;
-        if (Math.hypot(m.pos.x - b.pos.x, m.pos.z - b.pos.z) < reach && Math.abs(m.pos.y - b.pos.y - 0.5) < 1.6) {
+        if (Math.hypot(m.pos.x - b.pos.x, m.pos.z - b.pos.z) < 1.25 && Math.abs(m.pos.y - b.pos.y - 0.5) < 1.6) {
           out.push({ k: b.k, id: r.c.id });
           this.boom(q, r.c.id);
           break;
@@ -199,38 +170,26 @@ export class TeamPlay {
       }
     }
     A.pickups.length = 0;
-    for (const b of this.bombs) {
-      A.pickups.push(b.pos);
-      // (the bots think a big one's worth going a long way for)
-      if (b.big) A.pickups.push(b.pos, b.pos);
-    }
+    for (const b of this.bombs) A.pickups.push(b.pos);
     return out;
   }
 
   /** bomb k set off by bean `id` (the host told us, or we saw it): its team's colour splashed round it */
   collect(k: number, id: number) {
-    const q = this.bombs.findIndex((b) => b.k === k);
-    if (q >= 0) return this.boom(q, id);
-    // (not on this screen yet, or gone already: it still counts)
-    if (this.gone.has(k)) return;
     this.gone.add(k);
-    if (this.game === 'stars') this.arena.points[this.teamOf(id)] += this.worth(k);
+    const q = this.bombs.findIndex((b) => b.k === k);
+    if (q >= 0) this.boom(q, id);
   }
-  /** the last bomb or star that went: where, whose, by whom, what it was worth */
-  lastBoom: { pos: THREE.Vector3; team: number; mine: boolean; me: boolean; worth: number } | null = null;
+  /** the last bomb that went off: where, and whose */
+  lastBoom: { pos: THREE.Vector3; team: number; mine: boolean } | null = null;
   private boom(q: number, id: number) {
     const b = this.bombs[q];
     const team = this.teamOf(id);
     this.gone.add(b.k);
-    const worth = this.worth(b.k);
-    if (this.game === 'stars') this.arena.points[team] += worth;
-    else this.arena.splat(b.pos.x, b.pos.z, SPLAT_R, team);
+    this.arena.splat(b.pos.x, b.pos.z, SPLAT_R, team);
     const me = this.who().find((r) => r.c.player);
-    this.lastBoom = { pos: b.pos.clone(), team, mine: !!me && this.teamOf(me.c.id) === team, me: me?.c.id === id, worth };
-    if (this.game === 'stars') {
-      if (this.lastBoom.me) this.sound.notes(worth > 1 ? [76, 81, 84, 88, 93] : [84, 91], 0.04, 0.3, true);
-      else if (worth > 1) this.sound.notes(this.lastBoom.mine ? [72, 79, 84] : [60, 55], 0.05, 0.25, true);
-    } else this.sound.notes(this.lastBoom.mine ? [72, 76, 79, 84] : [60, 55], 0, 0.07, true);
+    this.lastBoom = { pos: b.pos.clone(), team, mine: !!me && this.teamOf(me.c.id) === team };
+    this.sound.notes(this.lastBoom.mine ? [72, 76, 79, 84] : [60, 55], 0, 0.07, true);
     this.remove(q);
   }
   private remove(q: number) {
@@ -458,7 +417,6 @@ export class TeamPlay {
     this.arena.pickups.length = 0;
     this.arena.zones.length = 0;
     this.bombGeo.dispose();
-    this.bigGeo?.dispose();
     this.bombMat.dispose();
     this.haloMat.dispose();
     this.haloGeo.dispose();
@@ -477,18 +435,3 @@ export class TeamPlay {
 }
 
 const TMP = new THREE.Color();
-
-/** a fat five-pointed star, standing up, `d` thick */
-function starGeo(R: number, r: number, d: number) {
-  const sh = new THREE.Shape();
-  for (let k = 0; k < 10; k++) {
-    const a = (k / 10) * Math.PI * 2 + Math.PI / 2, q = k % 2 ? r : R;
-    if (k) sh.lineTo(Math.cos(a) * q, Math.sin(a) * q);
-    else sh.moveTo(Math.cos(a) * q, Math.sin(a) * q);
-  }
-  sh.closePath();
-  const g = new THREE.ExtrudeGeometry(sh, { depth: d, bevelEnabled: true, bevelThickness: d * 0.35, bevelSize: d * 0.3, bevelSegments: 3, curveSegments: 4 });
-  g.translate(0, 0, -d / 2);
-  g.computeVertexNormals();
-  return g;
-}

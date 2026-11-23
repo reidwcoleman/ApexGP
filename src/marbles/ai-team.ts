@@ -4,9 +4,7 @@ import type { Marble } from './physics.ts';
 
 /**
  * Spot Hogs: it makes for a spot (the nearer the better, less so one its team already has well in
- * hand, more so one that's level or just lost) and stands in it. Star Scramble: it goes for a star
- * (the nearer the better, a big one from much further off), and drifts about the middle when
- * there's none worth the run.
+ * hand, more so one that's level or just lost) and stands in it.
  *
  * The team round: a bot picks a patch of floor that isn't its team's colour (other teams' paint
  * first, the nearer the better, a little nudge toward places its teammates aren't), runs there and
@@ -36,7 +34,6 @@ export class TeamBrain {
     const m = this.m, A = c.team!;
     const team = A.of.get(m.id) ?? 0;
     if (A.game === 'spots') this.pickSpot(t, A, team, all);
-    else if (A.game === 'stars') this.pickStar(t, A);
     else if (!this.has || t > this.nextPick || Math.hypot(this.tgt.x - m.pos.x, this.tgt.z - m.pos.z) < 0.8) {
       // a few looks round: the best tile to go and paint
       let best = -1e9;
@@ -157,25 +154,5 @@ export class TeamBrain {
     this.tgt.set(z.x + Math.cos(a) * r, A.center.y, z.z + Math.sin(a) * r);
     this.has = true;
     this.nextPick = t + 1.6 + this.rnd() * (3.2 - 1.4 * this.skill);
-  }
-
-  private pickStar(t: number, A: NonNullable<Course['team']>) {
-    const m = this.m;
-    if (t < this.nextPick && this.has) return;
-    this.nextPick = t + 0.25 + this.rnd() * (0.7 - 0.4 * this.skill);
-    // (a big one is in the list three times: three times as far is still worth it)
-    let best: THREE.Vector3 | null = null, bd = Infinity;
-    const seen = new Map<THREE.Vector3, number>();
-    for (const q of A.pickups) seen.set(q, (seen.get(q) ?? 0) + 1);
-    for (const [q, n] of seen) {
-      const d = Math.hypot(q.x - m.pos.x, q.z - m.pos.z) / n + this.rnd() * (1 - this.skill) * 5;
-      if (d < bd) (bd = d), (best = q);
-    }
-    if (best && bd < 9 + 16 * this.skill) this.tgt.set(best.x, A.center.y, best.z);
-    else if (!this.has || Math.hypot(this.tgt.x - m.pos.x, this.tgt.z - m.pos.z) < 1.2 || this.rnd() < 0.3) {
-      const a = this.rnd() * Math.PI * 2, r = 4 + this.rnd() * (A.half - 8);
-      this.tgt.set(A.center.x + Math.cos(a) * r, A.center.y, A.center.z + Math.sin(a) * r);
-    }
-    this.has = true;
   }
 }

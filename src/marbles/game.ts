@@ -511,7 +511,7 @@ export class MarbleGame {
     const c = this.course!;
     const alive = this.roster.filter((x) => !x.out).length;
     const info = SHOW[this.roundIdx];
-    const goal = c.keep ? `Hold the crown for ${KEEP.hold} seconds to win the show` : c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} standing go through` : c.cup ? c.cup.cfg.goalLine : c.kind === 'team' ? `${c.team!.teams} teams. The team with the ${c.team!.game === 'spots' ? 'fewest points' : c.team!.game === 'stars' ? 'fewest stars' : 'least floor'} goes home` : `First ${this.slots} of ${alive} qualify`;
+    const goal = c.keep ? `Hold the crown for ${KEEP.hold} seconds to win the show` : c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} standing go through` : c.cup ? c.cup.cfg.goalLine : c.kind === 'team' ? `${c.team!.teams} teams. The team with the ${c.team!.game === 'spots' ? 'fewest points' : 'least floor'} goes home` : `First ${this.slots} of ${alive} qualify`;
     this.ui.card({ n: this.roundIdx + 1, total: SHOW.length, name: info.name, kind: modeName(info.id), goal, blurb: info.blurb, team: this.teamPlay?.mine() ?? this.cupP?.mine() ?? undefined });
     this.state = 'intro';
     this.stateT = 0;
@@ -959,7 +959,7 @@ export class MarbleGame {
           } else if (ev.lost) this.sound.notes([64, 57], 0.06, 0.25, true);
         }
         if (T.game !== 'paint') {
-          if (x < 5) this.ui.call(x > 0.4 ? (T.game === 'spots' ? 'STAND IN THE SPOTS WITH YOUR TEAM' : 'GRAB THE STARS FOR YOUR TEAM') : null, T.game === 'spots' ? 0x4af0ff : 0xffc928);
+          if (x < 5) this.ui.call(x > 0.4 ? 'STAND IN THE SPOTS WITH YOUR TEAM' : null, 0x4af0ff);
           else if (x < 5.3) this.ui.call(null);
         }
       }
@@ -1281,8 +1281,8 @@ export class MarbleGame {
   private cupEvent(e: CupEvent) {
     const G = this.cupP!;
     if (e.k === 'goal') {
-      this.host?.broadcast({ t: 'goal', team: e.team, by: e.by, own: e.own, ball: e.ball, a: e.a, b: e.b });
-      this.cupGoal(e.team, e.by, e.own, e.ball);
+      this.host?.broadcast({ t: 'goal', team: e.team, by: e.by, own: e.own, ball: e.ball, a: e.a, b: e.b, pts: e.pts });
+      this.cupGoal(e.team, e.by, e.own, e.ball, e.pts);
     } else if (e.k === 'hit') {
       const r = this.racers.find((o) => o.c.id === e.id);
       if (!r) return;
@@ -1310,7 +1310,7 @@ export class MarbleGame {
   }
 
   /** the net bulges and the place goes up */
-  private cupGoal(team: number, by: number, own: boolean, ball: number) {
+  private cupGoal(team: number, by: number, own: boolean, ball: number, pts = 1) {
     const G = this.cupP;
     if (!G) return;
     const c = this.course!;
@@ -1321,9 +1321,9 @@ export class MarbleGame {
     const you = !!who?.c.player;
     const mine = this.player() && G.teamOf(this.player()!.c.id) === team;
     const name = CUP_NAMES[team];
-    const word = G.cfg.goalWord || 'GOAL!';
-    if (G.cfg.rule === 'cup' || G.cfg.rule === 'push') this.kickAt = w.time + 1.5;
-    this.ui.shout(own ? 'OWN GOAL!' : you ? (G.cfg.rule === 'volley' ? 'YOUR POINT!' : 'YOU SCORED!') : G.cfg.rule === 'cup' ? word : `${word} ${name}`, `${who ? `${who.c.name} · ` : ''}${CUP_NAMES[0]} ${G.score[0]} - ${G.score[1]} ${CUP_NAMES[1]}`, G.cfg.rule === 'volley' ? 1500 : 2400);
+    const word = pts === 3 ? 'THREE POINTER!' : G.cfg.goalWord || 'GOAL!';
+    if (G.cfg.rule === 'cup' || G.cfg.rule === 'push' || G.cfg.rule === 'hoops') this.kickAt = w.time + 1.5;
+    this.ui.shout(own ? 'OWN GOAL!' : you ? (G.cfg.rule === 'volley' ? 'YOUR POINT!' : pts === 3 ? 'YOUR THREE!' : 'YOU SCORED!') : G.cfg.rule === 'cup' ? word : `${word} ${name}`, `${who ? `${who.c.name} · ` : ''}${CUP_NAMES[0]} ${G.score[0]} - ${G.score[1]} ${CUP_NAMES[1]}`, G.cfg.rule === 'volley' ? 1500 : 2400);
     this.confetti.burst(b.pos, 160, 11);
     if (G.cfg.rule !== 'volley') this.fireworks.show(b.pos, 5, 14, 14, 0.14);
     this.rings.ring(b.pos.clone(), 8, CUP_COLORS[team], 0.5);
@@ -1748,7 +1748,7 @@ export class MarbleGame {
     if (p && p.out && !p.c.out) p.c.out = true;
     if (p && (c.team || c.cup)) {
       const ok = through.has(p.c.id);
-      this.ui.banner(ok ? 'QUALIFIED!' : 'ELIMINATED', ok ? 'good' : 'bad', c.cup ? this.cupP!.line() : c.team!.game === 'spots' ? (ok ? 'Your team hogged enough spots' : 'Your team had the fewest points') : c.team!.game === 'stars' ? (ok ? 'Your team grabbed enough stars' : 'Your team had the fewest stars') : ok ? 'Your team painted enough floor' : 'Your team painted the least', 3200);
+      this.ui.banner(ok ? 'QUALIFIED!' : 'ELIMINATED', ok ? 'good' : 'bad', c.cup ? this.cupP!.line() : c.team!.game === 'spots' ? (ok ? 'Your team hogged enough spots' : 'Your team had the fewest points') : ok ? 'Your team painted enough floor' : 'Your team painted the least', 3200);
       if (ok) this.sound.qualified();
       else this.sound.eliminated();
       this.sound.voice(ok ? 'yay' : 'aww', p.m.id, p.m.pos.x, p.m.pos.y, p.m.pos.z, true);
@@ -1873,14 +1873,6 @@ export class MarbleGame {
   private bombFx() {
     const b = this.teamPlay?.lastBoom;
     if (!b) return;
-    if (this.teamPlay!.game === 'stars') {
-      // (a star: a puff of gold, a ring in its team's colour, and the count if it was you)
-      this.puffs.stars(b.pos.clone().add(new THREE.Vector3(0, 1, 0)));
-      this.rings.ring(b.pos.clone(), b.worth > 1 ? 4.5 : 2, TEAM_COLORS[b.team], 0.35);
-      if (b.worth > 1) this.confetti.burst(b.pos.clone().add(new THREE.Vector3(0, 1.2, 0)), 90, 8, 3);
-      if (b.me) this.ui.pop(b.worth > 1 ? `BIG STAR! +${b.worth}` : '+1', b.worth > 1);
-      return;
-    }
     this.confetti.burst(b.pos.clone().add(new THREE.Vector3(0, 1, 0)), b.mine ? 160 : 70, 7, 3);
     this.puffs.dust(b.pos, 14, 0.35, 3.2);
     if (b.mine) this.ui.banner('SPLAT!', 'good', 'A paint bomb for your team', 900);
@@ -2038,7 +2030,7 @@ export class MarbleGame {
         if (this.cupP) {
           this.cupP.score[0] = m.a;
           this.cupP.score[1] = m.b;
-          this.cupGoal(m.team, m.by, m.own, m.ball);
+          this.cupGoal(m.team, m.by, m.own, m.ball, m.pts);
         }
         break;
       case 'keep':

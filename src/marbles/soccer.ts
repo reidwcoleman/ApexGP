@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Mode, type Marble } from './physics.ts';
 import type { Course } from './courses.ts';
-import { CUP_COLORS, CUP_NAMES, cupBallArt, fenceBallArt, pushBallArt, volleyBallArt, type CupArena, type CupBall, type CupCfg } from './course-soccer.ts';
+import { CUP_COLORS, CUP_NAMES, cupBallArt, fenceBallArt, hoopBallArt, pushBallArt, volleyBallArt, type CupArena, type CupBall, type CupCfg } from './course-soccer.ts';
 
 /**
  * Bean Cup's rules. The balls are the host's: it moves them, works out the kicks from wherever the
@@ -10,19 +10,21 @@ import { CUP_COLORS, CUP_NAMES, cupBallArt, fenceBallArt, pushBallArt, volleyBal
  */
 
 interface Who {
-  c: { id: number; name: string; player: boolean; human: boolean; owner?: string };
+  c: { id: number; name: string; player: boolean; human: boolean; owner?: string; skill?: number };
   m: Marble;
   out: boolean;
   local: boolean;
 }
 
 export type CupEvent =
-  | { k: 'goal'; team: number; by: number; own: boolean; ball: number; a: number; b: number }
+  | { k: 'goal'; team: number; by: number; own: boolean; ball: number; a: number; b: number; pts?: number }
   | { k: 'kick'; ball: number; id: number; v: number; shot: boolean }
   | { k: 'hit'; id: number; vx: number; vy: number; vz: number }
   | { k: 'bang'; ball: number; v: number };
 
 const P = new THREE.Vector3(), N = new THREE.Vector3(), AX = new THREE.Vector3();
+/** Bean Hoops: how near the iron the middle of the ball can come (less than the ball: a rim that size and a ball that size would never go in) */
+const RIM = 0.82;
 const Q = new THREE.Quaternion();
 
 export class CupPlay {
@@ -50,7 +52,7 @@ export class CupPlay {
   ) {
     this.arena = course.cup!;
     const C = (this.cfg = this.arena.cfg);
-    const tex = C.rule === 'push' ? pushBallArt() : C.rule === 'fence' ? fenceBallArt() : C.rule === 'volley' ? volleyBallArt() : cupBallArt();
+    const tex = C.rule === 'push' ? pushBallArt() : C.rule === 'fence' ? fenceBallArt() : C.rule === 'volley' ? volleyBallArt() : C.rule === 'hoops' ? hoopBallArt() : cupBallArt();
     const mat = new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.2 });
     const geo = new THREE.SphereGeometry(C.R, 40, 28);
     const ringGeo = new THREE.RingGeometry(C.R * 0.9, C.R * 1.15, 40).rotateX(-Math.PI / 2);
@@ -129,6 +131,8 @@ export class CupPlay {
     b.last = b.prev = -1;
     b.by[0] = b.by[1] = -1;
     b.byT[0] = b.byT[1] = -99;
+    b.worth = 2;
+    b.py = b.pos.y;
   }
   /** kick off: the first ball down */
   start() {
@@ -242,6 +246,27 @@ export class CupPlay {
         if (ev) ev.push({ k: 'bang', ball: i, v: 12 });
       }
     }
+    // Bean Hoops: the rims. A ball can drop through the middle; anywhere on the iron it comes off it
+    for (const H of A.hoops) {
+      const hx = b.pos.x - H.x, hz = b.pos.z - H.z, hr = Math.hypot(hx, hz);
+      if (hr < 1e-3 || hr > C.hoopR + R || Math.abs(b.pos.y - H.y) > R) continue;
+      // the nearest point of the ring
+      const px = H.x + (hx / hr) * C.hoopR, pz = H.z + (hz / hr) * C.hoopR;
+      let nx = b.pos.x - px, ny = b.pos.y - H.y, nz = b.pos.z - pz;
+      const d = Math.hypot(nx, ny, nz);
+      if (d >= RIM || d < 1e-3) continue;
+      nx /= d;
+      ny /= d;
+      nz /= d;
+      b.pos.set(px + nx * RIM, H.y + ny * RIM, pz + nz * RIM);
+      const vn = b.vel.x * nx + b.vel.y * ny + b.vel.z * nz;
+      if (vn < 0) {
+        b.vel.x -= nx * vn * 1.5;
+        b.vel.y -= ny * vn * 1.5;
+        b.vel.z -= nz * vn * 1.5;
+        if (ev && vn < -3) ev.push({ k: 'bang', ball: i, v: 9 });
+      }
+    }
     // (nobody kicks that hard, however many of them are in on it)
     const top = b.vel.length();
     if (top > C.top) b.vel.multiplyScalar(C.top / top);
@@ -338,8 +363,11 @@ export class CupPlay {
     // (a shot goes where you're going, so you can aim it)
     const dx = hs > 1 ? m.vel.x / hs : Math.sin(m.yaw), dz = hs > 1 ? m.vel.z / hs : Math.cos(m.yaw);
     if (C.rule === 'volley') return this.bump(b, i, r, t, ev, dx, dz, dive || (air && N.y > 0.2));
+    if (C.rule === 'hoops' && (dive || (air && N.y > 0.25))) return this.shoot(b, i, r, t, ev, dx, dz, !dive);
+    // (a shot just gone up isn't knocked off its line by everyone stood round it: only a dive or a jump gets to it)
+    if (C.rule === 'hoops' && t - b.kickT < 0.4) return;
     // a hard one coming the other way: it wins
-    if (speed > 15 && rel < -11 && C.rule !== 'push' && b.last !== m.id && t - b.kickT > 0.15 && m.mode === Mode.Run) {
+    if (speed > 15 && rel < -11 && C.rule !== 'push' && C.rule !== 'hoops' && b.last !== m.id && t - b.kickT > 0.15 && m.mode === Mode.Run) {
       b.vel.multiplyScalar(0.45);
       ev.push({ k: 'hit', id: r.c.id, vx: -N.x * speed * 0.5, vy: 5, vz: -N.z * speed * 0.5 });
       this.touched(b, m.id, t);
@@ -349,6 +377,8 @@ export class CupPlay {
     this.clear(b, reach);
     if (rel < -0.5 && !dive) return;
     this.touched(b, m.id, t);
+    // (dribbled since it was shot: it's a two again)
+    b.worth = 2;
     if (dive) {
       if (t - b.kickT < 0.2) return;
       b.kickT = t;
@@ -378,6 +408,53 @@ export class CupPlay {
     b.vel.z += fz * k;
     b.vel.y += Math.max(0, N.y) * k * 0.4;
     if (k > 8) ev.push({ k: 'kick', ball: i, id: m.id, v: k, shot: false });
+  }
+
+  /**
+   * Bean Hoops: a dive into the ball (or a jump up into it) is a shot. It's thrown at the hoop on
+   * an arc that drops into it; how true depends on how far out you are and how squarely you were
+   * heading at the hoop. From outside the arc it's worth three. Facing away from the hoop it's
+   * just a clearance, the way you're going.
+   */
+  private shoot(b: CupBall, i: number, r: Who, t: number, ev: CupEvent[], dx: number, dz: number, header: boolean) {
+    const A = this.arena, C = this.cfg, m = r.m;
+    if (t - b.kickT < 0.3) return;
+    b.kickT = t;
+    this.touched(b, m.id, t);
+    const team = this.teamOf(r.c.id), H = A.hoops[team];
+    const hx = H.x - b.pos.x, hz = H.z - b.pos.z, d = Math.hypot(hx, hz);
+    // which way it's being hit: the way you're going and the side of the ball you're on, together
+    let ax = dx + N.x, az = dz + N.z;
+    const al = Math.hypot(ax, az) || 1;
+    ax /= al;
+    az /= al;
+    const facing = d > 0.5 ? (ax * hx + az * hz) / d : 1;
+    // (a jump up into it is only a shot close in, a tip at the rim; further out it's just knocked on)
+    if (facing < 0.15 || (header && d > 9)) {
+      const v = header ? 8 : 15;
+      b.vel.set(ax * v, 8, az * v);
+      b.worth = 2;
+      ev.push({ k: 'kick', ball: i, id: m.id, v, shot: !header });
+      return;
+    }
+    // (from the far end it's not a shot, it's a long ball up the court for someone to run on to)
+    if (d > 27) {
+      const T = 1.5, k = 0.55;
+      b.vel.set((hx * k + (Math.random() - 0.5) * 6) / T, 0.5 * C.g * T * 0.8, (hz * k) / T);
+      b.worth = 2;
+      ev.push({ k: 'kick', ball: i, id: m.id, v: b.vel.length(), shot: true });
+      return;
+    }
+    // how far off it can be (m): more from further out, more if you weren't square to it, more for a weaker bot
+    const hand = r.c.human ? 1 : 1.9 - 0.7 * (r.c.skill ?? 0.7);
+    const off = (0.3 + d * 0.045 + Math.max(0, d - 10) * 0.1) * (1 + (1 - facing) * 3) * hand * (header ? 1.35 : 1);
+    const tx = H.x + (Math.random() + Math.random() - 1) * off * 1.6, tz = H.z + (Math.random() + Math.random() - 1) * off * 1.6;
+    const T = 0.8 + d * 0.045;
+    b.vel.set((tx - b.pos.x) / T, (H.y + 0.35 - b.pos.y) / T + 0.5 * C.g * T, (tz - b.pos.z) / T);
+    // (the arc above has no air in it: a touch more to make up for the drag)
+    b.vel.multiplyScalar(1 + 0.05 * T);
+    b.worth = d > C.three ? 3 : 2;
+    ev.push({ k: 'kick', ball: i, id: m.id, v: b.vel.length(), shot: true });
   }
 
   /**
@@ -450,6 +527,21 @@ export class CupPlay {
         for (const r of all) if (r.m.active && !r.out && !r.m.frozen) this.touch(b, i, r, t, ev);
         this.hold(b, was, 0, null, i);
         const dz = b.pos.z - A.center.z;
+        // Bean Hoops: down through a rim is a basket for the side that shoots at it
+        if (C.rule === 'hoops') {
+          for (let team = 0; team < 2 && b.live; team++) {
+            const H = A.hoops[team];
+            if (!(b.py > H.y && b.pos.y <= H.y) || Math.hypot(b.pos.x - H.x, b.pos.z - H.z) > C.hoopR - RIM * 0.6) continue;
+            const mine = t - b.byT[team] < C.credit, pts = mine ? b.worth : 2;
+            this.score[team] += pts;
+            b.live = false;
+            b.backAt = t + C.restart;
+            const by = mine ? b.by[team] : b.last;
+            ev.push({ k: 'goal', team, by, own: !mine && by >= 0 && this.teamOf(by) !== team, ball: i, a: this.score[0], b: this.score[1], pts });
+          }
+          b.py = b.pos.y;
+          continue;
+        }
         // Volley Folly: down on the floor is a point to the other side, and their serve to take
         if (C.rule === 'volley') {
           if (this.down !== i) continue;

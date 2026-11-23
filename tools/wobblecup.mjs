@@ -8,7 +8,7 @@ import { CHROME, ANGLE } from './chrome.mjs';
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
 const port = opt('port', '5197');
-const rounds = opt('rounds', 'beancup,bigpush,overfence,volleyfolly').split(',');
+const rounds = opt('rounds', 'beancup,bigpush,overfence,volleyfolly,beanhoops').split(',');
 const runs = Number(opt('runs', 2));
 let browser;
 for (let tries = 0; tries < 6 && !browser; tries++) {
@@ -43,6 +43,16 @@ async function one(id) {
     const calls = [];
     const shout = g.ui.shout.bind(g.ui);
     g.ui.shout = (a, b, ms) => { calls.push([+g.playT.toFixed(1), a, b]); shout(a, b, ms); };
+    // (Bean Hoops: every shot, how far out it was taken from, and where the ball spends its time)
+    out.shots = []; out.zSum = 0; out.high = 0;
+    if (P.shoot) {
+      const shoot = P.shoot.bind(P);
+      P.shoot = (b, i, r, tt, ev, dx, dz, h) => {
+        const k0 = b.kickT;
+        shoot(b, i, r, tt, ev, dx, dz, h);
+        if (b.kickT !== k0) { const H = A.hoops[P.teamOf(r.c.id)]; out.shots.push(+Math.hypot(H.x - b.pos.x, H.z - b.pos.z).toFixed(0) * (b.vel.y > 8.5 ? 1 : -1)); }
+      };
+    }
     for (let t = 0; t < 200 && (g.state === 'play' || g.state === 'countdown' || g.state === 'intro'); t += 1 / 60) {
       g.ff(1 / 60);
       if (g.state !== 'play') continue;
@@ -56,6 +66,7 @@ async function one(id) {
         if (step > fair) { out.jumps++; out.jumpMax = Math.max(out.jumpMax, +step.toFixed(2)); }
         prev[i].copy(b.pos);
         out.maxSpeed = Math.max(out.maxSpeed, +b.vel.length().toFixed(1));
+        out.zSum += Math.abs(b.pos.z - A.center.z); if (b.pos.y > y0 + C.R + 2) out.high++;
         const dx = Math.abs(b.pos.x - A.center.x), dz = Math.abs(b.pos.z - A.center.z);
         if (dx > C.HW + 0.05 || dz > C.HL + C.goalD + 0.05 || b.pos.y < y0 + C.R - 0.05 || b.pos.y > y0 + C.ceil + 0.5) out.ballOut++;
         // lying dead: slow, with nobody near it
@@ -76,7 +87,7 @@ async function one(id) {
       if (C.rule !== 'fence' && s !== lastScore) {
         const since = g.playT - Math.max(dropT, 0);
         out.goals.push([+g.playT.toFixed(1), P.score.join('-'), +since.toFixed(1)]);
-        if (since < 4 && C.rule !== 'volley') out.quick++;
+        if (since < 4 && (C.rule === 'cup' || C.rule === 'push')) out.quick++;
         lastScore = s;
         lastGoalT = g.playT;
       }
@@ -102,6 +113,7 @@ for (const r of res) {
   const wrong = r.errs.length || r.state === 'play' || r.jumps > 0 || r.dead > 0 || r.ballOut > 0 || r.beanOut > 0 || r.quick > 0;
   if (wrong) bad++;
   console.log(`${wrong ? 'BAD ' : 'ok  '}${r.id.padEnd(10)} ${String(r.playT).padStart(6)}s ${r.score.padEnd(5)} jumps ${r.jumps} (max ${r.jumpMax} m) dead ${r.dead} ${JSON.stringify(r.deadAt)} ballOut ${r.ballOut} beanOut ${r.beanOut} inBall ${r.inBall} quickGoals ${r.quick} top ${r.maxSpeed} m/s down ${(100 * r.tumble / n).toFixed(1)}% idle ${(100 * r.idle / n).toFixed(1)}% ballAlone ${(100 * r.far / Math.max(1, r.ticks)).toFixed(0)}%`);
+  if (r.shots.length) console.log(`      shots (m from the hoop; minus: a clearance) ${r.shots.join(' ')} · ball's mean distance from halfway ${(r.zSum / Math.max(1, r.ticks)).toFixed(1)} m, in the air ${(100 * r.high / Math.max(1, r.ticks)).toFixed(0)}%`);
   if (r.goals.length) console.log(`      goals ${r.goals.map((g) => `${g[0]}s ${g[1]} (+${g[2]}s)`).join(', ')}`);
   if (r.calls.length) console.log(`      calls ${r.calls.join(' | ')}`);
   if (r.errs.length) console.log(`      ERR ${r.errs.join(' | ')}`);

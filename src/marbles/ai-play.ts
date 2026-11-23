@@ -149,7 +149,7 @@ export class CupBrain {
       const mates = all.filter((o) => o.active && (A.of.get(o.id) ?? 0) === team).sort((p, q) => p.id - q.id);
       this.n = mates.length;
       this.slot = mates.indexOf(m);
-      this.keeper = !push && this.n >= 4 && this.slot === 0;
+      this.keeper = !push && CUP.rule !== 'hoops' && this.n >= 4 && this.slot === 0;
       if (ball) {
         const mine = bd;
         let closer = 0;
@@ -203,14 +203,19 @@ export class CupBrain {
     if (!ball || m.mode !== Mode.Run) return;
     const bx = ball.pos.x - m.pos.x, bz = ball.pos.z - m.pos.z, bdist = Math.hypot(bx, bz);
     const height = ball.pos.y - y0 - CUP.R;
-    if (!push && bdist < 3.4 && height > 1.4 && height < 4.5 && this.rnd() < 0.2 * this.skill) m.jump = true;
+    // (Bean Hoops: it only goes up for one under the hoop it shoots at, for the tip-in)
+    if (!push && (CUP.rule !== 'hoops' || Math.hypot(G.x - ball.pos.x, G.z - ball.pos.z) < 8) && bdist < 3.4 && height > 1.4 && height < 4.5 && this.rnd() < 0.2 * this.skill) m.jump = true;
     if (t < this.shotT || bdist > CUP.R + 1.7 || height > 1.6) return;
     // a shot or a clearance: heading at the ball, the ball's between it and somewhere useful
     const toGoal = Math.hypot(G.x - ball.pos.x, G.z - ball.pos.z);
-    const lined = bz * dir > 0.2 && Math.abs(bx) < CUP.R + 1 + 1.2 * this.skill;
+    // (Bean Hoops: anywhere the ball is between it and the hoop will do: a rebound is a shot too)
+    const lined = CUP.rule === 'hoops' ? bx * (G.x - m.pos.x) + bz * (G.z - m.pos.z) > bdist * 2 : bz * dir > 0.2 && Math.abs(bx) < CUP.R + 1 + 1.2 * this.skill;
     const panic = Math.abs(ball.pos.z - own) < 16;
-    if (lined && (toGoal < 26 || panic) && this.rnd() < 0.3 + 0.5 * this.skill - ease * 0.2) {
-      this.shotT = t + (push ? 0.9 : 1.6) + this.rnd() * 1.4;
+    // (Bean Hoops: it shoots from as far out as it fancies itself; the better it is, the further.
+    // Under its own hoop it just gets rid of it)
+    const range = CUP.rule === 'hoops' ? toGoal < 10 + 9 * this.skill - ease * 4 : toGoal < 26 || panic;
+    if (lined && range && this.rnd() < 0.3 + 0.5 * this.skill - ease * 0.2) {
+      this.shotT = t + (push || CUP.rule === 'hoops' ? 0.9 : 1.6) + this.rnd() * 1.4;
       m.input.set(bx / (bdist || 1), 0, bz / (bdist || 1));
       m.dash = true;
     }

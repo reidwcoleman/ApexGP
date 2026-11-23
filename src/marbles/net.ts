@@ -67,7 +67,7 @@ export type CtlMsg =
   | { t: 'keep'; h: number; x: number; z: number; s: [number, number][]; how?: 'took' | 'stole'; k?: number; home?: boolean }
   /** Bean Cup: where the balls are, and the goals; a goal going in */
   | { t: 'cup'; s: number[]; a: number; b: number }
-  | { t: 'goal'; team: number; by: number; own: boolean; ball: number; a: number; b: number }
+  | { t: 'goal'; team: number; by: number; own: boolean; ball: number; a: number; b: number; pts?: number }
   | { t: 'ping'; ts: number; ht: number; rtt: number }
   | { t: 'pong'; ts: number }
   | { t: 'kick'; why: string };
