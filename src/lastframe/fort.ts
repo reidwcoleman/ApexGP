@@ -44,7 +44,7 @@ export class Barricade {
   readonly planks: THREE.Group[] = [];
   readonly group = new THREE.Group();
   /** the charge on it, while there is one */
-  charge: THREE.Mesh | null = null;
+  charge: THREE.Object3D | null = null;
 
   constructor(readonly o: Opening, world: World, mat: THREE.Material) {
     const rnd = (n: number) => {
@@ -105,6 +105,19 @@ export class Barricade {
       this.planks[k].visible = up;
     }
     return gone;
+  }
+
+  /** nailed up a board at a time: each one shows when its turn comes (what stops a body is there from the first) */
+  nailUp(each: (k: number, at: THREE.Vector3) => void) {
+    for (let k = 0; k < BOARDS; k++) {
+      if (!(this.boards >> k & 1)) continue;
+      this.planks[k].visible = false;
+      window.setTimeout(() => {
+        if (!(this.boards >> k & 1)) return;
+        this.planks[k].visible = true;
+        each(k, this.centre(k));
+      }, 70 + k * 95);
+    }
   }
 
   centre(k: number, out = new THREE.Vector3()) {

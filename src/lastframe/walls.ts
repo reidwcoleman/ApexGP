@@ -310,7 +310,7 @@ function merge(list: THREE.BufferGeometry[]): THREE.BufferGeometry {
   return out;
 }
 
-export interface WallMats { plaster: THREE.Material; timber: THREE.Material; steel: THREE.Material }
+export interface WallMats { plaster: THREE.Material; timber: THREE.Material; steel: THREE.Material; rail: THREE.Material }
 
 /** the hole dressed: the studs it was cut between, the torn edge of the board on both faces, and what fell out of it */
 function holeModel(s: Site, dir: number, mats: WallMats): THREE.Group {
@@ -383,23 +383,40 @@ function holeModel(s: Site, dir: number, mats: WallMats): THREE.Group {
   return g;
 }
 
-/** two steel sheets on rails, bolted across the wall from one side */
-function sheetModel(s: Site, side: number, mat: THREE.Material): THREE.Group {
+/** two steel sheets in a frame of box section, braced corner to corner and bolted across the wall from one side */
+function sheetModel(s: Site, side: number, mat: THREE.Material, railMat: THREE.Material): THREE.Group {
   const g = new THREE.Group();
   const W = s.u1 - s.u0 + 0.3, H = s.y1 - s.y0 + 0.12;
-  const list: THREE.BufferGeometry[] = [];
+  const list: THREE.BufferGeometry[] = [], rails: THREE.BufferGeometry[] = [];
   const z = side * (s.t / 2 + 0.03);
-  boxAt(list, W / 2 - 0.006, H, 0.012, -W / 4, H / 2, z);
-  boxAt(list, W / 2 - 0.006, H, 0.012, W / 4, H / 2, z);
-  for (const y of [0.22, H * 0.5, H - 0.22]) boxAt(list, W + 0.06, 0.07, 0.035, 0, y, z + side * 0.02);
-  for (const x of [-W / 2 + 0.03, 0, W / 2 - 0.03]) boxAt(list, 0.05, H, 0.03, x, H / 2, z + side * 0.012);
-  // the feet it stands on, and the bolts
-  for (const x of [-W / 2 + 0.1, W / 2 - 0.1]) boxAt(list, 0.09, 0.03, 0.16, x, 0.015, z + side * 0.08);
-  for (const y of [0.22, H * 0.5, H - 0.22]) for (const x of [-W / 2 + 0.03, 0, W / 2 - 0.03]) boxAt(list, 0.03, 0.03, 0.02, x, y, z + side * 0.045, 0, 0, 0.785);
+  boxAt(list, W / 2 - 0.008, H, 0.012, -W / 4, H / 2, z);
+  boxAt(list, W / 2 - 0.008, H, 0.012, W / 4, H / 2, z);
+  // the frame: three rails across, a post at each edge and one over the join
+  for (const y of [0.16, H * 0.5, H - 0.16]) boxAt(rails, W + 0.08, 0.06, 0.05, 0, y, z + side * 0.031);
+  for (const x of [-W / 2 + 0.03, 0, W / 2 - 0.03]) boxAt(rails, 0.06, H, 0.04, x, H / 2, z + side * 0.026);
+  // a brace across each sheet, bottom outside corner to top middle
+  const bl = Math.hypot(W / 2 - 0.1, H - 0.4), ba = Math.atan2(W / 2 - 0.1, H - 0.4);
+  boxAt(rails, 0.045, bl, 0.03, -W / 4, H / 2, z + side * 0.02, 0, 0, -ba);
+  boxAt(rails, 0.045, bl, 0.03, W / 4, H / 2, z + side * 0.02, 0, 0, ba);
+  // feet out on the floor, a strut from each up to the middle rail, and the bolt heads
+  for (const x of [-W / 2 + 0.12, W / 2 - 0.12]) {
+    boxAt(rails, 0.1, 0.025, 0.42, x, 0.0125, z + side * 0.24);
+    const sl = Math.hypot(0.4, H * 0.5);
+    boxAt(rails, 0.035, sl, 0.035, x, H * 0.25, z + side * 0.23, side * Math.atan2(0.4, H * 0.5), 0, 0);
+  }
+  for (const y of [0.16, H * 0.5, H - 0.16]) for (const x of [-W / 2 + 0.03, -W / 4, 0, W / 4, W / 2 - 0.03]) boxAt(list, 0.032, 0.032, 0.016, x, y, z + side * 0.062, 0, 0, 0.785);
+  const rm = new THREE.Mesh(merge(rails), railMat);
+  rm.castShadow = true;
+  rm.receiveShadow = true;
   const m = new THREE.Mesh(merge(list), mat);
   m.castShadow = true;
   m.receiveShadow = true;
-  g.add(m);
+  // it is walked up from leaning: the mesh turns about the foot of the wall
+  const hold = new THREE.Group();
+  hold.add(m, rm);
+  hold.rotation.x = side * 0.75;
+  hold.userData.swing = side * 0.75;
+  g.add(hold);
   const mid = siteMid(s);
   g.position.set(mid.x, s.y0, mid.z);
   if (!s.ax) g.rotation.y = -Math.PI / 2;
@@ -407,12 +424,34 @@ function sheetModel(s: Site, side: number, mat: THREE.Material): THREE.Group {
   return g;
 }
 
+const CH_BODY = new THREE.MeshStandardMaterial({ color: 0x2a2d24, roughness: 0.75 });
+const CH_TAPE = new THREE.MeshStandardMaterial({ color: 0x8a8a84, roughness: 0.6 });
+const CH_LED = new THREE.MeshBasicMaterial({ color: 0xff3020 });
+
+/** a breaching charge: a frame of cutting strip taped flat, the firing box in the middle of it with its light on.
+ *  Built facing +z, standing with its foot at y = 0 */
+export function chargeMesh(w = 0.5, h = 0.72): THREE.Group {
+  const g = new THREE.Group();
+  const list: THREE.BufferGeometry[] = [], tape: THREE.BufferGeometry[] = [];
+  boxAt(list, w, 0.045, 0.022, 0, h, 0);
+  boxAt(list, w, 0.045, 0.022, 0, 0, 0);
+  boxAt(list, 0.045, h, 0.022, -w / 2, h / 2, 0);
+  boxAt(list, 0.045, h, 0.022, w / 2, h / 2, 0);
+  boxAt(list, 0.03, Math.hypot(w, h), 0.016, 0, h / 2, 0, 0, 0, Math.atan2(w, h));
+  boxAt(list, 0.11, 0.075, 0.04, 0, h / 2, 0.02);
+  for (const [x, y] of [[-w / 2, h * 0.25], [w / 2, h * 0.75], [-w * 0.2, h], [w * 0.2, 0]]) boxAt(tape, 0.09, 0.05, 0.004, x, y, 0.013, 0, 0, (x + y) * 3);
+  const led = new THREE.Mesh(new THREE.SphereGeometry(0.007, 8, 6), CH_LED);
+  led.position.set(0.035, h / 2 + 0.02, 0.042);
+  g.add(new THREE.Mesh(merge(list), CH_BODY), new THREE.Mesh(merge(tape), CH_TAPE), led);
+  return g;
+}
+
 /** a charge taped to a wall */
-export function chargeModel(s: Site, side: number): THREE.Mesh {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.6, 0.05), new THREE.MeshStandardMaterial({ color: 0x23261f, roughness: 0.7, emissive: 0x3a0500, emissiveIntensity: 0.8 }));
-  const p = siteOut(s, side, 0.03);
-  m.position.set(p.x, s.y0 + 1.15, p.z);
-  if (!s.ax) m.rotation.y = Math.PI / 2;
+export function chargeModel(s: Site, side: number): THREE.Group {
+  const m = chargeMesh();
+  const p = siteOut(s, side, 0.012);
+  m.position.set(p.x, s.y0 + 0.75, p.z);
+  m.rotation.y = s.ax ? (side > 0 ? 0 : Math.PI) : (side > 0 ? Math.PI / 2 : -Math.PI / 2);
   return m;
 }
 
@@ -424,7 +463,7 @@ export class Walls {
   readonly holes: Hole[] = [];
   readonly sheets: { s: Site; side: number; model: THREE.Group; box: Box }[] = [];
 
-  constructor(private world: World, private nav: Nav, private roots: THREE.Object3D[], private scene: THREE.Object3D, private mats: WallMats) {}
+  constructor(private world: World, private nav: Nav, private roots: THREE.Object3D[], private scene: THREE.Object3D, readonly mats: WallMats) {}
 
   /** every hole and every sheet, as sites: what a new one must keep clear of */
   taken(): Site[] {
@@ -491,7 +530,7 @@ export class Walls {
 
   reinforce(s: Site, side: number) {
     if (this.sheets.some((h) => sitesTouch(h.s, s, -0.05)) || this.holes.some((h) => sitesTouch(h.s, s, -0.05))) return;
-    const model = sheetModel(s, side, this.mats.steel);
+    const model = sheetModel(s, side, this.mats.steel, this.mats.rail);
     this.scene.add(model);
     const z0 = s.c + side * (s.t / 2 + 0.005), z1 = s.c + side * (s.t / 2 + 0.05);
     const lo = Math.min(z0, z1), hi = Math.max(z0, z1);
@@ -504,6 +543,18 @@ export class Walls {
 
   sheeted(s: Site) {
     return this.sheets.some((h) => sitesTouch(h.s, s, 0));
+  }
+
+  /** sheets still being stood up */
+  update(dt: number) {
+    for (const h of this.sheets) {
+      const m = h.model.children[0];
+      const a = m.userData.swing as number;
+      if (!a) continue;
+      const n = Math.abs(a) < 0.01 ? 0 : a * Math.max(0, 1 - dt * 9);
+      m.userData.swing = n;
+      m.rotation.x = n;
+    }
   }
 
   private dropSheet(k: number) {

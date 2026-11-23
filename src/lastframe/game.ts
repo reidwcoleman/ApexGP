@@ -17,8 +17,8 @@ import { Input, LocalPlayer, type PlayerCtx } from './player.ts';
 import { Soldier, angleDiff, loadGear, loadGuns, preparePeople } from './soldier.ts';
 import { stepNade, type NadeSim } from './nade.ts';
 import { Rats } from './vermin.ts';
-import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow , BOARDS, SIEGE , oneLife , DEFAULT_KITS, kitCharges, kitSheets, type KitId } from './shared.ts';
-import { Walls, chargeModel, siteAt, siteMid, siteOf, siteArr, sitesTouch, type Site } from './walls.ts';
+import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow , BOARDS, SIEGE , oneLife , DEFAULT_KITS, KITS, kitCharges, kitSheets, type KitId } from './shared.ts';
+import { Walls, chargeMesh, chargeModel, siteAt, siteMid, siteOf, siteArr, sitesTouch, type Site } from './walls.ts';
 import { Gear } from './gear.ts';
 import { Barricade, openingsOf } from './fort.ts';
 
@@ -506,7 +506,8 @@ export class Game {
     this.walls = new Walls(L.world, this.nav, casters ? [L.group, casters] : [L.group], this.scene, {
       plaster: applyLF(new THREE.MeshStandardMaterial({ color: 0x8d887c, roughness: 0.96, metalness: 0, side: THREE.DoubleSide })),
       timber: L.plankMat,
-      steel: applyLF(new THREE.MeshStandardMaterial({ color: 0x7b8084, roughness: 0.62, metalness: 0.25 })),
+      steel: applyLF(new THREE.MeshStandardMaterial({ color: 0x6f7478, roughness: 0.58, metalness: 0.3 })),
+      rail: applyLF(new THREE.MeshStandardMaterial({ color: 0x2b2e31, roughness: 0.7, metalness: 0.2 })),
     });
     this.gear = new Gear(this.scene);
     if (L.map.night && this.L.map.rooms?.length) {
@@ -1167,16 +1168,18 @@ export class Game {
         const gone = f.set(e.boards);
         const at = new THREE.Vector3(f.o.x, f.o.y + 1.1, f.o.z);
         if (e.boards && !was) {
-          // nailed up
-          this.sound.door(at, false);
-          this.sound.impact(at, 'wood');
+          // nailed up, a board at a time
+          f.nailUp((_k, c) => this.sound.hammer(c));
         }
         if (f.charge && (e.blast || !e.boards)) {
           this.scene.remove(f.charge);
           f.charge = null;
         }
-        // each board that went: splinters either side of the doorway, and the noise of it
+        // each board that went: its two halves on the floor the far side of whoever did it, splinters in the air
         const nx = f.o.alongX ? 0 : 1, nz = f.o.alongX ? 1 : 0;
+        const from = e.by !== undefined && e.by >= 0 ? this.actors.get(e.by) : undefined;
+        const away = from ? Math.sign(f.o.alongX ? f.o.z - from.z : f.o.x - from.x) || 1 : 1;
+        let dropped = 0;
         for (let k = 0; k < BOARDS; k++) {
           if (!(gone >> k & 1)) continue;
           const c = f.centre(k, new THREE.Vector3());
@@ -1186,6 +1189,19 @@ export class Game {
             this.fx.impact(px + nx * sd * 0.04, c.y, pz + nz * sd * 0.04, nx * sd, 0.2, nz * sd, 'wood');
           }
           this.sound.impact(c, 'wood');
+          if (dropped++ > 7) continue;
+          for (const half of [-1, 1]) {
+            const len = f.o.w * (0.3 + Math.random() * 0.22);
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(len, 0.13, 0.024), this.L.plankMat);
+            mesh.castShadow = true;
+            this.scene.add(mesh);
+            const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, f.o.alongX ? 0 : Math.PI / 2, (Math.random() - 0.5) * 0.5));
+            const along = half * f.o.w * 0.25;
+            const p = new THREE.Vector3(c.x + (f.o.alongX ? along : nx * away * 0.08), c.y, c.z + (f.o.alongX ? nz * away * 0.08 : along));
+            const sp = e.blast ? 4.5 + Math.random() * 3 : 1.6 + Math.random() * 1.6;
+            const v = new THREE.Vector3(nx * away * sp + (Math.random() - 0.5) * 1.2, 0.6 + Math.random() * (e.blast ? 2.6 : 1.2), nz * away * sp + (Math.random() - 0.5) * 1.2);
+            this.phys.drop(mesh, [len / 2, 0.065, 0.012], new THREE.Vector3(), p, q, v, e.blast ? 16 : 7, 0.5, 40, 'wood');
+          }
         }
         if (gone && !e.blast) this.sound.tink(at);
         break;
@@ -1195,14 +1211,12 @@ export class Game {
         if (!f) break;
         if (e.s === this.mySlot) this.myCharges = Math.max(0, this.myCharges - 1);
         if (f.charge) this.scene.remove(f.charge);
-        const m = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 0.05), new THREE.MeshStandardMaterial({ color: 0x23261f, roughness: 0.7, emissive: 0x3a0500, emissiveIntensity: 0.8 }));
-        m.position.set(f.o.x + (f.o.alongX ? 0 : e.side * 0.05), f.o.y + 1.15, f.o.z + (f.o.alongX ? e.side * 0.05 : 0));
-        if (!f.o.alongX) m.rotation.y = Math.PI / 2;
+        const m = chargeMesh(Math.min(0.62, f.o.w * 0.4), 0.8);
+        m.position.set(f.o.x + (f.o.alongX ? 0 : e.side * 0.045), f.o.y + 0.7, f.o.z + (f.o.alongX ? e.side * 0.045 : 0));
+        m.rotation.y = f.o.alongX ? (e.side > 0 ? 0 : Math.PI) : (e.side > 0 ? Math.PI / 2 : -Math.PI / 2);
         f.charge = m;
         this.scene.add(m);
-        // it counts itself down
-        const at = m.position.clone();
-        for (let k = 0; k < 5; k++) window.setTimeout(() => { if (f.charge === m) this.sound.tink(at); }, (e.fuse * 1000 * k) / 5);
+        this.fuse(m.position.clone().setY(f.o.y + 1.1), e.fuse, () => f.charge === m);
         break;
       }
       case 'down': {
@@ -1210,8 +1224,9 @@ export class Game {
         if (!a) break;
         a.info.down = true;
         a.flags |= F.down;
+        this.downUntil.set(e.s, this.time + e.secs);
         const by = this.actors.get(e.by);
-        this.hud.feed(by?.info.name ?? '?', a.info.name, e.w, e.zone, by?.info.team ?? 2, a.info.team, e.by === this.mySlot || e.s === this.mySlot);
+        this.hud.feed(by?.info.name ?? '?', a.info.name, e.w, e.zone, by?.info.team ?? 2, a.info.team, e.by === this.mySlot || e.s === this.mySlot, true);
         a.soldier?.flinch(e.zone, this.tmp.set(e.dir[0], e.dir[1], e.dir[2]).clone());
         if (e.by === this.mySlot && e.s !== this.mySlot) {
           this.hud.hitTick(true);
@@ -1220,23 +1235,29 @@ export class Game {
         if (e.s === this.mySlot) {
           this.me.down = true;
           this.downLeft = e.secs;
+          this.liftBy = '';
           this.endView();
           this.sound.hurt();
           this.sound.deafen(0.8);
-          this.hud.note('Down', 'You can crawl. A teammate can get you up before you bleed out.');
         }
         break;
       }
+      case 'lift':
+        if (e.s === this.mySlot) this.liftBy = e.on ? this.actors.get(e.by)?.info.name ?? 'Someone' : '';
+        break;
       case 'up': {
         const a = this.actors.get(e.s);
         if (!a) break;
         a.info.down = false;
         a.info.hp = e.hp;
         a.flags &= ~F.down;
+        this.downUntil.delete(e.s);
         if (e.s === this.mySlot) {
           this.me.down = false;
           this.me.hp = e.hp;
           this.hud.note('On your feet', `${this.actors.get(e.by)?.info.name ?? 'Someone'} got you up.`);
+          this.liftBy = '';
+          this.sound.cloth();
         }
         break;
       }
@@ -1247,8 +1268,7 @@ export class Game {
         const m = chargeModel(st, e.side);
         this.scene.add(m);
         this.wallCharges.push({ site: st, mesh: m });
-        const at = m.position.clone();
-        for (let k = 0; k < 5; k++) window.setTimeout(() => { if (m.parent) this.sound.tink(at); }, (e.fuse * 1000 * k) / 5);
+        this.fuse(m.position.clone().setY(st.y0 + 1.1), e.fuse, () => !!m.parent);
         break;
       }
       case 'wall': {
@@ -1268,18 +1288,34 @@ export class Game {
             const u = st.u0 + Math.random() * (st.u1 - st.u0), y = st.y0 + Math.random() * (st.y1 - st.y0);
             this.fx.impact(st.ax ? u : st.c + nx * 0.1, y, st.ax ? st.c + nz * 0.1 : u, nx, 0.15, nz, 'plaster');
           }
-          this.sound.impact(at, 'plaster');
+          this.sound.crumble(at);
+          // what was the wall, across the floor on the far side
+          for (let k = 0; k < 12; k++) {
+            const a = 0.1 + Math.random() * 0.26, c2 = 0.08 + Math.random() * 0.2;
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(a, 0.0125, c2), this.walls.mats.plaster);
+            mesh.castShadow = true;
+            this.scene.add(mesh);
+            const u = st.u0 + 0.1 + Math.random() * (st.u1 - st.u0 - 0.2), y = st.y0 + 0.2 + Math.random() * (st.y1 - st.y0 - 0.3);
+            const p = new THREE.Vector3(st.ax ? u : st.c + nx * 0.12, y, st.ax ? st.c + nz * 0.12 : u);
+            const sp = 3 + Math.random() * 5;
+            const v = new THREE.Vector3(nx * sp + (Math.random() - 0.5) * 2.5, 0.5 + Math.random() * 3, nz * sp + (Math.random() - 0.5) * 2.5);
+            this.phys.drop(mesh, [a / 2, 0.00625, c2 / 2], new THREE.Vector3(), p, new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.random() * 3, Math.random() * 3, Math.random() * 3)), v, 18, 0.3, 45, 'plaster');
+          }
         } else {
           if (e.by === this.mySlot) this.mySheets = Math.max(0, this.mySheets - 1);
           this.walls.reinforce(st, e.side);
-          this.sound.door(at, false);
-          this.sound.impact(at, 'metal');
+          this.sound.steel(at);
+          for (let k = 0; k < 3; k++) window.setTimeout(() => this.sound.drill(at), 260 + k * 330);
         }
         break;
       }
       case 'cams': {
         const went = this.gear.setCams(e.list, e.alive);
-        for (const i of went) this.sound.impact(this.gear.cams[i].pos, 'glass');
+        for (const i of went) {
+          const c = this.gear.cams[i].pos;
+          this.sound.zap(c);
+          this.fx.impact(c.x, c.y, c.z, 0, -1, 0, 'glass');
+        }
         if (this.camView >= 0 && this.gear.cams[this.camView]?.dead !== false) this.endView();
         break;
       }
@@ -1288,8 +1324,8 @@ export class Game {
         if (!f) break;
         const was = this.gear.setTrip(e.i, e.on, f.o);
         if (e.on && e.s === this.mySlot) this.myTrips = Math.max(0, this.myTrips - 1);
-        if (e.on) this.sound.tink(new THREE.Vector3(f.o.x, f.o.y + 0.3, f.o.z));
-        else if (was && !e.bang) this.sound.tink(was);
+        if (e.on) this.sound.wire(new THREE.Vector3(f.o.x, f.o.y + 0.3, f.o.z));
+        else if (was) this.sound.wire(was);
         break;
       }
       case 'spot': {
@@ -1674,6 +1710,7 @@ export class Game {
       wcharge: (site, side) => this.req({ t: 'wcharge', site, side }),
       reinf: (site, side) => this.req({ t: 'reinf', site, side }),
       revive: (to) => this.req({ t: 'revive', to }),
+      lift: (to, on) => this.req({ t: 'lift', to, on }),
       trip: (i) => this.req({ t: 'trip', i }),
     },
     forts: [],
@@ -1702,7 +1739,7 @@ export class Game {
       for (const i of hit.trips) this.req({ t: 'triphit', i });
     },
     muzzleLight: (p) => this.muzzleLight(p),
-    prompt: (s) => this.hud.prompt(s),
+    prompt: (s, k) => this.hud.prompt(s, k),
     hitMark: () => {},
   };
 
@@ -1712,7 +1749,7 @@ export class Game {
   // ---- the attack-and-defend game, as this screen knows it
   walls!: Walls;
   gear!: Gear;
-  private wallCharges: { site: Site; mesh: THREE.Mesh }[] = [];
+  private wallCharges: { site: Site; mesh: THREE.Object3D }[] = [];
   /** looking through a camera (which), or the scope (through which doorway); and where the look is turned to */
   camView = -1;
   scopeView = -1;
@@ -1727,8 +1764,44 @@ export class Game {
   kits: [KitId, KitId] = [...DEFAULT_KITS];
   private mySheets = 0;
   private myTrips = 0;
-  /** seconds left on the floor */
+  /** seconds left on the floor, who is getting me up, and when each of the fallen runs out */
   downLeft = 0;
+  liftBy = '';
+  readonly downUntil = new Map<number, number>();
+  /** each side as a row of marks: 2 standing, 1 on the floor, 0 gone. Mine first */
+  pips(): [number[], number[]] {
+    const my = this.player(this.mySlot)?.team ?? 0;
+    const out: [number[], number[]] = [[], []];
+    for (const a of [...this.actors.values()].sort((p, q) => p.info.slot - q.info.slot)) {
+      if (a.info.team > 1) continue;
+      out[a.info.team === my ? 0 : 1].push(!a.info.alive ? 0 : a.info.down ? 1 : 2);
+    }
+    return out;
+  }
+  /** what I carry this round, for the corner of the screen */
+  kitLine(): string {
+    if (this.cfg?.mode !== 'siege') return '';
+    const k = this.myKit(), atk = this.attacking();
+    const parts = [KITS[k].name.toUpperCase()];
+    if (atk) parts.push(`charges ${this.myCharges}`);
+    else parts.push(`steel ${this.mySheets}`);
+    if (k === 'trapper' && !atk) parts.push(`wires ${this.myTrips}`);
+    if (k === 'scout' && atk) parts.push('scope X');
+    if (!atk) parts.push('cameras B');
+    return parts.join('   ');
+  }
+  /** teammates on the floor, where they are on the screen and how long they have */
+  fallenMarks(): { x: number; y: number; name: string; secs: number; dist: number }[] {
+    const out: { x: number; y: number; name: string; secs: number; dist: number }[] = [];
+    const my = this.player(this.mySlot)?.team ?? 0;
+    for (const a of this.actors.values()) {
+      if (!a.info.alive || !a.info.down || a.info.team !== my || a.info.slot === this.mySlot) continue;
+      const d = Math.hypot(a.x - this.cam.position.x, a.z - this.cam.position.z);
+      const p = this.project(a.x, a.y + 0.6, a.z);
+      if (p) out.push({ x: p.x, y: p.y, name: a.info.name, secs: Math.max(0, (this.downUntil.get(a.info.slot) ?? this.time) - this.time), dist: d });
+    }
+    return out;
+  }
   myKit(): KitId {
     return this.kits[this.attacking() ? 0 : 1];
   }
@@ -1737,6 +1810,16 @@ export class Game {
     if (this.camView >= 0) return `CAM ${this.camView + 1} / ${this.gear.cams.length}   click: next   B: back`;
     if (this.scopeView >= 0) return 'SCOPE   X: back';
     return '';
+  }
+  /** a charge counting itself down: slow, then quick, then the long one */
+  private fuse(at: THREE.Vector3, secs: number, live: () => boolean) {
+    let t = 0, gap = 0.5;
+    while (t < secs - 0.05) {
+      const hi = secs - t < 0.75;
+      window.setTimeout(() => { if (live()) this.sound.pip(at, hi); }, t * 1000);
+      t += gap;
+      gap = Math.max(0.085, gap * 0.76);
+    }
   }
   private endView() {
     this.camView = -1;
@@ -1990,11 +2073,9 @@ export class Game {
           this.mySoldier?.setDrawn(!viewing);
         }
         this.gear.cams.forEach((c, k) => (c.mesh.visible = k !== this.camView));
-        if (me.down) {
-          this.downLeft = Math.max(0, this.downLeft - dt);
-          this.hud.prompt(`Down. Bleeding out in ${Math.ceil(this.downLeft)} s`);
-        }
+        if (me.down) this.downLeft = Math.max(0, this.downLeft - dt);
         if (this.spots.length) this.spots = this.spots.filter((q) => q.until > this.time);
+        this.walls.update(dt);
         // getting the room ready is done at the room: nobody goes to wait where the other side comes in
         if (this.phase === 'prep' && this.cfg?.mode === 'siege' && !this.attacking() && this.obj) {
           const o = this.obj, cx = (o[0] + o[3]) / 2, cz = (o[2] + o[5]) / 2;

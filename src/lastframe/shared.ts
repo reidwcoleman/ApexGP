@@ -203,6 +203,8 @@ export type Ev =
   | { t: 'down'; s: number; by: number; zone: number; w: number; dir: [number, number, number]; secs: number }
   /** back on their feet */
   | { t: 'up'; s: number; by: number; hp: number }
+  /** someone has started (or stopped) getting s up */
+  | { t: 'lift'; s: number; by: number; on: boolean }
   /** a wall: blown through, or sheeted with steel from one side. site: see walls.ts */
   | { t: 'wall'; kind: 'hole' | 'reinf'; site: number[]; side: number; by: number }
   /** a breaching charge on a wall */
@@ -263,6 +265,8 @@ export type Req =
   | { t: 'reinf'; site: number[]; side: number }
   /** a teammate got back on their feet */
   | { t: 'revive'; to: number }
+  /** started, or stopped, getting a teammate up */
+  | { t: 'lift'; to: number; on: boolean }
   /** a camera shot out */
   | { t: 'camhit'; i: number }
   /** a tripwire strung across doorway i, or shot off it */
@@ -288,7 +292,7 @@ export const BOARDS_WAY = (1 << (BOARDS - 1)) - 1;
 /** seconds to nail one up, to set a charge, and its fuse */
 export const BUILD_T = 1.6, CHARGE_T = 1.1, CHARGE_FUSE = 2.6;
 /** the attack-and-defend game: seconds of preparation, of action, to secure the room; charges a life */
-export const SIEGE = { prep: 28, live: 180, secure: 9, charges: 2, sheets: 2, trips: 3, cams: 4, bleedOut: 24, revive: 3, upHp: 35, downHp: 20 };
+export const SIEGE = { prep: 28, live: 180, secure: 7, charges: 2, sheets: 2, trips: 3, cams: 4, bleedOut: 24, revive: 3, upHp: 35, downHp: 20 };
 /** seconds to sheet a wall, and to set a charge on one */
 export const REINF_T = 2.4, WALL_CHARGE_T = 1.6;
 /** what each kit changes */

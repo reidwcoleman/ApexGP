@@ -1,7 +1,8 @@
 import './ui.css';
+import { TacMap } from './tacmap.ts';
 import type { Game } from './game.ts';
 import { Guest_, Host, makeCode, type Down } from './net.ts';
-import { PRIMARIES, TEAM_NAME, WEAPONS, ZONE_NAME, fmtClock, solo, type Ev, type MatchConfig, type Mode, type PlayerInfo, type Req, type WeaponId , ATK_KITS, DEF_KITS, KITS, type KitId } from './shared.ts';
+import { PRIMARIES, TEAM_NAME, WEAPONS, ZONE_NAME, fmtClock, solo, type Ev, type MatchConfig, type Mode, type PlayerInfo, type Req, type WeaponId , ATK_KITS, DEF_KITS, KITS, type KitId , SIEGE } from './shared.ts';
 import type * as THREE from 'three';
 import { BASE, DEFAULT_MAP, MAP_ID } from './world.ts';
 
@@ -19,7 +20,7 @@ const MAPS: { id: string; name: string; note: string }[] = [
 ];
 const HERE = MAPS.find((x) => x.id === MAP_ID) ?? MAPS[0];
 const thumb = (id: string) => `${BASE}thumbs/${id}.webp`;
-const KEYS: [string, string][] = [['WASD', 'Move'], ['Shift', 'Run'], ['Left click', 'Fire'], ['Right click', 'Aim'], ['C', 'Crouch, slide'], ['Space', 'Jump, climb'], ['Q E', 'Lean'], ['R', 'Reload'], ['F', 'Door, take gun'], ['Hold F', 'Barricade, charge, wall, revive'], ['Z', 'Kick'], ['B', 'Cameras'], ['X', 'Kit'], ['H', 'Bandage'], ['T', 'Weapon light'], ['G', 'Frag'], ['V', 'Flash'], ['1 2', 'Swap'], ['Tab', 'Case sheet']];
+const KEYS: [string, string][] = [['WASD', 'Move'], ['Shift', 'Run'], ['Left click', 'Fire'], ['Right click', 'Aim'], ['C', 'Crouch, slide'], ['Space', 'Jump, climb'], ['Q E', 'Lean'], ['R', 'Reload'], ['F', 'Door, take gun'], ['Hold F', 'Barricade, charge, wall, revive'], ['Z', 'Kick'], ['B', 'Cameras'], ['X', 'Kit'], ['M', 'Plan'], ['H', 'Bandage'], ['T', 'Weapon light'], ['G', 'Frag'], ['V', 'Flash'], ['1 2', 'Swap'], ['Tab', 'Case sheet']];
 interface Case { id: string; at: number; mode: Mode; won: number; line: string; k: number; d: number; len: number; marks: [number, number][] }
 const SKILL = [['Rookie', 0.2], ['Regular', 0.5], ['Veteran', 0.85]] as const;
 
@@ -62,7 +63,18 @@ export class Hud {
   private hudEl = el('div', 'hud');
   private feedEl = el('div', 'feed');
   private center = el('div', 'center');
-  private promptEl = el('div', 'prompt');
+  private promptEl = el('div', 'prompt', '<div class="acts"></div><div class="bar"><i></i></div>');
+  private promptActs = this.promptEl.firstChild as HTMLElement;
+  private promptBar = this.promptEl.lastChild!.firstChild as HTMLElement;
+  /** what I carry, by the ammunition */
+  private kitEl = el('div', 'kit');
+  /** on the floor: how long, and who is coming */
+  private downEl = el('div', 'downed', '<div class="d-in"><b>DOWN</b><span></span><div><i></i></div></div>');
+  private fallBox = el('div', 'fallen');
+  private tmap = new TacMap();
+  private fallTags: HTMLElement[] = [];
+  /** the picture a lens gives: brackets for a camera, a round mask for the scope */
+  private lensFx = el('div', 'lensfx', '<i></i><i></i><i></i><i></i><b></b>');
   /** the attack-and-defend game: where the room is, and how far the attackers have got with it */
   private objEl = el('div', 'obj', '<i></i><b></b><span></span>');
   private secEl = el('div', 'secure', '<b></b><div><i></i></div>');
@@ -129,7 +141,8 @@ export class Hud {
     const ka = store.get('kitA', 'breacher') as KitId, kd = store.get('kitD', 'fortifier') as KitId;
     g.kits = [ATK_KITS.includes(ka) ? ka : 'breacher', DEF_KITS.includes(kd) ? kd : 'fortifier'];
     this.vitals.append(this.wounds, this.hp);
-    this.hudEl.append(this.tagBox, this.spotBox, this.objEl, this.secEl, this.lensEl, this.stamp, this.top, this.feedEl, this.center, this.promptEl, this.healBar, this.ammo, this.vitals, this.tick, this.dmgEl, this.scope, this.hint);
+    this.hudEl.append(this.lensFx, this.downEl, this.tagBox, this.spotBox, this.fallBox, this.objEl, this.secEl, this.lensEl, this.kitEl, this.stamp, this.top, this.feedEl, this.center, this.promptEl, this.healBar, this.ammo, this.vitals, this.tick, this.dmgEl, this.scope, this.hint);
+    this.hudEl.append(this.tmap.el);
     this.sheet.append(this.shTop, this.report, this.tables, this.shActs);
     this.boardEl.append(this.sheet);
     this.root.append(this.hudEl, this.boardEl, this.lostEl, this.pauseEl, this.menu, this.toastEl);
@@ -307,7 +320,7 @@ export class Hud {
   /** Breach and Hold: what to carry on each side of the round */
   private kitPickers() {
     const one = (id: string, lab: string, list: KitId[], cur: KitId) => `<div class="group"><div class="lab">${lab}</div><div class="list" data-seg="${id}">${list.map((k) => `<button data-v="${k}" class="${k === cur ? 'sel' : ''}"><b>${KITS[k].name}</b><span>${KITS[k].note}</span></button>`).join('')}</div></div>`;
-    return one('kitA', 'Breach and Hold: attacking as', ATK_KITS, this.g.kits[0]) + one('kitD', 'Defending as', DEF_KITS, this.g.kits[1]);
+    return `<div class="kits"${this.mode === 'siege' ? '' : ' hidden'}>${one('kitA', 'Attacking as', ATK_KITS, this.g.kits[0]) + one('kitD', 'Defending as', DEF_KITS, this.g.kits[1])}</div>`;
   }
 
   private bind(root: HTMLElement, after: () => void = () => {}) {
@@ -318,7 +331,10 @@ export class Hud {
         const v = b.dataset.v!;
         const id = s.dataset.seg!;
         s.querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x === b));
-        if (id === 'mode') this.mode = v as Mode;
+        if (id === 'mode') {
+          this.mode = v as Mode;
+          root.querySelectorAll<HTMLElement>('.kits').forEach((k) => (k.hidden = this.mode !== 'siege'));
+        }
         if (id === 'bots') this.bots = Number(v);
         if (id === 'skill') this.skill = Number(v);
         if (id === 'team') this.team = Number(v);
@@ -596,8 +612,18 @@ export class Hud {
     this.fpsV = v;
   }
 
-  prompt(s: string) {
-    if (this.promptEl.textContent !== s) this.promptEl.textContent = s;
+  /** what can be done here, key by key; and how far along the thing being done is */
+  prompt(s: string, k = -1) {
+    if (this.promptEl.dataset.s !== s) {
+      this.promptEl.dataset.s = s;
+      // "Hold F  Barricade   Z  Kick" -> a cap for each key and its word
+      this.promptActs.innerHTML = s.split(/ {3,}/).filter(Boolean).map((a) => {
+        const m = /^(Hold )?([A-Z])  (.+)$/.exec(a);
+        return m ? `<span><kbd>${m[2]}</kbd>${m[1] ? '<i>hold</i>' : ''}${esc(m[3])}</span>` : `<span>${esc(a)}</span>`;
+      }).join('');
+    }
+    this.promptEl.classList.toggle('work', k >= 0);
+    if (k >= 0) this.promptBar.style.transform = `scaleX(${Math.min(1, k).toFixed(3)})`;
   }
 
   board(list: PlayerInfo[]) {
@@ -624,9 +650,9 @@ export class Hud {
     this.boardEl.classList.toggle('on', on);
   }
 
-  feed(a: string, b: string, w: number, zone: number, ta: number, tb: number, mine: boolean) {
+  feed(a: string, b: string, w: number, zone: number, ta: number, tb: number, mine: boolean, down = false) {
     const row = el('div', mine ? 'mine' : '');
-    const how = zone === 3 ? 'blast' : `${this.g.weaponName(w)}${zone === 0 ? ', head' : ''}`;
+    const how = (zone === 3 ? 'blast' : `${this.g.weaponName(w)}${zone === 0 ? ', head' : ''}`) + (down ? ', down' : '');
     const t = new Date().toTimeString().slice(0, 8);
     row.innerHTML = `<time>${t}</time><b class="t${ta}">${esc(a)}</b><span>${how}</span><b class="t${tb}">${esc(b)}</b>`;
     this.feedEl.prepend(row);
@@ -716,7 +742,7 @@ export class Hud {
       const m = MODES.find((x) => x.id === g.cfg?.mode);
       if (g.cfg?.mode === 'siege') {
         const atk = myTeam === e.atk;
-        this.say(`Round ${e.round}: ${atk ? 'Attack' : 'Defend'}<small>CASE ${this.caseId} &nbsp;${atk ? `Break into the ${esc(e.objName ?? 'room')} and hold it, or leave nobody to stop you.` : `Keep them out of the ${esc(e.objName ?? 'room')} until the clock runs out.`}${e.round <= 2 ? '<br>One life. A round in the head ends it.' : ''}</small>`, 4.6);
+        this.say(`Round ${e.round}: ${atk ? 'Attack' : 'Defend'}<small>CASE ${this.caseId} &nbsp;${atk ? `Break into the ${esc(e.objName ?? 'room')} and hold it, or leave nobody to stop you.` : `Keep them out of the ${esc(e.objName ?? 'room')} until the clock runs out.`}<br>${esc(KITS[g.myKit()].name)}: ${esc(KITS[g.myKit()].note)}</small>`, 4.6);
         this.boardEl.classList.remove('on', 'final');
         return;
       }
@@ -724,7 +750,7 @@ export class Hud {
       this.boardEl.classList.remove('on', 'final');
     } else if (e.phase === 'prep') {
       const atk = myTeam === e.atk;
-      this.say(`${atk ? 'Stand by' : 'Board it up'}<small>${atk ? `They are boarding the ${esc(e.objName ?? 'room')} up. You go when the clock does. Hold F at a barricade for a breaching charge, Z to kick boards out.` : 'Hold F in a doorway to nail a barricade across it. Then find a corner that watches one.'}</small>`, 5.5);
+      this.say(`${atk ? 'Stand by' : 'Board it up'}<small>${atk ? 'You go when the clock does. Study the plan.' : 'Hold F in a doorway for boards, on a thin wall for steel. B for the cameras, M for the plan.'}</small>`, 5);
       g.sound.beep(false);
     } else if (e.phase === 'live') {
       this.say(g.cfg?.mode === 'siege' ? (myTeam === e.atk ? 'Go' : 'They are coming') : 'Recording', g.cfg?.mode === 'siege' ? 1.4 : 0.8, 'go');
@@ -807,14 +833,16 @@ export class Hud {
     const score = solo(mode) ? `${info?.kills ?? 0}/${g.cfg?.limit}` : `${g.score[0]} : ${g.score[1]}`;
     const clock = g.phase === 'live' || g.phase === 'warmup' || g.phase === 'prep' ? fmtClock(Math.max(0, g.timer())) : '';
     let extra = mode === 'hold' && this.holdInfo ? `<span>${esc(this.holdInfo)}</span>` : '';
+    let pre = '', post = '';
     if (mode === 'siege') {
-      // who is still up on each side, and what this side is here to do
-      let mine = 0, theirs = 0;
-      const myTeam = info?.team ?? 0;
-      for (const a of g.actors.values()) if (a.info.alive) a.info.team === myTeam ? mine++ : theirs++;
-      extra = `<span>${g.phase === 'prep' ? 'PREP' : g.attacking() ? 'ATTACK' : 'DEFEND'} &nbsp;${esc(g.objName)}</span><span>${mine} v ${theirs}</span>`;
+      // each side as a row of marks, mine on the left: standing, on the floor, gone
+      const [mine, theirs] = g.pips();
+      const row = (list: number[], cls: string) => `<em class="pips ${cls}">${list.map((v) => `<i class="p${v}"></i>`).join('')}</em>`;
+      pre = row(mine, `t${info?.team ?? 0}`);
+      post = row(theirs, `t${1 - (info?.team ?? 0)}`);
+      extra = `<span>${g.phase === 'prep' ? 'PREP' : g.attacking() ? 'ATTACK' : 'DEFEND'} &nbsp;${esc(g.objName)}</span>`;
     }
-    const line = `<b>${score}</b>${clock ? `<span>${clock}</span>` : ''}${extra}`;
+    const line = `${pre}<b>${score}</b>${clock ? `<span>${clock}</span>` : ''}${extra}${post}`;
     if (this.top.dataset.s !== line) {
       this.top.dataset.s = line;
       this.top.innerHTML = line;
@@ -840,7 +868,43 @@ export class Hud {
       this.secEl.classList.toggle('bad', !g.attacking() && g.secureN[0] > 0);
       (this.secEl.lastChild!.firstChild as HTMLElement).style.transform = `scaleX(${g.secureProg.toFixed(3)})`;
     }
+    this.tmap.draw(g);
+    // what I carry
+    const kit = me.alive && !me.down ? g.kitLine() : '';
+    this.kitEl.classList.toggle('on', !!kit);
+    if (kit && this.kitEl.textContent !== kit) this.kitEl.textContent = kit;
+    // on the floor
+    this.downEl.classList.toggle('on', me.alive && me.down);
+    if (me.alive && me.down) {
+      const sub = g.liftBy ? `${g.liftBy} is getting you up` : 'Crawl to your side. Someone holds F on you to get you up.';
+      const sp = this.downEl.querySelector('span')!;
+      if (sp.textContent !== sub) sp.textContent = sub;
+      this.downEl.classList.toggle('help', !!g.liftBy);
+      (this.downEl.querySelector('i') as HTMLElement).style.transform = `scaleX(${(g.downLeft / SIEGE.bleedOut).toFixed(3)})`;
+    }
+    // those of my side on the floor: where, and how long they have
+    const fallen = me.alive ? g.fallenMarks() : [];
+    while (this.fallTags.length < fallen.length) {
+      const t = el('div', 'fall', '<i></i><b></b>');
+      this.fallTags.push(t);
+      this.fallBox.append(t);
+    }
+    this.fallTags.forEach((t, i) => {
+      const f = fallen[i];
+      t.style.display = f ? '' : 'none';
+      if (!f) return;
+      t.style.transform = `translate(${(f.x * innerWidth).toFixed(0)}px, ${(f.y * innerHeight).toFixed(0)}px)`;
+      const txt = `${f.name}  ${Math.ceil(f.secs)}s  ${Math.round(f.dist)}m`;
+      const b = t.lastChild as HTMLElement;
+      if (b.textContent !== txt) b.textContent = txt;
+    });
     const lens = g.viewLabel();
+    this.lensFx.className = 'lensfx' + (g.camView >= 0 ? ' cam' : g.scopeView >= 0 ? ' scope' : '');
+    if (g.camView >= 0) {
+      const tag = `CAM 0${g.camView + 1}`;
+      const b = this.lensFx.lastChild as HTMLElement;
+      if (b.textContent !== tag) b.textContent = tag;
+    }
     this.lensEl.classList.toggle('on', !!lens);
     if (lens && this.lensEl.textContent !== lens) this.lensEl.textContent = lens;
     // the other side, where a scope saw them

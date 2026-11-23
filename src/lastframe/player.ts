@@ -149,6 +149,7 @@ export interface PlayerCtx {
     wcharge(site: number[], side: number): void;
     reinf(site: number[], side: number): void;
     revive(to: number): void;
+    lift(to: number, on: boolean): void;
     trip(i: number): void;
   };
   /** the piece of partition being looked at, if a hole could go there: which side of it this is, and what is on it already */
@@ -162,7 +163,8 @@ export interface PlayerCtx {
   /** the attack-and-defend game: is it on, may this one act now, is it attacking, charges left */
   siege(): { on: boolean; act: boolean; attacker: boolean; charges: number; sheets: number; trips: number; kit: KitId; tripAt(i: number): boolean };
   muzzleLight(p: THREE.Vector3): void;
-  prompt(s: string): void;
+  /** what can be done here; k: how far along the thing being done is (0..1) */
+  prompt(s: string, k?: number): void;
   hitMark(kill: boolean): void;
 }
 
@@ -224,6 +226,7 @@ export class LocalPlayer {
   down = false;
   private downK = 0;
   private workKind = '';
+  private liftSent = -1;
   /** which shot of the burst the next one is, and the spread the burst has gathered, degrees */
   private spray = 0;
   private bloomV = 0;
@@ -946,8 +949,7 @@ export class LocalPlayer {
       }
     }
     this.fortNear = fort;
-    let work = '';
-    const bar = (k: number) => '\u25ae'.repeat(Math.round(Math.max(0, Math.min(1, k)) * 8)) + '\u25af'.repeat(8 - Math.round(Math.max(0, Math.min(1, k)) * 8));
+    let work = '', workK = -1;
     /** one thing done by holding a key: which, how long it takes, what it says, and what happens at the end */
     let job: { kind: string; need: number; key: string; doing: string; ask: string; done: () => void; tick?: boolean } | null = null;
     const free = !near && !closer && !this.busy && this.healT <= 0;
@@ -1002,12 +1004,20 @@ export class LocalPlayer {
           job.done();
         }
       } else this.workT = Math.min(0, this.workT + dt);
-      work = this.workT > 0 ? `${job.doing}  ${bar(this.workT / job.need)}` : job.ask;
+      work = this.workT > 0 ? job.doing : job.ask;
+      workK = this.workT > 0 ? this.workT / job.need : -1;
     } else {
       this.workT = Math.min(0, this.workT + dt);
       if (!work && fort && fort.boards !== 0 && !near && !closer) work = fort.charge ? 'Charge set. Stand clear' : 'Z  Kick the boards out';
     }
-    c.prompt(this.healT > 0 ? 'Bandaging' : closer ? `F  Take ${WEAPONS[gunId!].name}` : near ? (near.want > 0 ? 'F  Close' : 'F  Open') : work);
+    c.prompt(this.healT > 0 ? 'Bandaging' : closer ? `F  Take ${WEAPONS[gunId!].name}` : near ? (near.want > 0 ? 'F  Close' : 'F  Open') : work, this.healT > 0 ? this.healT / BANDAGE : workK);
+    // the one on the floor is told that someone has come
+    const lifting = job && job.kind.startsWith('lift') && this.workT > 0 ? Number(job.kind.slice(4)) : -1;
+    if (lifting !== this.liftSent) {
+      if (this.liftSent >= 0) c.send.lift(this.liftSent, false);
+      if (lifting >= 0) c.send.lift(lifting, true);
+      this.liftSent = lifting;
+    }
     if (closer && i.take('KeyF') && !this.busy) this.takeGun(lying.i, gunId!, c, sol, fw);
     if (near && i.take('KeyF')) c.send.door(near.id, [this.m.x, this.m.y, this.m.z]);
     // ---- a boot: through a door, into a chest

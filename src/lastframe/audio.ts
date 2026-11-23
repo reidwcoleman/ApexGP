@@ -793,6 +793,64 @@ export class Sound {
     this.duck.gain.linearRampToValueAtTime(1, t + 4.5);
   }
 
+  /** a nail going in */
+  hammer(p: THREE.Vector3) {
+    if (!this.ctx) return;
+    const d = this.src(p, 0.5, false);
+    this.thump(d, 190, 90, 0.05, 0.9);
+    this.burst(d, 0.03, 0.7, 900, 5200);
+  }
+
+  /** a bolt driven through steel into a wall: the whirr, then the bite */
+  drill(p: THREE.Vector3) {
+    if (!this.ctx) return;
+    const d = this.src(p, 0.36, false);
+    this.burst(d, 0.3, 0.3, 1400, 4200);
+    this.thump(d, 430, 390, 0.3, 0.18, 0, 'sawtooth');
+    this.thump(d, 150, 70, 0.06, 0.8, 0.3);
+  }
+
+  /** sheet steel stood against a wall */
+  steel(p: THREE.Vector3) {
+    if (!this.ctx) return;
+    const d = this.src(p, 0.7, false);
+    this.thump(d, 140, 60, 0.18, 1);
+    this.burst(d, 0.25, 0.5, 1800, 9000);
+    this.burst(d, 0.5, 0.2, 3000, 8000, 0.05);
+  }
+
+  /** the timer on a charge */
+  pip(p: THREE.Vector3, hi: boolean) {
+    if (!this.ctx) return;
+    const f = hi ? 2100 : 1500;
+    this.thump(this.src(p, 0.3, false), f, f, 0.045, 0.6, 0, 'square');
+  }
+
+  /** a wire pulled tight, or let go */
+  wire(p: THREE.Vector3) {
+    if (!this.ctx) return;
+    const d = this.src(p, 0.3, false);
+    this.burst(d, 0.02, 0.6, 2500, 9000);
+    this.thump(d, 900, 700, 0.05, 0.3, 0.02, 'triangle');
+  }
+
+  /** a wall coming apart */
+  crumble(p: THREE.Vector3) {
+    if (!this.ctx) return;
+    const d = this.src(p, 0.9, false);
+    this.burst(d, 0.5, 0.9, 200, 2600);
+    this.burst(d, 0.9, 0.4, 600, 5000, 0.12);
+    this.thump(d, 80, 35, 0.4, 1.1);
+  }
+
+  /** a camera dying */
+  zap(p: THREE.Vector3) {
+    if (!this.ctx) return;
+    const d = this.src(p, 0.4, false);
+    this.burst(d, 0.06, 0.8, 3000, 12000);
+    this.burst(d, 0.12, 0.3, 1500, 6000, 0.05);
+  }
+
   beep(hi = true) {
     if (!this.ctx) return;
     this.thump(this.src(null, 0.09, false), hi ? 1320 : 880, hi ? 1320 : 880, 0.08, 0.5, 0, 'sine');

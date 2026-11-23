@@ -416,7 +416,7 @@ export class Bot {
         this.react = 0.66 - this.skill * 0.5 + Math.random() * 0.22 + (bd > 25 ? 0.15 : 0);
         // already watching that way with the sights up: the shot comes sooner
         const ord = this.order();
-        if (ord?.kind === 'hold' && M.inObj(m.x, m.y, m.z) && Math.abs(angleDiff(Math.atan2(-(M.bodies[best].x - m.x), -(M.bodies[best].z - m.z)), this.yaw)) < 0.35) this.react *= 0.5;
+        if (ord?.kind === 'hold' && M.inObj(m.x, m.y, m.z) && Math.abs(angleDiff(Math.atan2(-(M.bodies[best].x - m.x), -(M.bodies[best].z - m.z)), this.yaw)) < 0.35) this.react *= 0.56;
         // somebody already said where that one was: the sights were halfway there
         if (this.called) this.react *= 0.78;
         this.err = (5.5 - this.skill * 4.2) * (0.7 + Math.random() * 0.6);
@@ -696,6 +696,7 @@ export class Bot {
         this.stand(0.2);
         this.crouch = true;
         face(b.x, b.z, 0.5);
+        if (this.workT <= 0) M.lift(this.slot, ord.slot, true);
         this.workT += 0.1;
         if (this.workT >= (M.kitOf(this.slot) === 'medic' ? SIEGE.revive / 2 : SIEGE.revive)) {
           this.workT = 0;

@@ -101,6 +101,7 @@ export class Tactics {
     this.contestT = 0;
     this.sweepAt.clear();
     this.reviving.clear();
+    this.flankAt.clear();
     this.sites = [];
     this.sheetJob.clear();
     this.tripJob.clear();
@@ -166,6 +167,8 @@ export class Tactics {
     }
   }
   private reviving = new Map<number, number>();
+  /** when each roamer stops waiting and goes looking */
+  private flankAt = new Map<number, number>();
   /** this round's places a wall could be gone through, and which the defenders have someone sheeting */
   private sites: Site[] = [];
   private sheetJob = new Map<number, Site>();
@@ -304,30 +307,36 @@ export class Tactics {
         taken.push(n);
         this.spot.set(s, { node: n, look: { x: o.x, z: o.z } });
       });
-      // the roamers: out on the way the attackers will come, to one side of it, where they can see it
+      // the roamers: somewhere off the way the attackers will come, out of sight of it, to come at their backs once
+      // they are busy with the room
       const from = M.nav.nearest(...this.anchorOf(M.atk));
       const way = from ? M.nav.path(from, obj.c) : [];
-      roamers.forEach((s, k) => {
-        let pick: Node | null = null, look = { x: obj.c.x, z: obj.c.z };
-        if (way.length > 12) {
-          const P = way[Math.floor(way.length * (0.62 + 0.16 * k))];
-          let bs = -1e9;
-          for (const n of M.nav.nodes) {
-            const d = Math.hypot(n.x - P.x, n.z - P.z);
-            if (d > 8 || d < 2.5 || Math.abs(n.y - P.y) > 0.8 || M.inBox(obj.box, n.x, n.y, n.z)) continue;
-            if (!M.world.open(n.x, n.y + 1.4, n.z, P.x, P.y + 1.2, P.z)) continue;
-            let sc = (n.cover ? 3 : 0) + Math.random() * 2 - Math.abs(d - 5);
-            for (const w of way) if (Math.hypot(w.x - n.x, w.z - n.z) < 1.2) sc -= 4;
-            if (sc > bs) {
-              bs = sc;
-              pick = n;
-            }
+      roamers.forEach((s) => {
+        let pick: Node | null = null, bs = -1e9;
+        for (let t = 0; t < 260; t++) {
+          const n = M.nav.nodes[Math.floor(Math.random() * M.nav.nodes.length)];
+          const d = Math.hypot(n.x - obj.c.x, n.z - obj.c.z) + Math.abs(n.y - obj.c.y) * 2.5;
+          if (d < 8 || d > 24 || M.inBox(obj.box, n.x, n.y, n.z, 0.5) || n.next.length < 3) continue;
+          let near = 1e9, seen = false;
+          for (let w = 0; w < way.length; w += 2) {
+            const q = way[w];
+            const dd = Math.hypot(q.x - n.x, q.z - n.z) + Math.abs(q.y - n.y) * 3;
+            if (dd < near) near = dd;
+            if (!seen && dd < 22 && M.world.open(n.x, n.y + 1.4, n.z, q.x, q.y + 1.4, q.z)) seen = true;
           }
-          look = { x: P.x, z: P.z };
+          if (near < 5 || seen) continue;
+          const sc = (n.cover ? 3 : 0) + Math.random() * 3 - Math.abs(d - 14) * 0.4 + Math.min(near, 14) * 0.2;
+          if (sc > bs) {
+            bs = sc;
+            pick = n;
+          }
         }
         if (pick) {
-          this.spot.set(s, { node: pick, look });
-          this.give(s, { kind: 'go', node: pick, look, fast: true });
+          const look = way.length ? way[Math.floor(way.length * 0.7)] : obj.c;
+          this.spot.set(s, { node: pick, look: { x: look.x, z: look.z } });
+          this.give(s, { kind: 'go', node: pick, look: { x: look.x, z: look.z }, fast: true });
+          // the bold come as soon as the room is being worked on; the patient wait until they are inside it
+          this.flankAt.set(s, M.bots.get(s)!.nerve > 0.5 ? 28 + Math.random() * 16 : 70 + Math.random() * 30);
         } else this.role.set(s, 'anchor');
       });
       const who = M.players.find((p) => p.slot === anchors[0]);
@@ -445,8 +454,8 @@ export class Tactics {
           }
           continue;
         }
-        // an attacker known close by: the roamer goes for them, from where they aren't looking
-        const near = this.knownNear(team, b, 16, 6);
+        // an attacker known close by, or the room being worked on: the roamer goes for them, from where they aren't looking
+        const near = this.knownNear(team, b, 12, 5) || (M.phase === 'live' && (this.liveT > (this.flankAt.get(s) ?? 1e9) || (this.liveT > 15 && (this.flankAt.get(s) ?? 0) < 60 && !!this.hotDoor())));
         if (near && M.phase === 'live') {
           if (this.orders.get(s)?.kind !== 'hunt') this.give(s, { kind: 'hunt' });
         } else if (spot) {
@@ -603,10 +612,10 @@ export class Tactics {
       if (two) this.groups.push(mk(d2, bots.slice(n1)));
       // one of the groups may come through a wall instead: the piece of it farthest from the other group's door
       const g2 = this.groups[this.groups.length - 1], other = this.groups[0].entry;
-      if (this.sites.length && Math.random() < 0.55) {
+      if (this.sites.length && Math.random() < 0.8) {
         const st = this.sites.reduce((b, q) => (Math.hypot(siteMid(q).x - other.x, siteMid(q).z - other.z) > Math.hypot(siteMid(b).x - other.x, siteMid(b).z - other.z) ? q : b), this.sites[0]);
         const asd = this.asDoor(st);
-        if (this.siteNode(st, -this.siteIn(st)) && (this.groups.length > 1 || Math.random() < 0.5)) {
+        if (this.siteNode(st, -this.siteIn(st))) {
           const ng = mk(asd, g2.slots);
           ng.wall = st;
           ng.alt = g2.entry;

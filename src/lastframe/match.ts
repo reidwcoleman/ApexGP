@@ -92,6 +92,12 @@ export class Match {
     return !!p && isUp(p);
   }
 
+  /** told to everyone: this one is being got up (so the one on the floor knows help has come) */
+  lift(by: number, to: number, on: boolean) {
+    const p = this.players.find((q) => q.slot === to);
+    if (p?.down && this.teamOf(by) === p.team) this.emit({ t: 'lift', s: to, by, on });
+  }
+
   /** a teammate gets one of the fallen up: close by, and on their own feet */
   revive(by: number, to: number) {
     const p = this.players.find((q) => q.slot === to), h = this.players.find((q) => q.slot === by);
@@ -301,7 +307,7 @@ export class Match {
         const bot = this.bots.get(p.slot);
         if (bot && across < 2.4 && !this.tripSeen.has(p.slot * 256 + i)) {
           this.tripSeen.add(p.slot * 256 + i);
-          if (Math.random() < 0.25 + bot.skill * 0.5) {
+          if (Math.random() < 0.15 + bot.skill * 0.35) {
             this.say(p.slot, pick(['Tripwire. Cutting it.', 'Wire on the door. Got it.', 'Watch the wire.']), 0.9);
             this.tripOff(i, false);
             break;
@@ -859,6 +865,20 @@ export class Match {
   }
 
   private endRound(winner: number, why: string) {
+    // whoever is still on the floor when it ends was not going to get up: those count for whoever put them there
+    if (this.downT.size) {
+      for (const [slot, d] of this.downT) {
+        const p = this.players.find((q) => q.slot === slot), k = this.players.find((q) => q.slot === d.by);
+        if (!p?.down) continue;
+        p.deaths++;
+        if (k && k !== p) {
+          k.kills++;
+          k.score += 50;
+        }
+      }
+      this.downT.clear();
+      this.emit({ t: 'roster', players: this.players });
+    }
     if (winner >= 0) this.score[winner]++;
     if (this.score[0] >= this.cfg.limit || this.score[1] >= this.cfg.limit) return this.finish(winner);
     this.phase = 'between';
@@ -1188,6 +1208,9 @@ export class Match {
         break;
       case 'revive':
         this.revive(slot, r.to);
+        break;
+      case 'lift':
+        this.lift(slot, r.to, !!r.on);
         break;
       case 'camhit':
         if (me.alive) this.camHit(r.i, slot);
