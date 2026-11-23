@@ -36,7 +36,13 @@ export default defineConfig(({ command }) => ({
     target: 'es2022',
     chunkSizeWarningLimit: 3000,
     rollupOptions: {
-      input: { main: resolve(__dirname, 'index.html'), miami: resolve(__dirname, 'miami.html'), marbles: resolve(__dirname, 'marbles.html'), boost: resolve(__dirname, 'boost.html'), mogul: resolve(__dirname, 'mogul.html'), tracksmith: resolve(__dirname, 'tracksmith.html'), lastframe: resolve(__dirname, 'lastframe.html'), bluebird: resolve(__dirname, 'bluebird.html') },
+      // (a page that isn't there, one being taken out or not yet put in, is left out of the build
+      // rather than failing every other game's deploy)
+      input: Object.fromEntries(
+        Object.entries({ main: 'index.html', miami: 'miami.html', marbles: 'marbles.html', boost: 'boost.html', mogul: 'mogul.html', tracksmith: 'tracksmith.html', lastframe: 'lastframe.html', bluebird: 'bluebird.html' })
+          .map(([k, f]) => [k, resolve(__dirname, f)] as const)
+          .filter(([, f]) => fs.existsSync(f)),
+      ),
     },
   },
 }));
