@@ -110,7 +110,7 @@ export class Stage {
     // anti-aliasing: temporal by default (?aa=smaa for the edge filter instead)
     this.aa = this.aaMode();
     if (this.aa === 'taa') c.addPass((this.taa = new TAAPass()));
-    const bloom = new BloomEffect({ mipmapBlur: true, levels: 5, luminanceThreshold: 1.0, luminanceSmoothing: 0.35, intensity: 0.72, radius: 0.68 });
+    const bloom = new BloomEffect({ mipmapBlur: true, levels: 5, luminanceThreshold: 0.92, luminanceSmoothing: 0.35, intensity: 0.92, radius: 0.7 });
     const tmq = new URLSearchParams(location.search).get('tm');
     const tm = new ToneMappingEffect({ mode: tmq === 'agx' ? ToneMappingMode.AGX : tmq === 'aces' ? ToneMappingMode.ACES_FILMIC : ToneMappingMode.NEUTRAL });
     c.addPass(new EffectPass(camera, bloom, tm, new GradeEffect(), new VignetteEffect({ darkness: 0.28, offset: 0.35 })));

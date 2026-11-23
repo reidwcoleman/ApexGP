@@ -931,6 +931,22 @@ and bots; the contestants are original bean characters, not marbles.
 - **Controls**, the usual party-game layout: WASD run, Space jump, Ctrl dive (or C), Shift grab
   (hold, or E), the mouse turns the camera (click to lock the pointer, ESC lets go) and tilts it;
   a pad: left stick, A jump, X/Square or B dive, RT grab, right stick camera.
+- **Mystery boxes** (`powers.ts`): rainbow "?" boxes in every round on foot. Run into one for a
+  power-up: ZOOM (6 s: 1.42 times the running speed), SUPER JUMP (8 s: twice the height) or IRON
+  BEAN (7 s: nothing knocks you over, and whoever you run into is bowled over). In a race they
+  stand along the road every 52 m and come back 8 s after they're taken; in the arenas one pops
+  up every six or seven seconds where a bean was standing a moment ago (three at most). Like the
+  stars each browser has its own boxes (yours are for your bean; on the host, the bots' too), the
+  power itself is three numbers on the bean (`pw`, `pwT`, `iron` in `physics.ts`), and which one
+  a bean has on rides in two bits of its state packet so everyone sees the glow and an IRON BEAN
+  is iron on every screen. A dive that bowls someone over is also worth 1.4 s of sprint.
+  `tools/wobblepower.mjs` checks that boxes appear, are picked up, and that each power does what
+  it says.
+- **The show-off effects** (`fx-cool.ts`): a soft streak of light in its own colour behind any
+  bean that's flying (a dive, a boost strip, a ZOOM, a long fall), a glowing shell round a bean
+  with a power-up (bright at the edge, clear in the middle, flickering as it runs out) and a
+  comic-book burst wherever a bean is knocked over. The bloom starts lower and runs brighter,
+  the grade is punchier (vibrance 0.45, contrast 0.29) and the beans' rim light is stronger.
 - **Bots that keep moving**: in Bar Hop a bot no longer keeps to one spot: every few seconds
   it's off round the plate to somewhere new, and it stops in good time for each bar (the hop is
   timed for a bean that's standing still). In Volley Folly the side slides across and up and back

@@ -709,7 +709,7 @@ function jelly(map: THREE.Texture | null, color: number, jig?: { value: THREE.Ve
       '#include <emissivemap_fragment>',
       `#include <emissivemap_fragment>
       { float rimF = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 2.5);
-        totalEmissiveRadiance += diffuseColor.rgb * rimF * 0.35; }`,
+        totalEmissiveRadiance += diffuseColor.rgb * rimF * 0.5 + vec3(rimF * rimF * 0.12); }`,
     );
   };
   m.customProgramCacheKey = () => (jig ? 'bean-jig' : 'bean-limb');

@@ -24,6 +24,8 @@ const IR = 0.4 * RADIUS * RADIUS;
 export const RUN = 9.4;
 /** off a boost strip */
 const ZOOM_K = 1.28;
+/** the mystery boxes' ZOOM and SUPER JUMP */
+export const POWER_RUN = 1.42, POWER_JUMP = 1.42;
 const RUN_K = 10.5;
 const RUN_ACC = 66;
 const AIR_ACC = 21;
@@ -170,6 +172,14 @@ export class Marble {
   jumpK = 1;
   /** a boost strip's sprint: when it runs out (world time) */
   zoomT = 0;
+  /**
+   * A power-up from a mystery box (powers.ts): which (0 none, 1 ZOOM: it runs faster, 2 SUPER
+   * JUMP, 3 IRON BEAN: nothing knocks it over and it bowls over whoever it runs into), and when it
+   * runs out (world time). `iron` is that last one, on now (a puppet's is set from the net).
+   */
+  pw = 0;
+  pwT = 0;
+  iron = false;
   /** a spring pad just threw it */
   sprung = false;
   /** a boost strip just sent it off */
@@ -186,7 +196,7 @@ export class Marble {
   /** knocked over: a tumble of `t` seconds (longer if it's already going) */
   knock(t: number) {
     if (this.puppet || this.frozen) return;
-    if (this.mode !== Mode.Tumble && this.guardT > 0) return;
+    if (this.mode !== Mode.Tumble && (this.guardT > 0 || this.iron)) return;
     if (this.mode !== Mode.Tumble) {
       this.mode = Mode.Tumble;
       this.knocked = true;
@@ -505,6 +515,10 @@ export class World {
       f.act?.(m, this.time, dt);
     }
     if (this.time < m.zoomT) m.runK *= ZOOM_K;
+    const pw = this.time < m.pwT ? m.pw : 0;
+    if (pw === 1) m.runK *= POWER_RUN;
+    else if (pw === 2) m.jumpK *= POWER_JUMP;
+    m.iron = pw === 3;
   }
   /** the slowest the course allows before a fall counts (m below) */
   private h = SUB;
@@ -543,7 +557,7 @@ export class World {
 
   /** per frame: the jump, the dive, the grab */
   private controlFrame(m: Marble, dt: number) {
-    if (this.fields.length && m.active && !m.frozen && !m.puppet) this.applyFields(m, dt);
+    if (m.active && !m.frozen && !m.puppet) this.applyFields(m, dt);
     m.hopped = m.dashed = m.knocked = m.grabbed = m.bounced = false;
     m.landed = 0;
     if (!m.active || m.frozen || m.puppet) {
@@ -1010,12 +1024,13 @@ export class World {
         const aFast = a.vel.lengthSq() > b.vel.lengthSq();
         a.vel.addScaledVector(N, -jn * wa);
         b.vel.addScaledVector(N, jn * wb);
-        // a dive into someone (or a flying body) bowls them over
-        if (imp > BUMP.knockAt) {
-          const hitter = aFast ? a : b;
+        // a dive into someone (or a flying body) bowls them over; an IRON BEAN does it at a walk
+        const iron = a.iron !== b.iron && imp > 3.4 ? (a.iron ? a : b) : null;
+        if (imp > BUMP.knockAt || iron) {
+          const hitter = iron ?? (aFast ? a : b);
           const target = hitter === a ? b : a;
-          if (hitter.mode === Mode.Dive || hitter.mode === Mode.Tumble) {
-            if (hitter.mode === Mode.Dive) hitter.bonked = true;
+          if (iron || hitter.mode === Mode.Dive || hitter.mode === Mode.Tumble) {
+            if (hitter.mode === Mode.Dive || iron) hitter.bonked = true;
             target.hitBy = hitter.id;
             target.hitT = this.time;
             if (target.puppet) this.shoves.push({ target, kind: 'knock', vx: hitter.vel.x * BUMP.puppet, vy: BUMP.up, vz: hitter.vel.z * BUMP.puppet });

@@ -86,6 +86,8 @@ export const makeCode = () => Array.from({ length: 4 }, () => ALPHA[Math.floor(M
 export const STRIDE = 14;
 /** flags: mode (2 bits), grounded, holding, held, fell, and this packet's events */
 export const F = { GROUND: 4, HOLD: 8, HELD: 16, FELL: 32, HOP: 64, DIVE: 128, KNOCK: 256, GRAB: 512 } as const;
+/** and above them, two bits for the power-up it has on (0 none; powers.ts) */
+export const F_POWER = 10;
 
 function toBuf(d: unknown): ArrayBuffer | null {
   if (d instanceof ArrayBuffer) return d;
