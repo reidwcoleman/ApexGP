@@ -6,7 +6,7 @@ import { CHROME, ANGLE } from './chrome.mjs';
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
 const port = opt('port', '5197');
-const rounds = opt('rounds', '2,4,6,16,20,25,26,27,32,33,34,35,36').split(',').map(Number);
+const rounds = opt('rounds', '2,4,6,16,20,25,26,27,32,33,34,35,36,37,38,39,40').split(',').map((x) => (/^\d+$/.test(x) ? Number(x) : x));
 const runs = Number(opt('runs', 2));
 const cut = opt('cut', '0');
 const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
@@ -39,6 +39,7 @@ async function one(round) {
       keep: c.keep ? { changes, holders: holders.size, top: g.keepP?.ranking().slice(0, 3).map((r) => +(g.keepP.held.get(r.m.id) ?? 0).toFixed(1)) } : undefined,
       pops: g.bounce ? g.bounce.ranking().slice(0, 3).map((r) => g.bounce.score.get(r.m.id) ?? 0) : undefined,
       cup: g.cupP ? g.cupP.score.join('-') : undefined,
+      team: g.teamPlay ? g.teamPlay.arena.counts().map((v) => Math.floor(v)).join('/') : undefined,
       book: g.bumpP ? g.bumpP.ranking().map((r) => g.bumpP.of(r.m.id)).filter((_, i, l) => i < 3 || i === l.length - 1) : undefined,
       sprung, bonk, wall: +((performance.now() - t0) / 1000).toFixed(1),
     };
@@ -51,9 +52,9 @@ async function one(round) {
 const queue = rounds.flatMap((n) => Array(runs).fill(n));
 const out = [];
 await Promise.all([0, 1, 2].map(async () => { while (queue.length) { const n = queue.shift(); out.push([n, await one(n)]); } }));
-out.sort((a, b) => a[0] - b[0]);
+out.sort((a, b) => String(a[0]).localeCompare(String(b[0]), undefined, { numeric: true }));
 for (const [n, r] of out) {
-  const extra = [r.keep && `crown changes ${r.keep.changes} by ${r.keep.holders}, top ${r.keep.top}`, r.cup && `goals ${r.cup}`, r.pops && `pops ${r.pops}`, r.book && `scores ${r.book}`, r.sprung && `springs ${r.sprung}`, r.bonk && `bonks ${r.bonk}`].filter(Boolean).join(' · ');
+  const extra = [r.keep && `crown changes ${r.keep.changes} by ${r.keep.holders}, top ${r.keep.top}`, r.cup && `goals ${r.cup}`, r.team && `teams ${r.team}`, r.pops && `pops ${r.pops}`, r.book && `scores ${r.book}`, r.sprung && `springs ${r.sprung}`, r.bonk && `bonks ${r.bonk}`].filter(Boolean).join(' · ');
   console.log(`${String(n).padStart(2)} ${r.id.padEnd(14)} ${String(r.playT).padStart(6)}s  left ${String(r.alive).padStart(2)}/${r.start} slots ${String(r.slots).padStart(2)} fin ${String(r.fin).padStart(2)} ${r.state.padEnd(8)} ${extra} ${r.errs.length ? 'ERR ' + r.errs.join(' | ') : ''}`);
 }
 await browser.close();

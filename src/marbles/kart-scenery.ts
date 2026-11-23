@@ -4,6 +4,7 @@ import type { CourseBuilder } from './builder.ts';
 import { glowMat } from './obs-world.ts';
 import type { KartTrack } from './kart-track.ts';
 import { RACE } from './kart-race.ts';
+import type { KartLayout, Where } from './kart-layout.ts';
 
 /**
  * What stands round Bean Bay: the start gantry and its lights, grandstands full of beans, the
@@ -63,7 +64,16 @@ const HOARDINGS: [string, string, string, string][] = [
   ['BIG BOWL', 'Flat out if you dare', '#22c08a', '#10242a'],
 ];
 
-export function dressScenery(b: CourseBuilder, tr: KartTrack, land: Land, y0: number, time: { value: number }) {
+export function dressScenery(b: CourseBuilder, tr: KartTrack, land: Land, y0: number, time: { value: number }, layout: KartLayout) {
+  const sOf = (at: Where) => {
+    if (typeof at === 'number') return at;
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < tr.n; i++) {
+      const d = (tr.P[i * 3] - at[0]) ** 2 + (tr.P[i * 3 + 2] - at[1]) ** 2;
+      if (d < bd) (bd = d), (best = i);
+    }
+    return best;
+  };
   const r = rng(4242);
   const S0 = RACE.start;
   // ---- the start gantry
@@ -98,7 +108,7 @@ export function dressScenery(b: CourseBuilder, tr: KartTrack, land: Land, y0: nu
     band.rotation.y = Math.PI;
     band.position.set((hw - hr) / 2, 8.6, -0.36);
     g.add(band);
-    const name = new THREE.Mesh(new THREE.PlaneGeometry(13, 1.5), new THREE.MeshBasicMaterial({ map: board('BEAN BAY GP', '', '#17182a', '#ffc21f', 1024, 128) }));
+    const name = new THREE.Mesh(new THREE.PlaneGeometry(13, 1.5), new THREE.MeshBasicMaterial({ map: board(layout.sign, '', '#17182a', '#ffc21f', 1024, 128) }));
     name.rotation.y = Math.PI;
     name.position.set((hw - hr) / 2, 7.5, -0.37);
     g.add(name);
@@ -203,11 +213,12 @@ transformed.y += max(0.0, sin(uT * (3.0 + fract(ph) * 2.0) + ph)) * 0.2;`);
     b.group.add(im);
   }
   // ---- hoardings along the barriers
-  const place = [S0 + 95, S0 + 118, S0 - 28, 250, 330, 470, 610, 720, 885, 1010, 1100];
+  // (the same spots as a share of the lap, so they fall along any circuit)
+  const place = [S0 + 95, S0 + 118, S0 - 28, ...[250, 330, 470, 610, 720, 885, 1010, 1100].map((s) => (layout.id === 'beanbaygp' ? s : Math.round((s / 1163) * tr.n)))];
   place.forEach((s, k) => {
     const side = k % 2 ? 1 : -1, i = tr.idx(s), wall = side > 0 ? tr.wl[i] : tr.wr[i];
     if (tr.tunnel[i] || tr.raised[i]) return;
-    const f = frame(tr, s, side * (wall + 0.9), 0.1), h = HOARDINGS[k % HOARDINGS.length];
+    const f = frame(tr, s, side * (wall + 0.9), 0.1), h = k ? HOARDINGS[k % HOARDINGS.length] : ([layout.sign, layout.tag, '#ffc21f', '#17182a'] as [string, string, string, string]);
     const g = new THREE.Group();
     g.position.copy(f.p);
     g.quaternion.copy(f.q);
@@ -251,10 +262,7 @@ transformed.y += max(0.0, sin(uT * (3.0 + fract(ph) * 2.0) + ph)) * 0.2;`);
     g.add(plate);
     b.group.add(g);
   };
-  arch(1116, 'BIG AIR!', '#ffc21f', '#17182a', 0xff4f8f);
-  arch(806, 'THE HUMP', '#e6332f', '#ffffff', 0xffc21f);
-  arch(566, 'BIG BOWL', '#22c08a', '#10242a', 0x2f6ad8);
-  arch(136, 'DRIFT ZONE', '#ff4f8f', '#ffffff', 0x2fb8ff);
+  for (const [at, text, bg, fg, pole] of layout.arches) arch(sOf(at), text, bg, fg, pole);
   // ---- chevron boards round the outside of the tight bends
   {
     const c = document.createElement('canvas');
@@ -478,7 +486,8 @@ transformed.y += abs(position.x) * sin(uT * 7.0 + float(gl_InstanceID) * 2.3) * 
   }
   // ---- the funfair, in the loop of the Bowl
   {
-    const c = new THREE.Vector3(76, 0, 70), g = new THREE.Group();
+    const c = new THREE.Vector3(layout.fair[0], 0, layout.fair[1]), g = new THREE.Group();
+    const fx = layout.fair[0] - 76, fz = layout.fair[1] - 70;
     c.y = land.at(c.x, c.z).h;
     g.position.copy(c);
     const R = 21, hub = R + 4;
@@ -535,13 +544,15 @@ transformed.y += abs(position.x) * sin(uT * 7.0 + float(gl_InstanceID) * 2.3) * 
       gg.traverse((o) => (o.castShadow = true));
       b.group.add(gg);
     };
-    tent(34, 66, 10, 12, 0xe6332f, 0xf8f4ea);
-    tent(44, 92, 7, 9, 0x2f6ad8, 0xffc21f);
-    tent(96, 84, 6, 8, 0x22c08a, 0xf8f4ea);
+    // (round the wheel; a circuit with less room inside it keeps them in closer)
+    const near = layout.id === 'beanbaygp' ? 1 : 0.6;
+    tent(76 + fx + (34 - 76) * near, 70 + fz + (66 - 70) * near, 10, 12, 0xe6332f, 0xf8f4ea);
+    tent(76 + fx + (44 - 76) * near, 70 + fz + (92 - 70) * near, 7, 9, 0x2f6ad8, 0xffc21f);
+    tent(76 + fx + (96 - 76) * near, 70 + fz + (84 - 70) * near, 6, 8, 0x22c08a, 0xf8f4ea);
   }
   // ---- the lighthouse, on the point
   {
-    const x = -250, z = -170, y = land.at(x, z).h, g = new THREE.Group();
+    const x = layout.light[0], z = layout.light[1], y = land.at(x, z).h, g = new THREE.Group();
     g.position.set(x, y - 1, z);
     for (let k = 0; k < 6; k++) {
       const s = new THREE.Mesh(new THREE.CylinderGeometry(3.4 - (k + 1) * 0.26, 3.4 - k * 0.26, 5, 20).translate(0, 2.5 + k * 5, 0), new THREE.MeshStandardMaterial({ color: k % 2 ? 0xf6f2e8 : 0xe0342f, roughness: 0.6 }));

@@ -109,6 +109,17 @@ export const KART = {
   unwindT: 0.28,
   kick: 300,
   kickT: 0.12,
+  /**
+   * the catch: a kart that steps out when nobody asked for a drift is gathered up before it
+   * comes round. Past this slip angle (rad) the driver's hands and feet are on it: a turning force
+   * back into line that grows with the angle (Nm per rad) and with how fast it's going (Nm per
+   * rad/s), up to a limit (Nm), and rear tyres that bite harder the further out they are
+   */
+  catchAt: 0.15,
+  catchK: 6400,
+  catchD: 520,
+  catchT: 3400,
+  catchGrip: 0.4,
   /** the little bounce a drift starts with (m/s up) */
   hop: 1.15,
   /** how long a drift must be held for each level of boost, and how long each level lasts */
@@ -301,14 +312,14 @@ export class Kart {
   }
 
   /** a hit at a point (world): impulse (j) on a body with this inertia */
-  impulse(px: number, py: number, pz: number, jx: number, jy: number, jz: number) {
+  impulse(px: number, py: number, pz: number, jx: number, jy: number, jz: number, twist = 1) {
     const K = KART, p = this.pos;
     this.vel.x += jx / K.mass;
     this.vel.y += jy / K.mass;
     this.vel.z += jz / K.mass;
     const rx = px - p.x, ry = py - p.y, rz = pz - p.z;
     const tx = ry * jz - rz * jy, ty = rz * jx - rx * jz, tz = rx * jy - ry * jx;
-    this.spinBy(tx, ty, tz);
+    this.spinBy(tx * twist, ty * twist, tz * twist);
   }
   /** a bump from another kart: flat along the road, with only part of its leverage going into a spin */
   shove(px: number, pz: number, jx: number, jz: number, twist: number) {
@@ -492,6 +503,8 @@ export class Kart {
     // ---- the corners
     this.fxs = this.fys = this.fzs = this.txs = this.tys = this.tzs = 0;
     let rearT = 0, rearK = 0, airborne = true;
+    // (the rears bite harder as they step out, unless it's a drift that's wanted)
+    const grab = this.driftDir || this.vf < 0.5 ? 1 : 1 + THREE.MathUtils.clamp((Math.abs(this.beta) - 0.09) * 1.6, 0, K.catchGrip);
     const jack = THREE.MathUtils.clamp(this.delta, -0.22, 0.22) * K.jack;
     const wasAir = this.air;
     for (let k = 0; k < 4; k++) {
@@ -556,7 +569,7 @@ export class Kart {
       // grip: rated, falling with load, the surface, the tyre's heat, the drift
       const load = Fz / K.Fz0;
       const heat = 0.93 + 0.07 * Math.min(1, w.temp / 0.55) - 0.05 * Math.max(0, w.temp - 1);
-      const mu = K.mu * (1 - K.loadK * (load - 1)) * SURF[q.mat].mu * heat * (w.front ? 1 : K.muR * this.rearGrip);
+      const mu = K.mu * (1 - K.loadK * (load - 1)) * SURF[q.mat].mu * heat * (w.front ? 1 : K.muR * this.rearGrip * grab);
       const D = mu * Fz;
       let Fx = 0, Fy = 0, f = 0;
       if (rho > 1e-5) {
@@ -687,6 +700,18 @@ export class Kart {
         this.tzs += ay.z * t;
       }
     }
+    // ---- the catch: stepping out with no drift asked for, it's brought back into line (KART.catchAt)
+    if (!this.driftDir && !airborne && sp > 4 && this.vf > 0.5) {
+      const over = Math.abs(this.beta) - K.catchAt;
+      if (over > 0) {
+        let t = Math.sign(this.beta) * over * K.catchK;
+        if (this.betaRate * this.beta > 0) t += this.betaRate * K.catchD;
+        t = THREE.MathUtils.clamp(t, -K.catchT, K.catchT) * Math.min(1, (sp - 4) / 4);
+        this.txs += ay.x * t;
+        this.tys += ay.y * t;
+        this.tzs += ay.z * t;
+      }
+    }
     // ---- integrate
     this.fys -= K.mass * G;
     vel.x += (this.fxs / K.mass) * h;
@@ -765,7 +790,9 @@ export class Kart {
           ty /= tl;
           tz /= tl;
           const jt = Math.min(j * 0.22, tl / this.invMass(px, py, pz, tx, ty, tz));
-          this.impulse(px, py, pz, nx * j - tx * jt, ny * j - ty * jt, nz * j - tz * jt);
+          // (a barrier turns the kart along itself, but only half as hard as the lever says: a clip
+          // on the way past shouldn't have it facing the other way)
+          this.impulse(px, py, pz, nx * j - tx * jt, ny * j - ty * jt, nz * j - tz * jt, 0.5);
           if (-vn > this.wallHit) {
             this.wallHit = -vn;
             this.wx = px;

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Mode, type Marble } from './physics.ts';
 import type { Course } from './courses.ts';
-import { CUP_COLORS, CUP_NAMES, cupBallArt, fenceBallArt, pushBallArt, type CupArena, type CupBall, type CupCfg } from './course-soccer.ts';
+import { CUP_COLORS, CUP_NAMES, cupBallArt, fenceBallArt, pushBallArt, volleyBallArt, type CupArena, type CupBall, type CupCfg } from './course-soccer.ts';
 
 /**
  * Bean Cup's rules. The balls are the host's: it moves them, works out the kicks from wherever the
@@ -50,7 +50,7 @@ export class CupPlay {
   ) {
     this.arena = course.cup!;
     const C = (this.cfg = this.arena.cfg);
-    const tex = C.rule === 'push' ? pushBallArt() : C.rule === 'fence' ? fenceBallArt() : cupBallArt();
+    const tex = C.rule === 'push' ? pushBallArt() : C.rule === 'fence' ? fenceBallArt() : C.rule === 'volley' ? volleyBallArt() : cupBallArt();
     const mat = new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.2 });
     const geo = new THREE.SphereGeometry(C.R, 40, 28);
     const ringGeo = new THREE.RingGeometry(C.R * 0.9, C.R * 1.15, 40).rotateX(-Math.PI / 2);
@@ -127,10 +127,13 @@ export class CupPlay {
     b.live = true;
     b.backAt = 0;
     b.last = b.prev = -1;
+    b.by[0] = b.by[1] = -1;
+    b.byT[0] = b.byT[1] = -99;
   }
   /** kick off: the first ball down */
   start() {
     const A = this.arena, C = this.cfg;
+    if (C.rule === 'volley') return this.serve(Math.random() < 0.5 ? 0 : 1);
     if (C.rule !== 'fence') return this.drop(A.balls[0], 0);
     // (Over the Fence: half the balls in each yard, spread across it)
     A.balls.forEach((b, i) => {
@@ -139,15 +142,41 @@ export class CupPlay {
     });
   }
 
+  /** Volley Folly: the ball comes down from high over the middle of a team's yard (theirs to play) */
+  private serve(team: number) {
+    const C = this.cfg, s = team === 0 ? -1 : 1;
+    this.drop(this.arena.balls[0], (Math.random() - 0.5) * C.HW * 0.9, s * C.HL * (0.35 + Math.random() * 0.3));
+    // (a slow one: up a little first, so there's time to get under it)
+    this.arena.balls[0].pos.y = this.arena.center.y + 11.5;
+    this.arena.balls[0].vel.set(0, 3, 0);
+    this.rally.team = -1;
+  }
+
   /** the flight: floor, walls, posts */
   private fly(b: CupBall, h: number, ev: CupEvent[] | null, i: number) {
-    const A = this.arena, y0 = A.center.y, C = this.cfg, R = C.R;
+    const A = this.arena, C = this.cfg;
     const was = b.pos.z - A.center.z;
     b.vel.y -= C.g * h;
     b.pos.addScaledVector(b.vel, h);
     const drag = 1 - 0.1 * h;
     b.vel.multiplyScalar(drag);
+    this.hold(b, was, h, ev, i);
+    // it rolls the way it's going
+    const sp = Math.hypot(b.vel.x, b.vel.z);
+    if (sp > 0.05) {
+      AX.set(b.vel.z, 0, -b.vel.x).normalize();
+      b.quat.premultiply(Q.setFromAxisAngle(AX, (sp / C.R) * h)).normalize();
+    }
+  }
+  /**
+   * Everything that keeps the ball where a ball can be: the floor, the roof, the walls, the posts,
+   * the fence, the top speed. Run after the flight and again after the beans have had their touch,
+   * so nothing a bean does can leave it in a wall or over the fence for a frame.
+   */
+  private hold(b: CupBall, was: number, h: number, ev: CupEvent[] | null, i: number) {
+    const A = this.arena, y0 = A.center.y, C = this.cfg, R = C.R;
     if (b.pos.y < y0 + R) {
+      this.down = i;
       b.pos.y = y0 + R;
       if (b.vel.y < -2.2) {
         b.vel.y *= -0.62;
@@ -157,7 +186,10 @@ export class CupPlay {
       b.vel.x *= k;
       b.vel.z *= k;
     }
-    if (b.pos.y > y0 + C.ceil - R && b.vel.y > 0) b.vel.y *= -0.5;
+    if (b.pos.y > y0 + C.ceil - R) {
+      b.pos.y = y0 + C.ceil - R;
+      if (b.vel.y > 0) b.vel.y *= -0.5;
+    }
     // in the goal, under the bar: the roof
     const dz = Math.abs(b.pos.z - A.center.z);
     if (C.goalHalf > 0 && dz > C.HL && b.pos.y > y0 + C.goalH - R && b.vel.y > 0) {
@@ -165,49 +197,105 @@ export class CupPlay {
       b.vel.y *= -0.3;
     }
     for (const s of A.segs) this.seg(b, s[0], s[1], s[2], s[3], 0.72);
-    // over the bar's a wall too, and the bar itself is a bar
+    // the bar is a bar (the ball comes off it whichever way it met it: nothing snaps back onto the
+    // pitch), and over it is the wall
     const inX = Math.abs(b.pos.x - A.center.x) < C.goalHalf;
-    if (inX && dz > C.HL - R && dz < C.HL + 0.5 && b.pos.y > y0 + C.goalH - 0.3) {
-      const s = Math.sign(b.pos.z - A.center.z);
-      b.pos.z = A.center.z + s * (C.HL - R);
-      if (b.vel.z * s > 0) b.vel.z *= -0.72;
+    if (inX && C.goalHalf > 0) {
+      const s = Math.sign(b.pos.z - A.center.z) || 1;
+      const zb = dz - C.HL, up = b.pos.y - (y0 + C.goalH);
+      const d = Math.hypot(zb, up), rr = R + 0.34;
+      if (d < rr && d > 1e-3) {
+        const nz = zb / d, ny = up / d;
+        b.pos.z = A.center.z + s * (C.HL + nz * rr);
+        b.pos.y = y0 + C.goalH + ny * rr;
+        const vn = b.vel.z * s * nz + b.vel.y * ny;
+        if (vn < 0) {
+          b.vel.z -= s * nz * vn * 1.6;
+          b.vel.y -= ny * vn * 1.6;
+          if (ev && vn < -5) ev.push({ k: 'bang', ball: i, v: 10 });
+        }
+      } else if (up > 0 && zb > -R && zb < 0.5) {
+        b.pos.z = A.center.z + s * (C.HL - R);
+        if (b.vel.z * s > 0) b.vel.z *= -0.72;
+      }
     }
     this.fenceHold(b, was, ev, i);
+    // the big bumpers: a drum with a top to it, so a ball coming down onto one rolls off it
+    // (a drum with no top let a bouncing ball sink into it, then threw it out sideways)
     for (const o of A.rounds) {
-      const dx = b.pos.x - o.x, dzz = b.pos.z - o.z, d = Math.hypot(dx, dzz), r = o.r + R;
-      if (d >= r || b.pos.y > y0 + 3.6 || d < 0.01) continue;
-      const nx = dx / d, nz = dzz / d;
-      b.pos.x = o.x + nx * r;
-      b.pos.z = o.z + nz * r;
-      const vn = b.vel.x * nx + b.vel.z * nz;
+      const dx = b.pos.x - o.x, dzz = b.pos.z - o.z, d = Math.hypot(dx, dzz);
+      if (d >= o.r + R || d < 0.01) continue;
+      const rr = Math.min(d, o.r), cy = THREE.MathUtils.clamp(b.pos.y - y0, 0, 3);
+      const px = o.x + (dx / d) * rr, pz = o.z + (dzz / d) * rr, py = y0 + cy;
+      let nx = b.pos.x - px, ny = b.pos.y - py, nz = b.pos.z - pz;
+      const gap = Math.hypot(nx, ny, nz);
+      if (gap >= R) continue;
+      if (gap < 1e-3) (nx = dx / d), (ny = 0), (nz = dzz / d);
+      else (nx /= gap), (ny /= gap), (nz /= gap);
+      b.pos.set(px + nx * R, py + ny * R, pz + nz * R);
+      const vn = b.vel.x * nx + b.vel.y * ny + b.vel.z * nz;
       if (vn < 0) {
-        b.vel.x += nx * (-vn * 1.6 + o.kick);
-        b.vel.z += nz * (-vn * 1.6 + o.kick);
+        const j = -vn * 1.6 + o.kick * Math.hypot(nx, nz);
+        b.vel.x += nx * j;
+        b.vel.y += ny * j;
+        b.vel.z += nz * j;
         if (ev) ev.push({ k: 'bang', ball: i, v: 12 });
       }
     }
     // (nobody kicks that hard, however many of them are in on it)
     const top = b.vel.length();
-    if (top > 34) b.vel.multiplyScalar(34 / top);
+    if (top > C.top) b.vel.multiplyScalar(C.top / top);
     // (and however it got there, it isn't leaving)
     const lim = C.HL + C.goalD - R, limX = C.HW - R;
     b.pos.x = THREE.MathUtils.clamp(b.pos.x, A.center.x - limX, A.center.x + limX);
     b.pos.z = THREE.MathUtils.clamp(b.pos.z, A.center.z - lim, A.center.z + lim);
-    // it rolls the way it's going
-    const sp = Math.hypot(b.vel.x, b.vel.z);
-    if (sp > 0.05) {
-      AX.set(b.vel.z, 0, -b.vel.x).normalize();
-      b.quat.premultiply(Q.setFromAxisAngle(AX, (sp / R) * h)).normalize();
+  }
+  /** a bean has it against them: eased out of the bean, never thrown (no jumps on the screen) */
+  private clear(b: CupBall, reach: number) {
+    const gap = Math.min(reach - P.distanceTo(b.pos), this.give);
+    if (gap > 0) {
+      b.pos.addScaledVector(N, gap);
+      this.give -= gap;
     }
+    const floor = this.arena.center.y + this.cfg.R;
+    if (b.pos.y < floor) b.pos.y = floor;
+  }
+  /** how far the beans can still ease the ball this step, and the ball that touched the floor in it */
+  private give = 0;
+  private down = -1;
+  /** who had it last, for each side (a goal is theirs) */
+  private touched(b: CupBall, id: number, t: number) {
+    if (b.last !== id) {
+      b.prev = b.last;
+      b.last = id;
+    }
+    const team = this.teamOf(id);
+    b.by[team] = id;
+    b.byT[team] = t;
   }
   /** Over the Fence: low enough, the net stops it; over the top it goes */
   private fenceHold(b: CupBall, was: number, ev: CupEvent[] | null, i: number) {
     const A = this.arena, C = this.cfg;
     if (C.fenceH <= 0 || Math.abs(was) < 1e-3) return;
     const now = b.pos.z - A.center.z;
-    const low = b.pos.y - C.R * 0.6 < A.center.y + C.fenceH;
-    if (!low || (Math.abs(now) >= C.R && Math.sign(now) === Math.sign(was))) return;
     const side = Math.sign(was);
+    const up = b.pos.y - (A.center.y + C.fenceH);
+    if (up > 0) {
+      // (above the top: the rail along it is a bar the ball rolls off, one way or the other)
+      const d = Math.hypot(now, up);
+      if (d >= C.R) return;
+      const nz = d > 1e-3 ? now / d : side * 0.3, ny = d > 1e-3 ? up / d : 0.95;
+      b.pos.z = A.center.z + nz * C.R;
+      b.pos.y = A.center.y + C.fenceH + ny * C.R;
+      const vn = b.vel.z * nz + b.vel.y * ny;
+      if (vn < 0) {
+        b.vel.z -= nz * vn * 1.45;
+        b.vel.y -= ny * vn * 1.45;
+        if (ev && vn < -4) ev.push({ k: 'bang', ball: i, v: 8 });
+      }
+      return;
+    }
+    if (Math.abs(now) >= C.R && Math.sign(now) === side) return;
     b.pos.z = A.center.z + side * C.R;
     if (b.vel.z * side < 0) {
       b.vel.z *= -0.5;
@@ -238,32 +326,29 @@ export class CupPlay {
     N.subVectors(b.pos, P);
     const d = N.length();
     const C = this.cfg;
-    const reach = C.R + (r.c.human ? 0.95 : 0.78);
+    // (Volley Folly: you have to get properly under it)
+    const reach = C.R + (C.rule === 'volley' ? (r.c.human ? 0.8 : 0.5) : r.c.human ? 0.95 : 0.78);
     if (d >= reach || d < 1e-3) return;
     N.multiplyScalar(1 / d);
     const hs = Math.hypot(m.vel.x, m.vel.z);
     const rel = (m.vel.x - b.vel.x) * N.x + (m.vel.y - b.vel.y) * N.y + (m.vel.z - b.vel.z) * N.z;
     const speed = b.vel.length();
-    // a hard one coming the other way: it wins
-    if (speed > 15 && rel < -11 && C.rule !== 'push' && b.last !== m.id && t - b.kickT > 0.15 && m.mode === Mode.Run) {
-      b.vel.multiplyScalar(0.45);
-      ev.push({ k: 'hit', id: r.c.id, vx: -N.x * speed * 0.5, vy: 5, vz: -N.z * speed * 0.5 });
-      b.prev = b.last;
-      b.last = m.id;
-      b.pos.copy(P).addScaledVector(N, reach);
-      return;
-    }
-    b.pos.copy(P).addScaledVector(N, reach);
-    if (b.pos.y < this.arena.center.y + C.R) b.pos.y = this.arena.center.y + C.R;
     const air = m.groundT > 0.1;
     const dive = m.mode === Mode.Dive;
     // (a shot goes where you're going, so you can aim it)
     const dx = hs > 1 ? m.vel.x / hs : Math.sin(m.yaw), dz = hs > 1 ? m.vel.z / hs : Math.cos(m.yaw);
-    if (rel < -0.5 && !dive) return;
-    if (b.last !== m.id) {
-      b.prev = b.last;
-      b.last = m.id;
+    if (C.rule === 'volley') return this.bump(b, i, r, t, ev, dx, dz, dive || (air && N.y > 0.2));
+    // a hard one coming the other way: it wins
+    if (speed > 15 && rel < -11 && C.rule !== 'push' && b.last !== m.id && t - b.kickT > 0.15 && m.mode === Mode.Run) {
+      b.vel.multiplyScalar(0.45);
+      ev.push({ k: 'hit', id: r.c.id, vx: -N.x * speed * 0.5, vy: 5, vz: -N.z * speed * 0.5 });
+      this.touched(b, m.id, t);
+      this.clear(b, reach);
+      return;
     }
+    this.clear(b, reach);
+    if (rel < -0.5 && !dive) return;
+    this.touched(b, m.id, t);
     if (dive) {
       if (t - b.kickT < 0.2) return;
       b.kickT = t;
@@ -295,6 +380,51 @@ export class CupPlay {
     if (k > 8) ev.push({ k: 'kick', ball: i, id: m.id, v: k, shot: false });
   }
 
+  /**
+   * Volley Folly: any touch sends it up. Run under it and it's a bump: up and on toward the net
+   * for someone else (or over, if you're close to it). JUMP or DIVE into it and it's a hit: over the
+   * net, the way you're heading, as deep as you were moving fast. The flight's worked out so it
+   * lands where it's aimed and clears the net on the way.
+   */
+  private bump(b: CupBall, i: number, r: Who, t: number, ev: CupEvent[], dx: number, dz: number, hard: boolean) {
+    const A = this.arena, C = this.cfg, m = r.m;
+    if (t - b.kickT < 0.32) return;
+    const team = this.teamOf(r.c.id), dir = team === 0 ? 1 : -1;
+    const floor = A.center.y + C.R, zNet = A.center.z;
+    const toNet = (zNet - b.pos.z) * dir;
+    // (only in your own yard: the net's glass is in the way of anything else)
+    if (toNet < 0) return;
+    b.kickT = t;
+    this.touched(b, m.id, t);
+    // how many times this side has had it since it came over
+    if (this.rally.team !== team) (this.rally.team = team), (this.rally.n = 0);
+    const n = ++this.rally.n;
+    const hs = Math.hypot(m.vel.x, m.vel.z);
+    if (!hard) {
+      // a bump: straight up off your head and a little on toward the net, for someone to hit.
+      // Each one in a row comes up lower: three and it's as good as down
+      const vy = n <= 1 ? 7.4 : n === 2 ? 5.4 : 2.6;
+      b.vel.set(dx * 1.6, vy, dz * 1.6 + dir * Math.min(2.2, toNet * 0.3));
+      ev.push({ k: 'kick', ball: i, id: m.id, v: vy, shot: false });
+      return;
+    }
+    // a hit: over the net, the way you're heading, as deep as you were moving fast
+    const deep = 3.5 + Math.min(1, hs / 11) * (C.HL - 7) * (r.c.human ? 1 : 0.55 + Math.random() * 0.55);
+    const tz = zNet + dir * Math.min(C.HL - 2.2, deep);
+    const tx = THREE.MathUtils.clamp(b.pos.x + dx * 9 + (r.c.human ? 0 : (Math.random() - 0.5) * 9), A.center.x - C.HW + 2.2, A.center.x + C.HW - 2.2);
+    // the flight: as flat as clears the net with room to spare
+    let T = 0.8;
+    for (; T < 3; T += 0.1) {
+      const vy = (floor - b.pos.y) / T + 0.5 * C.g * T;
+      const tc = (T * toNet) / Math.max(0.1, (tz - b.pos.z) * dir);
+      if (b.pos.y + vy * tc - 0.5 * C.g * tc * tc > A.center.y + C.fenceH + C.R + 0.55) break;
+    }
+    b.vel.set((tx - b.pos.x) / T, (floor - b.pos.y) / T + 0.5 * C.g * T, (tz - b.pos.z) / T);
+    // (the flight above has no air in it: a touch more to make up for the drag)
+    b.vel.multiplyScalar(1 + 0.05 * T);
+    ev.push({ k: 'kick', ball: i, id: m.id, v: b.vel.length(), shot: hard });
+  }
+
   /** (the host) the ball's moves, this frame */
   tick(dt: number, t: number, x: number) {
     const ev: CupEvent[] = [];
@@ -306,22 +436,41 @@ export class CupPlay {
     }
     const n = 4, h = dt / n;
     A.balls.forEach((b, i) => {
-      if (b.backAt && t >= b.backAt) this.drop(b, i ? 6 : this.second ? -6 : 0);
+      if (b.backAt && t >= b.backAt) {
+        if (C.rule === 'volley') this.serve(this.serveTo);
+        else this.drop(b, i ? 6 : this.second ? -6 : 0);
+      }
       if (!b.live && !b.backAt) return;
       for (let k = 0; k < n; k++) {
+        this.down = -1;
         this.fly(b, h, ev, i);
         if (!b.live) continue;
         const was = b.pos.z - A.center.z;
+        this.give = 0.085;
         for (const r of all) if (r.m.active && !r.out && !r.m.frozen) this.touch(b, i, r, t, ev);
-        this.fenceHold(b, was, ev, i);
+        this.hold(b, was, 0, null, i);
         const dz = b.pos.z - A.center.z;
+        // Volley Folly: down on the floor is a point to the other side, and their serve to take
+        if (C.rule === 'volley') {
+          if (this.down !== i) continue;
+          const team = dz > 0 ? 0 : 1;
+          this.score[team]++;
+          b.live = false;
+          b.backAt = t + C.restart;
+          this.serveTo = team === 0 ? 1 : 0;
+          ev.push({ k: 'goal', team, by: t - b.byT[team] < 8 ? b.by[team] : -1, own: false, ball: i, a: this.score[0], b: this.score[1] });
+          continue;
+        }
         if (Math.abs(dz) > C.HL + C.R * 0.6 && Math.abs(b.pos.x - A.center.x) < C.goalHalf && b.pos.y < A.center.y + C.goalH) {
           const team = dz > 0 ? 0 : 1;
           this.score[team]++;
           b.live = false;
           b.backAt = t + C.restart;
-          const by = b.last;
-          ev.push({ k: 'goal', team, by, own: by >= 0 && this.teamOf(by) !== team, ball: i, a: this.score[0], b: this.score[1] });
+          // (it's the goal of whoever on the scoring side had it last, if that was lately: a keeper
+          // getting a hand to a shot hasn't scored an own goal, and nor has the bean pushing back)
+          const mine = t - b.byT[team] < C.credit;
+          const by = mine ? b.by[team] : b.last;
+          ev.push({ k: 'goal', team, by, own: !mine && by >= 0 && this.teamOf(by) !== team, ball: i, a: this.score[0], b: this.score[1] });
         }
       }
       if (b.live) this.attack[b.pos.z > A.center.z ? 0 : 1] += dt;
@@ -330,6 +479,10 @@ export class CupPlay {
     if (C.rule === 'fence') this.yards();
     return ev;
   }
+
+  /** Volley Folly: whose yard the next ball comes down in, and who's had it how often since it came over */
+  private serveTo = 0;
+  private rally = { team: -1, n: 0 };
 
   private yards() {
     const A = this.arena;

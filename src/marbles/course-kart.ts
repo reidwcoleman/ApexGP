@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CourseBuilder } from './builder.ts';
 import type { Course } from './courses.ts';
 import { KartTrack, KERB } from './kart-track.ts';
-import { BEAN_BAY, BEAN_PADS } from './kart-layout.ts';
+import { BEAN_BAY_GP, type KartLayout, type Where } from './kart-layout.ts';
 import { RACE, type Racer } from './kart-race.ts';
 import { dressScenery, type Land } from './kart-scenery.ts';
 
@@ -202,11 +202,24 @@ roughnessFactor = mix(roughnessFactor, 0.5, mkRub * 0.7);`).replace('#include <e
   return m;
 }
 
-export function beanBayGP(info: { name: string; blurb: string }): Course {
+/** how far round a spot on the map is: the nearest metre of road that's on the ground */
+export function whereOn(tr: KartTrack, at: Where) {
+  if (typeof at === 'number') return at;
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < tr.n; i++) {
+    const d = (tr.P[i * 3] - at[0]) ** 2 + (tr.P[i * 3 + 2] - at[1]) ** 2;
+    if (d < bd) (bd = d), (best = i);
+  }
+  return best;
+}
+
+export function beanBayGP(info: { name: string; blurb: string }, layout: KartLayout = BEAN_BAY_GP): Course {
   const b = new CourseBuilder();
   const y0 = 40, center = new THREE.Vector3(-10, y0, 0);
   b.lakeY = y0 - 13;
-  const tr = new KartTrack(BEAN_BAY, new THREE.Vector3(0, y0, 0), BEAN_PADS);
+  const tr = new KartTrack(layout.points, new THREE.Vector3(0, y0, 0), []);
+  // (the pads: put where the map says, once the road's there to measure along)
+  for (const p of layout.pads) tr.pads.push({ s: whereOn(tr, p.at) - (typeof p.at === 'number' ? 0 : 3.5), len: 7, lat: p.lat, w: p.w });
   const n = tr.n;
   const state = { go: 1e9 };
   const time = { value: 0 };
@@ -347,14 +360,14 @@ void main() {
   bridge(b, tr, land);
   const tunnelT = tunnel(b, tr);
   b.animators.push(tunnelT);
-  const gantry = dressScenery(b, tr, land, y0, time);
+  const gantry = dressScenery(b, tr, land, y0, time, layout);
   b.finish();
   // ---- the race's own numbers
   let racers: Racer[] = [];
   const byId = new Map<number, Racer>();
   const gridAt = tr.point(RACE.start - 20, 0, 1, new THREE.Vector3());
   return {
-    id: 'beanbaygp',
+    id: layout.id,
     name: info.name,
     kind: 'race',
     blurb: info.blurb,

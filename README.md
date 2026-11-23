@@ -754,9 +754,11 @@ and bots; the contestants are original bean characters, not marbles.
   below (marbled paint, ocean, lava, ice, swamp, a neon grid, sand, cloud; `paintLakeFor`), the
   light, the fog, the scenery round the course, the course's tiles, rails and arches, the obstacles'
   colours and the toys on the islands. `ROUND_BIOME` says which round is in which.
-- **The show**: six rounds dealt fresh every show from 32 (`POOL` / `dealShow` in `courses.ts`):
-  race, survival, a race or a party game, a party game, a race, the final. A short wheel of round
-  names lands on each one. Rounds are built ahead (`buildAhead` in `game.ts`): the next course, its
+- **The show**: six rounds dealt fresh every show from 37 (`POOL` / `dealShow` in `courses.ts`):
+  every show has a team game, a ball game and a kart race in it, plus two of the other kinds
+  (obstacle race, outrun it, vanishing floor, dodge it), then the final. The team and ball games
+  come in the first three rounds, while there's a field to split, and a small field is never cut
+  so hard that the final is two beans. A short wheel of round names lands on each one. Rounds are built ahead (`buildAhead` in `game.ts`): the next course, its
   bot paths and its shaders go up behind the results, and the first round of the next show behind
   the menu, so nothing waits on a build. Disposing a course keeps its materials, so the shader
   programs stay compiled for the next one.
@@ -823,18 +825,44 @@ and bots; the contestants are original bean characters, not marbles.
     your team's colour all round you. Online the host's floor (run-length coded) goes to everyone
     once a second, never over what a guest has just painted itself. Paint
     Party (a walled square, a turntable, bumpers) or Splat Ring (a round arena swept by one long
-    bar that speeds up: hop it).
+    bar that speeds up: hop it). Two more team games are played on the same floor (`TeamGame`):
+    **Spot Hogs** (three glowing spots; the team with the most beans on their feet in one owns it
+    and it pays a point a second, so a dive that knocks a rival over takes them out of the count;
+    the spots blink and move every 17 s to three of nine places, the same in every browser) and
+    **Star Scramble** (a round arena with bumpers; a star drops in every 0.6 s and every 14th is
+    a big one worth five; run into one and it's your team's). In both the fewest points goes
+    home, and the host's points go to everyone once a second.
   - **Ball games** (`course-soccer.ts` builds the pitch from a `CupCfg`, `soccer.ts` runs the balls
     on the host, `CupBrain` in `ai-play.ts` plays them): two teams, half the field goes home.
     Bean Cup (soccer: goals, a second ball late on, golden goal), Big Push (one giant beach ball,
-    no kicking, everyone shoves; push it over the other team's end line, the team piles in) and
+    no kicking, everyone shoves; push it over the other team's end line, the team piles in),
     Over the Fence (eight small balls and a net down the middle with glass above it for the
     beans: a dive lobs a ball over; when the clock stops the yard with more balls in it goes
-    home, level is sudden death).
+    home, level is sudden death) and Volley Folly (volleyball: one big floaty ball and a net;
+    run under it and it comes up off your head, lower each time; JUMP or DIVE into it and it goes
+    over, on a flight worked out to clear the net and land where you were heading; down in your
+    yard is a point to them). A goal belongs to whoever on the scoring side touched the ball
+    last (a keeper getting a hand to a shot hasn't scored an own goal), and after one everybody
+    goes back to their own half for a kick-off. The ball is held inside the walls, the fence and
+    the bumpers after the beans have touched it as well as after it has moved, and a bean eases
+    it away rather than throwing it, so it never jumps on the screen. `tools/wobblecup.mjs`
+    plays all four tick by tick and fails on a ball that jumps, lies dead, or leaves the pitch.
+  - **Go-karts** (`kart-sim.ts`, `kart-race.ts`, `kart-track.ts`, `course-kart.ts`, a
+    `KartLayout` per circuit in `kart-layout.ts`): two laps of Bean Bay GP (a figure of eight: the
+    hairpin, the Big Bowl, the Hump, the Light Tunnel) or Sundae Speedway (quicker and more open:
+    the banked Scoop, a crest that throws you in the air, the Candy Tunnel, the Sprinkles esses
+    and the Cone hairpin). Hold SPACE or SHIFT to drift and let go for a boost. A kart that steps
+    out when no drift was asked for is caught before it comes round (`KART.catchAt`: a turning
+    force back into line and rear tyres that bite harder the further out they are), a barrier or
+    another kart turns you half as hard as it used to, and a held drift is untouched.
+    `tools/wobblekart.mjs` races a flat-out, full-lock keyboard driver against the bots and
+    counts the spins (24 in six races before the catch, none after).
   - **Final**: Crown Peak, the longest platform course; first across the line takes the crown.
   - The old downhill chutes (Timber Tumble, Paint Mill, Rickety Ridge, Crown Summit) are out of the
     rotation but still built for the test links: `?round=N` indexes `DEFAULT_SHOW` in `courses.ts`.
-    `?lineup=colourcall,bigpush` plays those rounds, in that order, as the show.
+    `?round=beancup` takes a round's name too. `?lineup=colourcall,bigpush` plays those rounds,
+    in that order, as the show. `tools/wobblewatch.mjs` plays a round (or, with `--show`, a whole
+    show from the menu) in real time and prints everything the console said.
   - Out of the show, start a new one or watch the rest (←/→ switches bean, ENTER skips the round).
 - **The beans** (`bean.ts`): party-game proportions (from what the genre's own developers describe:
   round "baked bean" bodies, low hips, stubby feet, big arms) with our own art — a chunky,

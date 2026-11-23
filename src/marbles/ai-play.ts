@@ -134,6 +134,7 @@ export class CupBrain {
   update(dt: number, t: number, c: Course, all: Marble[], ease: number) {
     const m = this.m, A = c.cup!, CUP = A.cfg;
     if (CUP.rule === 'fence') return this.fence(dt, t, c, all, ease);
+    if (CUP.rule === 'volley') return this.volley(dt, t, c, all, ease);
     const push = CUP.rule === 'push';
     const team = A.of.get(m.id) ?? 0, dir = team === 0 ? 1 : -1;
     const y0 = A.center.y;
@@ -174,9 +175,16 @@ export class CupBrain {
       W.subVectors(ball.pos, G).setY(0);
       const l = W.length() || 1;
       W.multiplyScalar((CUP.R + 1.1) / l).add(ball.pos);
-      // (on the wrong side of it: round, not through)
+      // (on the wrong side of it: round, not through. Out to the side first, clear of it, then
+      // past it; running straight at the spot behind would shove the ball at its own goal)
       const wrong = (ball.pos.z - m.pos.z) * dir < -0.5;
-      if (wrong) W.x += (m.pos.x > ball.pos.x ? 1 : -1) * (CUP.R + 1.9);
+      if (wrong) {
+        const room = CUP.HW - CUP.R * 2 - 2.5, off = ball.pos.x - A.center.x;
+        const side = off > room ? -1 : off < -room ? 1 : m.pos.x > ball.pos.x ? 1 : -1;
+        const clearX = ball.pos.x + side * (CUP.R + 2.1);
+        if ((m.pos.x - ball.pos.x) * side < CUP.R + 1.4) W.set(clearX, y0, m.pos.z + dir * 0.5);
+        else W.set(clearX, y0, ball.pos.z - dir * (CUP.R + 1.6));
+      }
       const dW = Math.hypot(W.x - m.pos.x, W.z - m.pos.z);
       // (lined up: straight through it at the goal)
       if (dW < 1.5 && !wrong) W.copy(G);
@@ -204,6 +212,83 @@ export class CupBrain {
     if (lined && (toGoal < 26 || panic) && this.rnd() < 0.3 + 0.5 * this.skill - ease * 0.2) {
       this.shotT = t + (push ? 0.9 : 1.6) + this.rnd() * 1.4;
       m.input.set(bx / (bdist || 1), 0, bz / (bdist || 1));
+      m.dash = true;
+    }
+  }
+
+  /**
+   * Volley Folly: it works out where the ball's coming down. In its own yard, the two nearest go
+   * and get under it (a weaker bot reads the flight less well and sets off later); the rest spread
+   * out to cover the floor. Under it in time, it jumps or dives into it to send it back over.
+   */
+  private land = new THREE.Vector3();
+  private err = new THREE.Vector3();
+  private volley(_dt: number, t: number, c: Course, all: Marble[], ease: number) {
+    const m = this.m, A = c.cup!, C = A.cfg;
+    const team = A.of.get(m.id) ?? 0, dir = team === 0 ? 1 : -1;
+    const y0 = A.center.y, cz = A.center.z, b = A.balls[0];
+    const floor = y0 + C.R;
+    // where it comes down, and when
+    let eta = 0;
+    if (b.live) {
+      const h = Math.max(0, b.pos.y - floor);
+      eta = (b.vel.y + Math.sqrt(b.vel.y * b.vel.y + 2 * C.g * h)) / C.g;
+      this.land.set(b.pos.x + b.vel.x * eta * 0.94, y0, b.pos.z + b.vel.z * eta * 0.94);
+      this.land.x = THREE.MathUtils.clamp(this.land.x, A.center.x - C.HW + C.R, A.center.x + C.HW - C.R);
+      this.land.z = THREE.MathUtils.clamp(this.land.z, cz - C.HL + C.R, cz + C.HL - C.R);
+    }
+    // (it takes a moment to read a ball that's just been hit: longer for a weaker bot)
+    const read = t - b.kickT > 0.22 + (1 - this.skill) * 0.5 + ease * 0.35;
+    const ours = b.live && read && (this.land.z - cz) * dir < 0;
+    if (t > this.think) {
+      this.think = t + 0.16 + (1 - this.skill) * 0.3 + ease * 0.25 + this.rnd() * 0.1;
+      const mates = all.filter((o) => o.active && (A.of.get(o.id) ?? 0) === team).sort((p, q) => p.id - q.id);
+      this.n = mates.length;
+      this.slot = mates.indexOf(m);
+      this.chase = false;
+      if (ours) {
+        const mine = Math.hypot(this.land.x - m.pos.x, this.land.z - m.pos.z);
+        let closer = 0;
+        for (const o of mates) if (o !== m && Math.hypot(this.land.x - o.pos.x, this.land.z - o.pos.z) < mine) closer++;
+        // (the nearest goes; the next one too if that's a long run)
+        this.chase = closer < 1 || (closer < 2 && mine < 7 && eta > 0.5);
+        // (how well it reads the flight: a new guess every look)
+        const off = (1 - this.skill) * 3.2 + ease * 2.2;
+        this.err.set((this.rnd() - 0.5) * off, 0, (this.rnd() - 0.5) * off);
+      }
+    }
+    if (ours && this.chase) {
+      // under it, a step back from the net so it's hit going forward
+      W.set(this.land.x + this.err.x, y0, this.land.z + this.err.z - dir * 0.7);
+    } else {
+      // the shape: two rows across the yard, leaning toward where the ball is
+      const per = Math.max(1, Math.ceil(this.n / 2)), row = this.slot % 2, col = Math.floor(this.slot / 2);
+      const lane = ((col + 0.5) / per - 0.5) * (C.HW * 1.7);
+      const lean = b.live ? (b.pos.x - A.center.x) * 0.2 : 0;
+      W.set(A.center.x + lane + lean, y0, cz - dir * C.HL * (row ? 0.3 : 0.68));
+    }
+    W.z = cz - dir * Math.max(1.4, (cz - W.z) * dir);
+    const dx = W.x - m.pos.x, dz = W.z - m.pos.z, d = Math.hypot(dx, dz);
+    if (d > 0.45) m.input.set(dx / d, 0, dz / d).multiplyScalar(ours && this.chase ? 1 : Math.min(1, d / 3));
+    else m.input.set(0, 0, 0);
+    if (!b.live || m.mode !== Mode.Run || t < this.shotT || !ours) return;
+    // the hit: it's nearly down and within a lunge
+    const bx = b.pos.x - m.pos.x, bz = b.pos.z - m.pos.z, bd = Math.hypot(bx, bz);
+    const up = b.pos.y - floor;
+    if (b.vel.y > 1 || up > 3.6 || bd > C.R + 3.2) return;
+    // (it doesn't always get its timing right: then the ball just comes off its head)
+    if (this.rnd() > 0.42 + 0.45 * this.skill - ease * 0.25) {
+      this.shotT = t + 0.7;
+      return;
+    }
+    this.shotT = t + 0.9 + this.rnd() * 0.5;
+    // (aimed over the net, off to a side it picks)
+    const ax = (this.rnd() - 0.5) * 1.4;
+    if (up > 1.5 && bd < C.R + 1.2) {
+      m.input.set(ax, 0, dir).normalize();
+      m.jump = true;
+    } else if (bd > 1.2) {
+      m.input.set(bx / bd + ax * 0.3, 0, bz / bd + dir * 0.5).normalize();
       m.dash = true;
     }
   }

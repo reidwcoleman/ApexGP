@@ -18,7 +18,7 @@ export const RACE = {
   tail: -0.65,
   /** how lively karts are on each other, and how much of a hit goes into turning them (tyres on the road resist that) */
   e: 0.3,
-  twist: 0.4,
+  twist: 0.22,
   /** seconds on its side or back before the marshals right it, and how long it can't be touched after */
   flipT: 1.3,
   ghost: 2.2,

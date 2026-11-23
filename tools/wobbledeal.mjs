@@ -25,7 +25,10 @@ const res = await page.evaluate(async () => {
     // the final is its own kind, and the crown race never comes with an obstacle race's twin
     if (new Set(modes).size !== 6) badMode++;
     if (ids[5] === 'crownpeak' && modes.includes('race')) badMode++;
-    if (ids[4] === 'paintparty' || ids[4] === 'splatring') teamLate++;
+    // a team game or a ball game is never one of the two rounds before the final, and every show
+    // has one of each and a kart race
+    if (['team', 'ball'].includes(modes[3]) || ['team', 'ball'].includes(modes[4])) teamLate++;
+    if (!modes.includes('team') || !modes.includes('ball') || !modes.includes('kart')) badMode++;
     sameAsLast += ids.filter((x) => prev.includes(x) && x !== 'crownkeep' && x !== 'crownpeak').length;
     prev = ids;
     finals[ids[5]] = (finals[ids[5]] ?? 0) + 1;

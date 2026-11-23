@@ -3,6 +3,11 @@ import type { Course } from './courses.ts';
 import type { Marble } from './physics.ts';
 
 /**
+ * Spot Hogs: it makes for a spot (the nearer the better, less so one its team already has well in
+ * hand, more so one that's level or just lost) and stands in it. Star Scramble: it goes for a star
+ * (the nearer the better, a big one from much further off), and drifts about the middle when
+ * there's none worth the run.
+ *
  * The team round: a bot picks a patch of floor that isn't its team's colour (other teams' paint
  * first, the nearer the better, a little nudge toward places its teammates aren't), runs there and
  * paints its way across; now and then it dives into a rival close ahead. It steers round the
@@ -24,10 +29,15 @@ export class TeamBrain {
     readonly aggr: number,
   ) {}
 
+  /** Spot Hogs: the spot it's making for (-1: none yet), and where in it */
+  private zone = -1;
+
   update(dt: number, t: number, c: Course, all: Marble[]) {
     const m = this.m, A = c.team!;
     const team = A.of.get(m.id) ?? 0;
-    if (!this.has || t > this.nextPick || Math.hypot(this.tgt.x - m.pos.x, this.tgt.z - m.pos.z) < 0.8) {
+    if (A.game === 'spots') this.pickSpot(t, A, team, all);
+    else if (A.game === 'stars') this.pickStar(t, A);
+    else if (!this.has || t > this.nextPick || Math.hypot(this.tgt.x - m.pos.x, this.tgt.z - m.pos.z) < 0.8) {
       // a few looks round: the best tile to go and paint
       let best = -1e9;
       for (let k = 0; k < 18; k++) {
@@ -57,7 +67,7 @@ export class TeamBrain {
       this.nextPick = t + 0.7 + this.rnd() * (1.6 - this.skill);
     }
     // a paint bomb near: go and get it (the better ones spot them from further off)
-    let near: THREE.Vector3 | null = null, nd = 4 + 7 * this.skill;
+    let near: THREE.Vector3 | null = null, nd = A.game === 'paint' ? 4 + 7 * this.skill : 0;
     for (const q of A.pickups) {
       const dq = Math.hypot(q.x - m.pos.x, q.z - m.pos.z);
       if (dq < nd) {
@@ -75,6 +85,8 @@ export class TeamBrain {
     if (d > 0.01) P.multiplyScalar(1 / d);
     const pace = 0.82 + 0.18 * this.skill;
     m.input.copy(P).multiplyScalar(pace * Math.min(1, 0.4 + d));
+    // (Spot Hogs: in its spot, it stands its ground)
+    if (A.game === 'spots' && d < 0.5) m.input.set(0, 0, 0);
     // stuck against something: hop
     const sp = Math.hypot(m.vel.x, m.vel.z);
     this.stuckT = sp < 0.8 && d > 1 ? this.stuckT + dt : 0;
@@ -101,11 +113,15 @@ export class TeamBrain {
     this.diveCD -= dt;
     if (this.diveCD <= 0) {
       this.diveCD = 0.5;
+      // (one roll a look, however many rivals are crowded into the spot with it)
+      const roll = this.rnd();
       for (const o of all) {
         if (o === m || !o.active || (A.of.get(o.id) ?? 0) === team) continue;
         const ox = o.pos.x - m.pos.x, oz = o.pos.z - m.pos.z;
         const od = Math.hypot(ox, oz);
-        if (od < 2.4 && (ox * P.x + oz * P.z) / (od || 1) > 0.7 && this.rnd() < 0.25 * this.aggr + 0.05) {
+        // (Spot Hogs: a rival in the spot it's in is there to be knocked out of it, wherever it's facing)
+        const inSpot = A.game === 'spots' && this.zone >= 0 && A.zones[this.zone] && Math.hypot(o.pos.x - A.zones[this.zone].x, o.pos.z - A.zones[this.zone].z) < A.zones[this.zone].r && Math.hypot(m.pos.x - A.zones[this.zone].x, m.pos.z - A.zones[this.zone].z) < A.zones[this.zone].r + 1.5;
+        if (od < 2.4 && (inSpot ? roll < 0.07 * this.aggr + 0.03 * this.skill : (ox * P.x + oz * P.z) / (od || 1) > 0.7 && this.rnd() < 0.25 * this.aggr + 0.05)) {
           m.input.set(ox / od, 0, oz / od);
           m.dash = true;
           this.diveCD = 2.5;
@@ -113,5 +129,53 @@ export class TeamBrain {
         }
       }
     }
+  }
+
+  private pickSpot(t: number, A: NonNullable<Course['team']>, team: number, all: Marble[]) {
+    const m = this.m;
+    const cur = this.zone >= 0 ? A.zones[this.zone] : undefined;
+    if (cur && t < this.nextPick && !cur.going && Math.hypot(this.tgt.x - cur.x, this.tgt.z - cur.z) < cur.r) return;
+    if (!A.zones.length) return;
+    let best = -1e9, pick = 0;
+    A.zones.forEach((z, k) => {
+      const d = Math.hypot(z.x - m.pos.x, z.z - m.pos.z);
+      // how many of each side are in it already
+      let mine = 0, theirs = 0;
+      for (const o of all) {
+        if (o === m || !o.active || Math.hypot(o.pos.x - z.x, o.pos.z - z.z) > z.r + 1) continue;
+        if ((A.of.get(o.id) ?? 0) === team) mine++;
+        else theirs++;
+      }
+      // (a spot well in hand needs nobody else; one that's close is where it's wanted)
+      let sc = -d * (0.1 + 0.08 * (1 - this.skill)) - Math.max(0, mine - theirs - 1) * 1.1 + (mine <= theirs ? 0.9 : 0) + (this.rnd() - 0.5) * (1.6 - this.skill);
+      if (z.going) sc -= 2.5;
+      if (k === this.zone) sc += 0.5;
+      if (sc > best) (best = sc), (pick = k);
+    });
+    this.zone = pick;
+    const z = A.zones[pick], a = this.rnd() * Math.PI * 2, r = this.rnd() * z.r * 0.62;
+    this.tgt.set(z.x + Math.cos(a) * r, A.center.y, z.z + Math.sin(a) * r);
+    this.has = true;
+    this.nextPick = t + 1.6 + this.rnd() * (3.2 - 1.4 * this.skill);
+  }
+
+  private pickStar(t: number, A: NonNullable<Course['team']>) {
+    const m = this.m;
+    if (t < this.nextPick && this.has) return;
+    this.nextPick = t + 0.25 + this.rnd() * (0.7 - 0.4 * this.skill);
+    // (a big one is in the list three times: three times as far is still worth it)
+    let best: THREE.Vector3 | null = null, bd = Infinity;
+    const seen = new Map<THREE.Vector3, number>();
+    for (const q of A.pickups) seen.set(q, (seen.get(q) ?? 0) + 1);
+    for (const [q, n] of seen) {
+      const d = Math.hypot(q.x - m.pos.x, q.z - m.pos.z) / n + this.rnd() * (1 - this.skill) * 5;
+      if (d < bd) (bd = d), (best = q);
+    }
+    if (best && bd < 9 + 16 * this.skill) this.tgt.set(best.x, A.center.y, best.z);
+    else if (!this.has || Math.hypot(this.tgt.x - m.pos.x, this.tgt.z - m.pos.z) < 1.2 || this.rnd() < 0.3) {
+      const a = this.rnd() * Math.PI * 2, r = 4 + this.rnd() * (A.half - 8);
+      this.tgt.set(A.center.x + Math.cos(a) * r, A.center.y, A.center.z + Math.sin(a) * r);
+    }
+    this.has = true;
   }
 }

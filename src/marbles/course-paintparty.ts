@@ -20,9 +20,25 @@ import { dressArena } from './course-dress.ts';
 export const TEAM_COLORS = [0xff4f9a, 0x2f9bff, 0xffc21f];
 export const TEAM_NAMES = ['PINK', 'BLUE', 'GOLD'];
 export const TEAM_T = 100;
+/**
+ * The games played on this floor. 'paint': the most floor painted. 'spots': Spot Hogs, three
+ * glowing spots that pay a point a second to the team with the most beans stood in them, and move.
+ * 'stars': Star Scramble, stars raining in to be grabbed for the team.
+ */
+export type TeamGame = 'paint' | 'spots' | 'stars';
+/** Spot Hogs: how big a spot is, how long they stay put, and the warning before they move */
+export const SPOTS = { r: 3.5, every: 17, warn: 3, n: 3 };
 
 export interface TeamArena {
   center: THREE.Vector3;
+  game: TeamGame;
+  /** the teams' points (the games that aren't about the floor) */
+  points: number[];
+  /** Spot Hogs: the places a spot can be, and the spots as they are now (for the bots) */
+  sites: THREE.Vector3[];
+  zones: { x: number; z: number; r: number; owner: number; going: boolean }[];
+  /** what stands on the floor (nothing drops in on top of one) */
+  blocks: { x: number; z: number; r: number }[];
   half: number;
   n: number;
   cell: number;
@@ -57,9 +73,13 @@ export interface TeamArena {
   pickups: THREE.Vector3[];
 }
 
-/** 'square': the walled square with a turntable; 'ring': a round arena swept by a long bar (hop it) */
-export function paintparty(info: { id?: string; name: string; blurb: string }, variant: 'square' | 'ring' = 'square'): Course {
-  const ROUND = variant === 'ring';
+/**
+ * 'square': the walled square with a turntable; 'ring': a round arena swept by a long bar (hop it);
+ * 'spots': the square, clear, for Spot Hogs; 'stars': the ring with bumpers, for Star Scramble
+ */
+export function paintparty(info: { id?: string; name: string; blurb: string }, variant: 'square' | 'ring' | 'spots' | 'stars' = 'square'): Course {
+  const ROUND = variant === 'ring' || variant === 'stars';
+  const GAME: TeamGame = variant === 'spots' ? 'spots' : variant === 'stars' ? 'stars' : 'paint';
   /** the ring's bar: its angle at t (it turns faster as the round goes on) */
   const barAngle = (t: number) => {
     const x = Math.max(0, t - state.go);
@@ -146,7 +166,7 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
   const cvalid = new Uint16Array(N * N);
   const tcount = [0, 0, 0];
   let total = 0;
-  const hub = ROUND ? 1.2 : 3.6;
+  const hub = variant === 'ring' ? 1.2 : variant === 'square' ? 3.6 : variant === 'stars' ? 1.7 : 0;
   for (let j = 0; j < NF; j++)
     for (let i = 0; i < NF; i++) {
       const x = -HALF + (i + 0.5) * F, z = -HALF + (j + 0.5) * F;
@@ -254,11 +274,23 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
   b.group.add(tiles);
   // the turntable in the middle, and bumpers out at the corners of the middle
   const up = new THREE.Quaternion();
-  if (ROUND) {
+  if (variant === 'ring') {
     // one long bar turning over the floor from a hub in the middle, speeding up as it goes: hop it
     sweeper(b, center.clone(), up, { len: HALF * 2 - 0.9, height: 0.55, angle: barAngle, paint: { a: th.rail, b: PAINT.white, pattern: 2, scale: 1.4 }, hub: 0.9 });
-  } else turntable(b, center.clone(), new THREE.Quaternion(), { r: 3.4, omega: 0.7, fins: 2, finH: 0.45 });
-  for (const [x, z, c] of ROUND ? [] : [
+  } else if (variant === 'square') turntable(b, center.clone(), new THREE.Quaternion(), { r: 3.4, omega: 0.7, fins: 2, finH: 0.45 });
+  // Star Scramble: a big bumper in the middle and six round it, to be bounced off on the way to a star
+  const blocks: TeamArena['blocks'] = [];
+  if (variant === 'stars') {
+    bumperAt(b, center.clone(), up, { r: 1.3, color: PAINT.yellow });
+    blocks.push({ x: center.x, z: center.z, r: 1.3 });
+    const cols = [PAINT.pink, PAINT.teal, PAINT.purple, PAINT.orange, PAINT.blue, PAINT.green];
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2 + 0.26;
+      bumperAt(b, new THREE.Vector3(center.x + Math.cos(a) * 10.5, center.y, center.z + Math.sin(a) * 10.5), up, { r: 0.9, color: cols[k] });
+      blocks.push({ x: center.x + Math.cos(a) * 10.5, z: center.z + Math.sin(a) * 10.5, r: 0.9 });
+    }
+  }
+  for (const [x, z, c] of variant !== 'square' ? [] : [
     [-9, -9, PAINT.pink],
     [9, -9, PAINT.teal],
     [-9, 9, PAINT.yellow],
@@ -274,7 +306,7 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
     p.add(b.railWood, plank(9.4, 2.0, 0.3, 0.08, 'x'), mat(0, 7.5, -0.18));
     for (const sx of [-4.2, 4.2]) post(p, b, mat(sx, -6, -0.3), 14.6, { w: 0.42 });
     p.toBatch(b, new THREE.Matrix4().makeTranslation(center.x, center.y, center.z - HALF - 4));
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshPhysicalMaterial({ map: signTexture(info.name.toUpperCase(), ROUND ? 'Team round · Hop the bar, paint the floor' : 'Team round · Paint the floor', PAINT.pink, 9 / 1.7), roughness: 0.4, clearcoat: 0.8 }));
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshPhysicalMaterial({ map: signTexture(info.name.toUpperCase(), variant === 'spots' ? 'Team round · Hog the spots' : variant === 'stars' ? 'Team round · Grab the stars' : ROUND ? 'Team round · Hop the bar, paint the floor' : 'Team round · Paint the floor', PAINT.pink, 9 / 1.7), roughness: 0.4, clearcoat: 0.8 }));
     sign.position.set(center.x, center.y + 7.5, center.z - HALF - 4);
     b.group.add(sign);
   }
@@ -288,8 +320,17 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
     if (i < 0 || j < 0 || i >= N || j >= N || !cvalid[j * N + i]) return -1;
     return j * N + i;
   };
+  // (Spot Hogs: nine places a spot can be, well apart, clear of the walls and the bases)
+  const sites: THREE.Vector3[] = [];
+  for (const [x, z] of [[0, 0], [-11.5, 0], [11.5, 0], [0, -11.5], [0, 11.5], [-9.5, -9.5], [9.5, -9.5], [-9.5, 9.5], [9.5, 9.5]]) sites.push(new THREE.Vector3(center.x + x, center.y, center.z + z));
+  const points = [0, 0, 0];
   const arena: TeamArena = {
     center,
+    game: GAME,
+    points,
+    sites,
+    zones: [],
+    blocks,
     half: HALF,
     n: N,
     cell: CELL,
@@ -352,13 +393,13 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
     },
     total,
     round: ROUND,
-    bar: ROUND ? { angle: barAngle, omega: (t: number) => 0.55 + 0.005 * Math.max(0, t - state.go) } : undefined,
+    bar: variant === 'ring' ? { angle: barAngle, omega: (t: number) => 0.55 + 0.005 * Math.max(0, t - state.go) } : undefined,
     nearWall(x, z, m) {
       const cx = x - center.x, cz = z - center.z;
       return ROUND ? Math.hypot(cx, cz) > HALF - m : Math.abs(cx) > HALF - m || Math.abs(cz) > HALF - m;
     },
     counts() {
-      return tcount.slice(0, teams);
+      return (GAME === 'paint' ? tcount : points).slice(0, teams);
     },
     base(team) {
       const a = (team / teams) * Math.PI * 2 + Math.PI / 2;
