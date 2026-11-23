@@ -14,6 +14,8 @@ export interface BodyState extends Body {
   pitch: number;
   flags: number;
   w: number;
+  /** for someone on another machine: when they were here, on the host's clock */
+  t?: number;
 }
 
 /** The match itself: runs in the host's browser (or alone, for solo play). */
@@ -28,7 +30,11 @@ export class Match {
   holdZone = 0;
   holdOwner = -1;
   holdProg = 0;
+  /** how the computer's players are shooting, for the tools that tune them: trigger pulls, pulls that hit someone, hits to
+   *  the head, and how long each took from first seeing someone to the first round at them */
+  stats = { shots: 0, hits: 0, heads: 0, react: [] as number[] };
   private respawn = new Map<number, number>();
+  private clkT = 0;
   /** where each side starts this round: picked fresh every round, a long way apart */
   private anchors: { x: number; y: number; z: number }[] = [];
   /** on a map with sides: the teams have swapped ends this round */
@@ -588,23 +594,55 @@ export class Match {
     return 15;
   }
 
+  /** someone who was playing has gone: a bot carries on in their boots, where they stood and as hurt as they were, so the
+   *  round they left is still the round the others are playing */
   removeHuman(id: string) {
-    const i = this.players.findIndex((p) => p.id === id);
-    if (i >= 0) {
-      this.players.splice(i, 1);
-      this.fillBots();
-      this.emit({ t: 'roster', players: this.players });
-    }
+    const p = this.players.find((q) => q.id === id && !q.bot);
+    if (!p) return;
+    const b = this.bodies[p.slot];
+    p.bot = true;
+    p.id = `bot-${p.slot}`;
+    p.name = botName(p.slot + this.cfg.seed + 5);
+    p.ping = 0;
+    p.kits = undefined;
+    const bot = new Bot(this, p.slot, Math.min(1, Math.max(0, this.cfg.skill + (Math.random() - 0.5) * 0.2)));
+    this.bots.set(p.slot, bot);
+    b.t = undefined;
+    if (p.alive) {
+      bot.reset(b.x, Math.max(b.y, this.world.floorAt(b.x, b.y + 0.5, b.z, 0.2)), b.z, b.yaw, p.primary);
+      if (p.down) bot.wentDown();
+    } else if (!oneLife(this.cfg.mode) && !this.respawn.has(p.slot) && this.phase !== 'over') this.respawn.set(p.slot, performance.now() / 1000 + 3);
+    this.emit({ t: 'roster', players: this.players });
   }
 
-  /** a person takes a bot's place */
-  dropBot(team: number) {
-    const i = this.players.findIndex((p) => p.bot && (p.team === team || p.team === 2));
-    if (i < 0) return;
-    const p = this.players[i];
-    this.players.splice(i, 1);
+  /** a person arrives in the middle of it and takes a bot's place: the bot's slot, its score, and where it stands if it is
+   *  standing. Null when there is no bot left to stand in for on either side */
+  seat(id: string, name: string, primary: WeaponId, team: number): PlayerInfo | null {
+    const ffa = solo(this.cfg.mode);
+    const pool = this.players.filter((q) => q.bot);
+    const of = (t: number) => pool.filter((q) => ffa || q.team === t).sort((a, b2) => Number(isUp(b2)) - Number(isUp(a)));
+    const p = of(team)[0] ?? of(1 - team)[0];
+    if (!p) return null;
     this.bots.delete(p.slot);
-    this.respawn.delete(p.slot);
+    p.bot = false;
+    p.id = id;
+    p.name = name;
+    p.kits = undefined;
+    if (this.cfg.mode !== 'gun' && !p.alive) p.primary = primary;
+    this.tactics.forget(p.slot);
+    return p;
+  }
+
+  /** the one who has just sat down is told where they are: on their feet where the bot was, or waiting for the next round */
+  joinNow(p: PlayerInfo) {
+    if (!this.players.includes(p) || p.bot || this.phase === 'over') return;
+    const b = this.bodies[p.slot];
+    if (p.alive) {
+      this.emit({ t: 'spawn', s: p.slot, p: [b.x, b.y, b.z], yaw: b.yaw, primary: p.primary });
+      if (p.hp < 100) this.emit({ t: 'hp', s: p.slot, hp: p.hp, bleed: this.bleed.get(p.slot) ?? 0 });
+      const d = this.downT.get(p.slot);
+      if (p.down && d) this.emit({ t: 'down', s: p.slot, by: d.by, zone: d.zone, w: d.w, dir: [0, 0, 1], secs: Math.max(1, d.t) });
+    } else if (!oneLife(this.cfg.mode) && !this.respawn.has(p.slot)) this.spawn(p, false, this.phase === 'live');
   }
 
   /** everything someone who has just walked in needs to be told */
@@ -619,9 +657,6 @@ export class Match {
     this.emit({ t: 'secure', prog: this.secureProg, n: this.secureN });
   }
 
-  joinNow(p: PlayerInfo) {
-    if (this.players.includes(p) && !p.alive && this.phase !== 'over') this.spawn(p, false, this.phase === 'live');
-  }
 
   /** bots make up the numbers: `cfg.bots` per side beyond the humans */
   fillBots() {
@@ -702,6 +737,12 @@ export class Match {
     if (this.map.flares) flaresAt(this.elapsed, this.map.flares, this.flareNow);
     const live = this.phase === 'live';
     this.clock -= dt;
+    // every machine counts the round down by itself: this keeps them all on the same second
+    this.clkT += dt;
+    if (this.clkT >= 2) {
+      this.clkT = 0;
+      this.emit({ t: 'clk', clock: this.clock, pings: this.players.filter((p) => !p.bot).map((p) => [p.slot, p.ping]) });
+    }
     if (this.phase === 'warmup' && this.clock <= 0 && this.cfg.mode === 'siege') {
       this.phase = 'prep';
       this.clock = SIEGE.prep;
@@ -1343,6 +1384,10 @@ export class Match {
     }
     this.emit({ t: 'shot', s: b.slot, w, o: [ox, oy, oz], e: out.e, surf: out.surf });
     this.noise({ x: ox, y: oy, z: oz }, spec.loud);
+    this.stats.shots++;
+    const foeHits = out.hits.filter((h) => this.foes(b.slot, h.slot));
+    if (foeHits.length) this.stats.hits++;
+    if (foeHits.some((h) => h.zone === 0)) this.stats.heads++;
     for (const h of out.hits) {
       if (!this.foes(b.slot, h.slot)) continue;
       // bots hit a little softer than people in the body: they don't flinch, tire or miss on purpose. A round in the

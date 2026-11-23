@@ -87,6 +87,14 @@ export class Tactics {
     return this.orders.get(slot) ?? null;
   }
 
+  /** a person has taken this one's place: nothing it was told applies to them */
+  forget(slot: number) {
+    this.orders.delete(slot);
+    this.role.delete(slot);
+    this.spot.delete(slot);
+    this.buildList.delete(slot);
+  }
+
   newRound() {
     this.orders.clear();
     this.peekPts = null;

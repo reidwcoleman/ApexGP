@@ -109,6 +109,8 @@ export const TEAM_NAME = ['Unit', 'Crew'];
 export const F = { crouch: 1, ads: 2, sprint: 4, light: 8, reload: 16, alive: 32, moving: 64, cook: 128, down: 256 };
 
 export const STRIDE = 10;
+/** people in one room (the rest are bots): everyone's browser talks to the host's, and the host's has to keep up */
+export const MAX_PEOPLE = 10;
 
 /** where star shells are fired over a field: its x and z span in game axes, and how high they go */
 export interface FlareSpec { x0: number; x1: number; z0: number; z1: number; h: number }
@@ -219,6 +221,8 @@ export type Ev =
   | { t: 'hit'; s: number; by: number; dmg: number; hp: number; zone: number; dir: [number, number, number]; bleed?: number }
   /** health changed without a new wound: the bleed, a bandage */
   | { t: 'hp'; s: number; hp: number; bleed: number; healed?: boolean }
+  | { t: 'clk'; clock: number; pings: number[][] }
+  | { t: 'lamps'; out: number[] }
   | { t: 'die'; s: number; by: number; zone: number; w: number; dir: [number, number, number]; dist: number }
   | { t: 'door'; i: number; open: number; dir: number; blast?: number }
   | { t: 'pane'; i: number; at?: [number, number, number] }
@@ -243,6 +247,8 @@ export type Phase = 'warmup' | 'prep' | 'live' | 'between' | 'over';
 export type Req =
   | { t: 'hello'; name: string; primary: WeaponId; team: number }
   | { t: 'me'; primary?: WeaponId; team?: number; name?: string; ready?: boolean }
+  /** arriving in the middle of a match: the location has loaded, put me in */
+  | { t: 'ready' }
   | { t: 'shot'; w: number; o: [number, number, number]; e: number[]; surf: string[] }
   | { t: 'hit'; to: number; dmg: number; zone: number; w: number; dir: [number, number, number]; dist: number }
   | { t: 'door'; i: number; from: [number, number, number] }

@@ -42,6 +42,10 @@ for (let r = 0; r < +rounds; r++) {
     window.__cnt = ev;
     const st = { stalls: [], built: 0, maxBars: 0, firstContact: -1, breachAt: -1, enterAt: -1, charges: 0, kicks: 0, live: 0, prepKick: 0 };
     let guard = 0, seenLive = false, barsBefore = 0;
+    // how they carry themselves: what a person watching one would notice
+    const hb = window.__hb ??= { n: 0, turn: 0, flat: 0, snap: 0, wall: 0, walk: 0, dist: 0, wig: 0, still: 0, back: 0, prev: new Map() };
+    const WORK = new Set(['build', 'breach', 'sheet', 'trip', 'wbreach', 'revive', 'scope']);
+    const ad = (a, b2) => Math.atan2(Math.sin(a - b2), Math.cos(a - b2));
     const alive = (t) => m.players.filter((q) => q.alive && q.team === t).length;
     for (;;) {
       if (++guard > 30 * 400) break;
@@ -62,6 +66,40 @@ for (let r = 0; r < +rounds; r++) {
         if (st.firstContact < 0 && (A.some((q) => q.bot && !q.alive) || D.some((q) => q.bot && !q.alive))) st.firstContact = st.live;
         if (st.enterAt < 0 && m.secureN[0] > 0) st.enterAt = st.live;
         if (st.breachAt < 0 && m.obj.doors.some((d) => m.chargeOn(d))) st.breachAt = st.live;
+      }
+      if (m.phase === 'live') for (const q of m.players) {
+        if (!q.bot || !q.alive || q.down) { hb.prev.delete(q.slot); continue; }
+        const bt = m.bots.get(q.slot), mm = bt.m;
+        const pv = hb.prev.get(q.slot);
+        const sp = Math.hypot(mm.vx, mm.vz), head = Math.atan2(-mm.vx, -mm.vz);
+        if (pv) {
+          const rate = Math.abs(ad(bt.yaw, pv.yaw)) / dt;
+          hb.n++;
+          if (rate > 0.8) {
+            hb.turn++;
+            // turning at exactly the rate it was turning at a moment ago: a machine's turn
+            if (Math.abs(rate - pv.rate) < 0.02 * rate) hb.flat++;
+          }
+          if (rate > 14) hb.snap++;
+          const work = WORK.has(m.tactics.orderFor(q.slot)?.kind);
+          if (!work && (hb.n & 3) === 0) {
+            const cp = Math.cos(bt.pitch), ey = mm.y + 1.5;
+            const d = m.world.ray(mm.x, ey, mm.z, -Math.sin(bt.yaw) * cp, Math.sin(bt.pitch), -Math.cos(bt.yaw) * cp, 3, true);
+            hb.look = (hb.look ?? 0) + 1;
+            if (d && d.t < 1.1) hb.wall++;
+          }
+          if (sp > 1) {
+            hb.walk++;
+            // on its way somewhere with nobody in the sights: how much the line it walks wanders
+            if (bt.target < 0) {
+              hb.dist += sp * dt;
+              if (pv.sp > 1) hb.wig += Math.abs(ad(head, pv.head));
+            }
+            if (Math.abs(ad(head, bt.yaw)) > 2.2 && bt.target < 0) hb.back++;
+          } else if (sp < 0.15 && !work && m.tactics.orderFor(q.slot)?.kind !== 'hold') hb.still++;
+          pv.rate = rate;
+        }
+        hb.prev.set(q.slot, { yaw: bt.yaw, rate: pv?.rate ?? 0, sp, head });
       }
       // anyone who means to walk somewhere and has not moved for 15 s
       if (m.phase === 'live') for (const q of m.players) {
@@ -89,5 +127,7 @@ for (const r of res) why[r.why] = (why[r.why] ?? 0) + 1;
 const sum = (k) => res.reduce((t, r) => t + r.ev[k], 0);
 console.log(`totals: downs ${sum('downs')} revives ${sum('ups')} wall holes ${sum('holes')} steel sheets ${sum('sheets')} wires ${sum('wires')} (went off ${sum('bangs')}) cameras shot ${sum('cams')} scope spots ${sum('spots')}`);
 console.log(`attackers won ${aw} of ${res.length}; mean round ${(res.reduce((s, r) => s + r.live, 0) / res.length).toFixed(0)}s; how: ${JSON.stringify(why)}; rounds with a charge ${res.filter((r) => r.breachAt >= 0).length}, with attackers in the room ${res.filter((r) => r.enterAt >= 0).length}`);
+const hb = await p.evaluate(() => { const h = window.__hb, s = __lf.g.match.stats, r = [...s.react].sort((a, c) => a - c); return h ? { flat: h.flat / (h.turn || 1), snap: h.snap / h.n, wall: h.wall / (h.look || 1), wig: h.wig / (h.dist || 1), still: h.still / h.n, back: h.back / (h.walk || 1), acc: s.hits / (s.shots || 1), hs: s.heads / (s.hits || 1), shots: s.shots, react: r.length ? [r[Math.floor(r.length * 0.1)], r[Math.floor(r.length / 2)], r[Math.floor(r.length * 0.9)]] : [] } : null; });
+if (hb) console.log(`how they move: machine-steady turns ${(hb.flat * 100).toFixed(0)}% of turning, snaps ${(hb.snap * 100).toFixed(2)}%, nose to a wall ${(hb.wall * 100).toFixed(1)}% of the time, path wiggle ${(hb.wig * 57.3).toFixed(0)} deg a metre, idle with no post ${(hb.still * 100).toFixed(0)}%, walking backwards ${(hb.back * 100).toFixed(1)}%\nhow they shoot: ${hb.shots} trigger pulls, ${(hb.acc * 100).toFixed(0)}% hit, ${(hb.hs * 100).toFixed(0)}% of hits to the head, first shot after ${hb.react.map((x) => x.toFixed(2)).join(' / ')} s (quick / usual / slow)`);
 console.log('page errors:', errs);
 await b.close();

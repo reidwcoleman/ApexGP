@@ -9,6 +9,7 @@ async function boot() {
   g.hud.applyPrefs();
   const q = new URLSearchParams(location.search);
   if (q.has('dev')) g.autoInput = true;
+  if (q.has('dev') && q.has('nodraw')) g.noDraw = true;
   // the menu is up at once; the location loads behind it, and starting waits for it if it has to
   g.hud.ready();
   document.getElementById('loading')?.classList.add('done');

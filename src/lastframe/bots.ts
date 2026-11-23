@@ -24,6 +24,16 @@ export const botName = (i: number) => NAMES[i % NAMES.length];
  *             them by another way, as its nerve has it
  * What it knows about the other side it shares: a sighting goes into its side's picture (Match.intel), and that is what
  * the others walk toward. Nobody knows where anyone is who hasn't been seen or heard.
+ *
+ * Under all of that it has a body like a person's, and the limits of one:
+ *   hands     the sights are swung, not set: they speed up, slow down and settle (a spring with a little overshoot for
+ *             the clumsy ones), wander about the point they are held on, and get kicked by every round
+ *   eyes      it aims at where it believes someone is, which is where they were a moment ago and partly where they are
+ *             heading; walking, it looks as far down its own way as it can see, glances into the openings it passes,
+ *             and holds its sights on the corner someone it knows about would come round
+ *   legs      it cuts corners instead of walking the squares of the map, plants its feet to shoot at range, keeps moving
+ *             close in, and when there is a corner to hand it fights from the corner: out to shoot, back in between
+ * Each one is its own mix of steady hands, quick eyes, care and nerve, set around the level the match was given.
  */
 export class Bot {
   /** the map is dark: lights stay on */
@@ -53,8 +63,6 @@ export class Bot {
   private seenPos: Vec = { x: 0, y: 0, z: 0 };
   private react = 0;
   private err = 0;
-  private errYaw = 0;
-  private errPitch = 0;
   private headShot = false;
   private strafe = 0;
   private strafeT = 0;
@@ -111,8 +119,54 @@ export class Bot {
   /** the camera it has decided to shoot out (the lamp code does the shooting) */
   private lampCam = -1;
   private camAt = 3 + Math.random() * 5;
+  /** when the one now in its sights was first seen (-1: already shot at) */
+  private acqT = -1;
 
-  constructor(private match: Match, readonly slot: number, readonly skill: number) {}
+  // ---- the person in it
+  /** how steady the hands are, how quick the eyes, how carefully it checks what it walks past: each its own, 0 to 1 */
+  private readonly aimK: number;
+  private readonly reflex: number;
+  private readonly care = Math.random();
+  /** how fast the sights are turning */
+  private yawV = 0;
+  private pitchV = 0;
+  /** the hand's wander about the point it is held on (about one in size; `err` degrees scales it) */
+  private nYaw = 0;
+  private nPitch = 0;
+  /** where it believes the one in its sights is, and how fast they are going: a moment behind the truth */
+  private bx = 0;
+  private by = 0;
+  private bz = 0;
+  private bvx = 0;
+  private bvz = 0;
+  private believes = false;
+  /** with nobody in the sights: the point the eyes are on (null: the way `gazeYaw` says), and until when a glance lasts */
+  private lookPt: Vec | null = null;
+  private gazeYaw = 0;
+  private gazeT = 0;
+  private glanceAt = 1 + Math.random() * 3;
+  private lastGlance = 0;
+  /** where someone it knows about, and cannot see, would come into view: the corner to hold the sights on */
+  private threat: Vec | null = null;
+  private threatAt = 0;
+  /** the furthest point of its way it can walk straight to, and when that was last worked out */
+  private steerAt = 0;
+  /** not running before then: each one settles into its own pace now and then */
+  private runAt = Math.random() * 6;
+  /** fighting from a corner: the spot out of their sight, the spot it shoots from, which it is at, and until when */
+  private peek: { ix: number; iz: number; ox: number; oz: number; out: boolean; until: number } | null = null;
+  private peekAt = 0;
+  private leanAt = 0;
+  /** how long each of the other side has been in the corner of its eye without being noticed yet */
+  private notice = new Map<number, number>();
+  /** running: between places, with nobody it knows of near */
+  sprint = false;
+
+  constructor(private match: Match, readonly slot: number, readonly skill: number) {
+    const own = () => clamp(skill + (Math.random() - 0.5) * 0.3, 0, 1);
+    this.aimK = own();
+    this.reflex = own();
+  }
 
   /** a new gun in the hands, loaded */
   rearm(w: WeaponId) {
@@ -144,6 +198,17 @@ export class Bot {
     this.workT = 0;
     this.kickT = 0;
     this.lastOrder = null;
+    this.yawV = 0;
+    this.pitchV = 0;
+    this.believes = false;
+    this.lookPt = null;
+    this.gazeYaw = yaw;
+    this.gazeT = 0;
+    this.threat = null;
+    this.peek = null;
+    this.acqT = -1;
+    this.notice.clear();
+    this.sprint = false;
     // the side breaking in carries more to throw through a doorway
     this.nades = { frag: 1, flash: this.match.cfg.mode === 'siege' && !this.match.isDefender(this.slot) ? 2 : 1 };
     this.hurry = false;
@@ -160,8 +225,8 @@ export class Bot {
     this.blindT = this.t + 1.2 + 3 * k;
     this.err = 9;
     this.react = 0.4 + 0.5 * k;
-    this.errYaw = (Math.random() - 0.5) * 2;
-    this.errPitch = (Math.random() - 0.5) * 2;
+    this.nYaw = gauss() * 1.5;
+    this.nPitch = gauss() * 1.5;
     if (k > 0.4) this.match.say(this.slot, pick(["Can't see!", "I'm blind!", 'Flashed!']), 0.7);
   }
 
@@ -177,12 +242,17 @@ export class Bot {
   }
 
   hurt(from: Vec) {
-    this.coverT = this.t + 1.6 + Math.random();
+    // fighting from a corner: back behind it, and out again when the nerve is back
+    if (this.peek && this.target >= 0) {
+      this.peek.out = false;
+      this.peek.until = this.t + 0.7 + Math.random() * (1.6 - this.nerve);
+    } else this.coverT = this.t + 1.6 + Math.random();
     // a round in the body throws the aim off: whoever lands the first one has the fight
     this.err = Math.min(8, this.err + 2.4);
     this.react = Math.max(this.react, 0.14);
-    this.errYaw = (Math.random() - 0.5) * 2;
-    this.errPitch = (Math.random() - 0.5) * 2;
+    // and jolts the hands
+    this.yawV += (Math.random() - 0.5) * 2.4;
+    this.pitchV += (Math.random() - 0.5) * 1.6;
     const hp = this.match.players.find((p) => p.slot === this.slot)?.hp ?? 100;
     // badly hit, all but the boldest break off and go to ground somewhere out of sight
     if (hp < 40 && this.nerve < 0.72) this.coverT = this.t + 3.5 + Math.random() * 2.5;
@@ -190,8 +260,11 @@ export class Bot {
     if (this.target < 0) {
       this.heard = { x: from.x, y: from.y, z: from.z };
       this.heardAt = this.t;
-      // a bullet from nowhere: turn and face it
-      this.yaw = Math.atan2(-(from.x - this.m.x), -(from.z - this.m.z)) + (Math.random() - 0.5) * 0.7;
+      // a bullet from nowhere: the head comes round to it, as fast as a head can
+      this.lookPt = null;
+      this.gazeYaw = Math.atan2(-(from.x - this.m.x), -(from.z - this.m.z)) + (Math.random() - 0.5) * 0.7;
+      this.gazeT = this.t + 0.9;
+      this.watchT = 0;
       this.goalAt = 0;
     }
   }
@@ -274,11 +347,13 @@ export class Bot {
       this.think = 0.1;
       this.sense();
       this.decide();
+      this.eyes();
     }
     // ---- walking
     let wx = 0, wz = 0, speed = 0;
     if (live) {
       const engaged = this.target >= 0 && this.t - this.seenAt < 0.4;
+      const corner = this.peek && this.target >= 0 && this.t - this.seenAt < 3 && this.t >= this.coverT;
       if (this.t < this.backT) {
         // off the charge, backwards, quickly
         wx = this.backX;
@@ -286,11 +361,22 @@ export class Bot {
         speed = 3.6;
       } else if (this.lamp && !engaged) {
         // stood still to take the shot
+      } else if (corner) {
+        // working a corner: a step out to shoot, a step back in between
+        const k = this.peek!;
+        const dx = (k.out ? k.ox : k.ix) - m.x, dz = (k.out ? k.oz : k.iz) - m.z, d = Math.hypot(dx, dz);
+        if (d > 0.15) {
+          wx = dx / d;
+          wz = dz / d;
+          speed = Math.min(3.6, 1 + d * 4.5);
+        }
       } else if (this.path.length && this.pi < this.path.length && (!engaged || this.t < this.coverT || this.weapon === 'shotgun')) {
+        this.steer();
         const n = this.path[this.pi];
         const dx = n.x - m.x, dz = n.z - m.z, d = Math.hypot(dx, dz);
         if (d < 0.55 && Math.abs(n.y - m.y) < 1.2) {
           this.pi++;
+          this.steerAt = 0;
           // there: think again now, not when the clock says
           if (this.pi >= this.path.length) this.goalAt = 0;
         } else {
@@ -301,7 +387,11 @@ export class Bot {
             wx = -wz * this.nudgeS * 0.9 - ox * 0.3;
             wz = ox * this.nudgeS * 0.9 - wz * 0.3;
           }
-          speed = engaged ? 2.4 : this.t < this.coverT || this.hurry ? 5 : this.careful ? 2.05 : n.indoors ? 2.5 + this.skill * 0.6 : 4.2;
+          // a long way still to go and nobody it knows of anywhere near: people run that, and walk the last of it
+          const safe = !this.threat && !this.careful && this.target < 0 && this.path.length - this.pi > 9 && this.t - this.heardAt > 5 && this.t >= this.runAt;
+          speed = engaged ? 2.4 : this.t < this.coverT || this.hurry ? 5 : this.careful ? 2.05 : safe ? 4.4 : n.indoors ? 2.5 + this.skill * 0.6 : 4.2;
+          // someone it knows about is round the next corner: the last steps to it are taken slowly, sights first
+          if (!engaged && !this.hurry && this.t >= this.coverT && this.threat && Math.hypot(this.threat.x - m.x, this.threat.z - m.z) < 5.5) speed = Math.min(speed, 1.9);
           M.openDoorsNear(m.x, m.y, m.z, wx, wz);
           // boards across the way: stop at them and deal with them
           const prev = this.path[this.pi - 1];
@@ -313,20 +403,27 @@ export class Bot {
           } else this.kickT = Math.max(0, this.kickT - dt);
         }
       } else if (engaged) {
-        // sidestep while shooting; from a spot it has been given it leans out instead and keeps its feet where they are
+        // in the open with someone in the sights. Close in, people keep moving, side to side; further off they plant
+        // their feet to shoot and shift between bursts. From a spot it has been given it keeps its feet where they are
+        const b = M.bodies[this.target];
+        const close = Math.hypot(b.x - m.x, b.z - m.z) < 9;
         this.strafeT -= dt;
+        const sx = Math.cos(this.yaw), sz = -Math.sin(this.yaw);
         if (this.strafeT <= 0) {
-          this.strafe = Math.random() < 0.3 ? 0 : Math.random() < 0.5 ? -1 : 1;
-          this.strafeT = 0.5 + Math.random() * 1.1;
+          this.strafe = close ? (Math.random() < 0.85 ? (this.strafe > 0 ? -1 : 1) : 0) : Math.random() < 0.5 ? 0 : Math.random() < 0.5 ? -1 : 1;
+          this.strafeT = close ? 0.3 + Math.random() * 0.75 : 0.5 + Math.random() * 1.1;
         }
+        // not into a wall
+        if (this.strafe && M.world.blocked(m.x + sx * this.strafe * 0.7, m.y + 0.3, m.z + sz * this.strafe * 0.7, 0.3, 1.35)) this.strafe = -this.strafe;
         const ord = this.order();
         const rooted = ord?.kind === 'hold' || ord?.kind === 'build';
-        const s = rooted ? this.strafe * 0.35 : this.strafe;
-        wx = Math.cos(this.yaw) * s;
-        wz = -Math.sin(this.yaw) * s;
-        speed = this.crouch ? 0.9 : 2;
+        const s2 = rooted ? this.strafe * 0.35 : this.strafe;
+        wx = sx * s2;
+        wz = sz * s2;
+        speed = this.crouch ? 0.9 : close ? 2.7 : 2;
       }
     }
+    this.sprint = speed > 4.25;
     const a = Math.min(1, dt * 11);
     m.vx += (wx * speed - m.vx) * a;
     m.vz += (wz * speed - m.vz) * a;
@@ -334,7 +431,47 @@ export class Bot {
     move(M.world, m, dt);
     // ---- turning
     if (live) this.aimAndFire(dt, wx, wz, speed);
-    else this.lean += (0 - this.lean) * Math.min(1, dt * 6);
+    else {
+      this.lean += (0 - this.lean) * Math.min(1, dt * 6);
+      this.yawV = this.pitchV = 0;
+    }
+  }
+
+  /** could a body walk straight from where it stands to that point, on the level? */
+  private clearWalk(tx: number, tz: number, y: number) {
+    const W = this.match.world, m = this.m;
+    const dx = tx - m.x, dz = tz - m.z, d = Math.hypot(dx, dz);
+    const n = Math.ceil(d / 0.33);
+    for (let k = 1; k <= n; k++) {
+      const px = m.x + (dx * k) / n, pz = m.z + (dz * k) / n;
+      if (W.blocked(px, y + 0.3, pz, 0.31, 1.35)) return false;
+      if (Math.abs(W.floorAt(px, y + 0.46, pz, 0.22, 0) - y) > 0.2) return false;
+    }
+    return true;
+  }
+
+  /** Its way is a string of points a metre apart, square by square. A person does not walk the squares: they walk at the
+   *  furthest part of the way they can reach in a straight line, and so cut every corner. A few times a second the next
+   *  point to walk at is moved on to the furthest of the next few it could walk straight to (never past boards across
+   *  the way, never off the level it is on: stairs are taken a step at a time) */
+  private steer() {
+    if (this.t < this.steerAt || this.t < this.nudgeT) return;
+    this.steerAt = this.t + 0.12 + Math.random() * 0.06;
+    const M = this.match, m = this.m, P = this.path;
+    const prev = P[this.pi - 1];
+    if (prev && M.barOnStep(prev.i, P[this.pi].i) >= 0) return;
+    let last = this.pi;
+    const far = Math.min(P.length - 1, this.pi + 5);
+    for (let j = this.pi + 1; j <= far; j++) {
+      if (Math.abs(P[j].y - m.y) > 0.25 || M.barOnStep(P[j - 1].i, P[j].i) >= 0) break;
+      last = j;
+    }
+    for (let j = last; j > this.pi; j--) {
+      if (this.clearWalk(P[j].x, P[j].z, m.y)) {
+        this.pi = j;
+        return;
+      }
+    }
   }
 
   /** stopped at a barricade that is in the way */
@@ -363,6 +500,7 @@ export class Bot {
     let best = -1, bd = 1e9;
     const eye = { x: m.x, y: m.y + (this.crouch ? 1.05 : 1.6), z: m.z };
     const team = Math.min(2, M.teamOf(this.slot));
+    const noticed = new Set<number>();
     for (const p of M.players) {
       // nobody is fought before the round is on
       if (this.t < this.blindT || M.phase === 'prep') break;
@@ -377,6 +515,18 @@ export class Bot {
       const head = { x: b.x, y: b.y + (crouch ? 1.1 : 1.6), z: b.z };
       const chest = { x: b.x, y: b.y + (crouch ? 0.7 : 1.15), z: b.z };
       if (!M.world.sees(eye, head) && !M.world.sees(eye, chest)) continue;
+      // In front of the sights someone is seen at once. Out at the edge of what the eyes take in it takes a moment to
+      // notice them, longer the further off they are and the stiller they stand; with the sights up on an angle the edge
+      // is narrower still. The one it is already fighting it does not lose this way
+      if (p.slot !== this.target) {
+        const moves = (b.flags & F.moving) !== 0;
+        const edge = Math.max(0, a - (this.ads ? 0.32 : 0.5));
+        const need = edge <= 0 || d < 3.5 ? 0 : (0.1 + edge * 0.55 + d * 0.006) * (moves ? 0.6 : 1) * (1.35 - this.reflex * 0.7);
+        const had = (this.notice.get(p.slot) ?? 0) + 0.1;
+        this.notice.set(p.slot, had);
+        noticed.add(p.slot);
+        if (had < need) continue;
+      }
       const lit = (b.flags & F.light) !== 0;
       if (Bot.night) {
         // in the dark a figure is a shape at arm's length, unless something lights it: their own light, mine on them,
@@ -394,15 +544,22 @@ export class Bot {
       const known = M.intel[team].get(p.slot);
       if (p.slot !== this.target) this.called = !!known && M.elapsed - known.t < 4 && Math.hypot(known.x - b.x, known.z - b.z) < 3;
       M.intel[team].set(p.slot, { x: b.x, y: b.y, z: b.z, t: M.elapsed });
-      // someone on the floor is no threat: only when nobody is standing
-      const rank = p.down ? d + 60 : d;
+      // someone on the floor is no threat: only when nobody is standing. And the one already in the sights stays in them
+      // unless somebody else is a good deal nearer: people finish what they started
+      const rank = (p.down ? d + 60 : d) - (p.slot === this.target ? Math.min(6, d * 0.35) : 0);
       if (rank < bd) {
         bd = rank;
         best = p.slot;
       }
     }
+    // out of sight, out of mind: what was half noticed fades
+    for (const [k, v] of this.notice) {
+      if (noticed.has(k)) continue;
+      if (v <= 0.2) this.notice.delete(k);
+      else this.notice.set(k, v - 0.2);
+    }
     if (best >= 0) {
-      if (bd >= 60) bd -= 60;
+      bd = Math.hypot(M.bodies[best].x - m.x, M.bodies[best].z - m.z);
       if (best !== this.target) {
         if (this.t - this.calledAt > 2) {
           this.calledAt = this.t;
@@ -413,15 +570,22 @@ export class Bot {
           M.say(this.slot, room ? pick(['Contact in the room!', "They're on the objective!"]) : bd < 7 ? pick(['Contact, close!', 'Right here!', "He's on top of me!"]) : up > 2 ? pick(['Contact, above us!', 'Movement upstairs.']) : up < -2 ? pick(['Contact, below!', "They're under us."])
             : (b.flags & F.light) ? pick(['I see a light.', 'Torch, straight ahead.']) : pick(['Contact!', 'Got eyes on one.', 'Movement, ahead.', 'Contact front!']), 0.8);
         }
-        this.react = 0.66 - this.skill * 0.5 + Math.random() * 0.22 + (bd > 25 ? 0.15 : 0);
+        this.acqT = this.t;
+        // how long before the first round: the eyes' own quickness, longer for someone far off, and longer the further
+        // from where it was looking they turned up (the sights then have to be swung there as well)
+        const off = Math.abs(angleDiff(Math.atan2(-(M.bodies[best].x - m.x), -(M.bodies[best].z - m.z)), this.yaw));
+        this.react = 0.17 + (1 - this.reflex) * 0.34 + Math.random() * 0.2 + (bd > 25 ? 0.12 : 0) + Math.min(0.22, off * 0.16);
+        this.believes = false;
+        this.peek = null;
+        this.peekAt = this.t + 0.3;
         // already watching that way with the sights up: the shot comes sooner
         const ord = this.order();
         if (ord?.kind === 'hold' && M.inObj(m.x, m.y, m.z) && Math.abs(angleDiff(Math.atan2(-(M.bodies[best].x - m.x), -(M.bodies[best].z - m.z)), this.yaw)) < 0.35) this.react *= 0.56;
         // somebody already said where that one was: the sights were halfway there
         if (this.called) this.react *= 0.78;
         this.err = (5.5 - this.skill * 4.2) * (0.7 + Math.random() * 0.6);
-        this.errYaw = (Math.random() - 0.5) * 2;
-        this.errPitch = (Math.random() - 0.5) * 2;
+        this.nYaw = gauss();
+        this.nPitch = gauss();
         this.headShot = Math.random() < 0.05 + this.skill * 0.2;
         this.burst = 0;
         // some of them will shoot the wall you went behind, the way people do
@@ -434,6 +598,7 @@ export class Bot {
       this.crouch = bd > 7 && this.weapon !== 'shotgun' ? (this.crouch || Math.random() < 0.05) : this.order()?.kind === 'hold' ? this.crouch : false;
     } else if (this.target >= 0 && this.t - this.seenAt > 3.5) {
       this.target = -1;
+      this.peek = null;
       this.goalAt = 0;
       if (this.order()?.kind !== 'hold') this.crouch = false;
     }
@@ -592,6 +757,8 @@ export class Bot {
       const kind: NadeKind = this.nades.flash > 0 && (Math.random() < 0.55 || this.nades.frag <= 0) ? 'flash' : 'frag';
       if (d > 6 && d < 20 && this.nades[kind] > 0 && Math.random() < 0.2 + this.skill * 0.45 && M.botNade(this, kind, this.seenPos)) this.nades[kind]--;
     }
+    this.workCorner(lost);
+    if (this.peek && lost < 3) return true;       // fighting from a corner: the walking code steps out and in
     if (lost <= 0.5) return true;       // in its sights: the walking code sidesteps
     // lost them. Whoever has a place to keep, keeps it, sights on where they went
     const rooted = ord && ord.kind !== 'go' && ord.kind !== 'hunt';
@@ -607,6 +774,62 @@ export class Bot {
     this.crouch = true;
     this.stand(0.5);
     return true;
+  }
+
+  /** In a fight at any distance, a person with a corner to hand uses it: out to shoot, back behind it to change magazine,
+   *  when hit, and between bursts. A corner is a spot a step or two away that the one in its sights cannot see. */
+  private workCorner(lost: number) {
+    const M = this.match, m = this.m;
+    const b = M.bodies[this.target];
+    const dT = Math.hypot(b.x - m.x, b.z - m.z);
+    if (dT < 5.5 || this.weapon === 'shotgun' || this.t < this.coverT) {
+      this.peek = null;
+      return;
+    }
+    const head = { x: b.x, y: b.y + 1.5, z: b.z }, chest = { x: b.x, y: b.y + 1, z: b.z };
+    const hid = (x: number, y: number, z: number) => !M.world.sees({ x, y: y + 1.5, z }, head) && !M.world.sees({ x, y: y + 0.95, z }, chest);
+    if (!this.peek && lost < 0.3 && this.t > this.peekAt) {
+      this.peekAt = this.t + 0.8;
+      const here = M.nav.nearest(m.x, m.y, m.z);
+      if (!here) return;
+      // the squares within two steps
+      const near = new Set<number>([here.i]);
+      for (const k of here.next) {
+        near.add(k);
+        for (const k2 of M.nav.nodes[k].next) near.add(k2);
+      }
+      let best: Node | null = null, bd = 1e9;
+      for (const k of near) {
+        const n = M.nav.nodes[k];
+        const d = Math.hypot(n.x - m.x, n.z - m.z);
+        if (d < 0.55 || d > 2.4 || Math.abs(n.y - m.y) > 0.25 || d >= bd) continue;
+        if (!hid(n.x, n.y, n.z) || !this.clearWalk(n.x, n.z, m.y)) continue;
+        // someone told to hold a room does not leave it for a corner
+        if (M.cfg.mode === 'siege' && M.inObj(m.x, m.y, m.z) && !M.inObj(n.x, n.y, n.z)) continue;
+        bd = d;
+        best = n;
+      }
+      if (best) this.peek = { ix: best.x, iz: best.z, ox: m.x, oz: m.z, out: true, until: this.t + 0.7 + Math.random() * 1.3 };
+      return;
+    }
+    const k = this.peek;
+    if (!k) return;
+    // they have moved to where the corner is no corner: find another
+    if (!k.out && lost > 0.6 && Math.hypot(k.ix - m.x, k.iz - m.z) < 0.4 && !hid(m.x, m.y, m.z)) {
+      this.peek = null;
+      return;
+    }
+    const empty = this.reload > 0 || this.ammo <= 0;
+    if (k.out && (this.t > k.until || empty)) {
+      k.out = false;
+      // behind it for as long as the magazine takes, or a breath: the bold are out again sooner
+      k.until = this.t + Math.max(this.reload + 0.1, 0.4 + Math.random() * (1.5 - this.nerve));
+    } else if (!k.out && this.t > k.until && !empty) {
+      k.out = true;
+      k.until = this.t + 0.9 + Math.random() * 1.5;
+      // coming out again it knows where to look: quicker than the first time
+      this.react = Math.min(this.react, 0.05 + Math.random() * 0.12);
+    }
   }
 
   /** doing what the commander said */
@@ -626,13 +849,8 @@ export class Bot {
         }
         this.stand(0.4);
         this.crouch = !!ord.crouch;
-        // eyes on what it was told to watch, with a glance to either side now and then; a noise takes the glance
-        if (this.t - this.heardAt < 2.5) face(this.heard.x, this.heard.z, 0.6);
-        else if (this.t > this.watchT) {
-          const base = Math.atan2(-(ord.look.x - m.x), -(ord.look.z - m.z));
-          this.watch = base + (Math.random() < 0.7 ? 0 : (Math.random() - 0.5) * 0.9);
-          this.watchT = this.t + 1.2 + Math.random() * 2.2;
-        }
+        // what it watches from there is the eyes' business (`eyes`): the way it was told to, the corner someone it knows
+        // about would come round, a noise
         return;
       }
       case 'go': {
@@ -898,61 +1116,271 @@ export class Bot {
     this.walkTo(goal, wander, soon);
   }
 
+  /** someone its side knows about and it cannot see: the point where they would come into its view (the last stretch it
+   *  can see of the way from them to it), or the place itself if that is in plain sight */
+  private findThreat(eye: Vec): Vec | null {
+    const M = this.match, m = this.m;
+    const team = Math.min(2, M.teamOf(this.slot));
+    let best: { x: number; y: number; z: number; t: number } | null = null, bs = -1e9;
+    for (const [slot, k] of M.intel[team]) {
+      const age = M.elapsed - k.t;
+      if (age > 8 || !M.foes(this.slot, slot)) continue;
+      if (!M.players.find((q) => q.slot === slot)?.alive) continue;
+      const d = Math.hypot(k.x - m.x, k.z - m.z, (k.y - m.y) * 2);
+      if (d > 30) continue;
+      const sc = -age * 2.5 - d;
+      if (sc > bs) {
+        bs = sc;
+        best = k;
+      }
+    }
+    if (!best) return null;
+    const at = { x: best.x, y: best.y + 1.45, z: best.z };
+    if (M.world.sees(eye, at)) return at;
+    const a = M.nav.nearest(m.x, m.y, m.z), b = M.nav.nearest(best.x, best.y, best.z);
+    if (!a || !b) return null;
+    const way = M.nav.path(a, b);
+    let pt: Vec | null = null;
+    for (let j = 1; j < way.length && j < 40; j++) {
+      const q = { x: way[j].x, y: way[j].y + 1.45, z: way[j].z };
+      if (!M.world.sees(eye, q)) break;
+      pt = q;
+    }
+    return pt && Math.hypot(pt.x - m.x, pt.z - m.z) > 1.3 ? pt : null;
+  }
+
+  /** a direction, among those offered, that it can see a good way along and did not look along last */
+  private openWay(eye: Vec, base: number, offs: number[], min = 4.5): number | null {
+    const W = this.match.world;
+    let best: number | null = null, bs = 0;
+    for (const off of offs) {
+      const yaw = base + off;
+      if (Math.abs(angleDiff(yaw, this.lastGlance)) < 0.5) continue;
+      const h = W.ray(eye.x, eye.y, eye.z, -Math.sin(yaw), 0, -Math.cos(yaw), 14);
+      const open = h ? h.t : 14;
+      const sc = open * (0.6 + Math.random() * 0.8);
+      if (open > min && sc > bs) {
+        bs = sc;
+        best = yaw;
+      }
+    }
+    return best;
+  }
+
+  /** With nobody in its sights: what the eyes are doing. Decided ten times a second; the hands follow every frame. */
+  private eyes() {
+    const M = this.match, m = this.m;
+    if (this.target >= 0 || this.lamp) return;
+    const eye = { x: m.x, y: m.y + (this.crouch ? 1.05 : 1.5), z: m.z };
+    const sp = Math.hypot(m.vx, m.vz);
+    const moving = this.path.length > 0 && this.pi < this.path.length && sp > 0.4;
+    if (this.t >= this.threatAt) {
+      this.threatAt = this.t + 0.5 + Math.random() * 0.4;
+      this.threat = M.phase === 'live' ? this.findThreat(eye) : null;
+    }
+    // a glance lasts as long as it lasts
+    if (this.t < this.gazeT) return;
+    const glance = (yaw: number, hold: number) => {
+      this.lookPt = null;
+      this.gazeYaw = yaw;
+      this.gazeT = this.t + hold;
+      this.lastGlance = yaw;
+    };
+    if (moving) {
+      const head = Math.atan2(-m.vx, -m.vz);
+      // into the openings it walks past, as people do: the more careful, the more often
+      if (this.t > this.glanceAt && !this.hurry && this.t >= this.coverT) {
+        this.glanceAt = this.t + 1.1 + (1 - this.care) * 2.4 + Math.random() * 1.6;
+        const yaw = this.openWay(eye, head, [-1.57, 1.57, -0.95, 0.95, -2.3, 2.3]);
+        if (yaw !== null) return glance(yaw, 0.26 + Math.random() * 0.3);
+      }
+      // the corner someone would come round, if it is more or less ahead
+      if (this.threat && Math.abs(angleDiff(Math.atan2(-(this.threat.x - m.x), -(this.threat.z - m.z)), head)) < 1.35) {
+        this.lookPt = this.threat;
+        return;
+      }
+      // otherwise as far down its own way as it can see: the eyes are round the corner before the feet are
+      const far = Math.min(this.path.length - 1, this.pi + 9);
+      for (let j = far; j >= this.pi; j--) {
+        const n = this.path[j];
+        if (Math.hypot(n.x - m.x, n.z - m.z) < 1.5) break;
+        const q = { x: n.x, y: n.y + 1.45, z: n.z };
+        if (M.world.sees(eye, q)) {
+          this.lookPt = q;
+          return;
+        }
+      }
+      this.lookPt = null;
+      this.gazeYaw = head;
+      return;
+    }
+    // ---- standing
+    // facing what it is working on, or what it was told to
+    if (this.t < this.watchT) {
+      this.lookPt = null;
+      this.gazeYaw = this.watch;
+      return;
+    }
+    if (this.t - this.heardAt < 2.5) {
+      this.lookPt = { x: this.heard.x, y: this.heard.y + 1.3, z: this.heard.z };
+      return;
+    }
+    const ord = this.order();
+    const post = ord?.kind === 'hold' ? ord.look : null;
+    const base = this.threat ?? (post ? { x: post.x, y: m.y + 1.4, z: post.z } : null);
+    if (base) {
+      const yaw = Math.atan2(-(base.x - m.x), -(base.z - m.z));
+      if (this.t > this.glanceAt) {
+        this.glanceAt = this.t + 1.6 + Math.random() * 3.6;
+        // mostly the sights shift a little about the angle it is holding; now and then a proper look somewhere else
+        if (Math.random() < (this.threat ? 0.75 : 0.55)) return glance(yaw + (Math.random() - 0.5) * 0.22, 0.5 + Math.random() * 1.1);
+        const other = this.openWay(eye, yaw, [-0.8, 0.8, -1.5, 1.5, 3.1]);
+        if (other !== null) return glance(other, 0.35 + Math.random() * 0.5);
+      }
+      this.lookPt = base;
+      return;
+    }
+    // nothing to watch in particular: along whichever ways are open, one after another
+    if (this.t > this.glanceAt) {
+      const yaw = this.openWay(eye, this.yaw, [0.7, -0.7, 1.5, -1.5, 2.4, -2.4, 3.1], 3.5);
+      this.glanceAt = this.t + 1 + Math.random() * 2.2;
+      if (yaw !== null) return glance(yaw, 0.8 + Math.random() * 1.4);
+    }
+    this.lookPt = null;
+  }
+
+  /** would leaning out to one side show it someone its middle cannot see, or leave less of it showing? -1, 0 or 1 */
+  private leanFor(b: Vec): number {
+    const W = this.match.world, m = this.m;
+    const eyeY = m.y + (this.crouch ? 1.05 : 1.6);
+    const head = { x: b.x, y: b.y + 1.5, z: b.z };
+    const sx = Math.cos(this.yaw) * 0.36, sz = -Math.sin(this.yaw) * 0.36;
+    const l = W.sees({ x: m.x - sx, y: eyeY, z: m.z - sz }, head), r = W.sees({ x: m.x + sx, y: eyeY, z: m.z + sz }, head);
+    // one side has the line and the other is behind something: the body stays behind it and the head goes out
+    return l === r ? 0 : r ? 1 : -1;
+  }
+
   private aimAndFire(dt: number, wx: number, wz: number, speed: number) {
     const M = this.match, m = this.m;
     const spec = WEAPONS[this.weapon];
+    void wx;
+    void wz;
     let ty = this.yaw, tp = 0;
     const engaged = this.target >= 0 && this.t - this.seenAt < 0.8;
     const eyeY = m.y + (this.crouch ? 1.05 : 1.6);
+    // which the hands are doing: on someone (quick, firm), or following the eyes about (easy)
+    let firm = false;
     if (this.target >= 0) {
       const b = M.bodies[this.target];
-      const px = engaged ? b.x : this.seenPos.x, pz = engaged ? b.z : this.seenPos.z, py = engaged ? b.y : this.seenPos.y;
+      // It aims at where it believes them to be. That belief follows the truth a moment behind (the slower the eyes, the
+      // further behind), carries on the way they were going, and is led by part of what the lag costs: someone who
+      // changes direction gets ahead of it, the way they get ahead of a person
+      const lag = 0.085 + 0.16 * (1 - this.reflex);
+      if (engaged) {
+        if (!this.believes) {
+          this.believes = true;
+          this.bx = b.x;
+          this.by = b.y;
+          this.bz = b.z;
+          this.bvx = this.bvz = 0;
+        }
+        const k = 1 - Math.exp(-dt / lag);
+        const ox = this.bx, oz = this.bz;
+        this.bx += (b.x - this.bx) * k;
+        this.by += (b.y - this.by) * k;
+        this.bz += (b.z - this.bz) * k;
+        const a = Math.min(1, dt * 7);
+        this.bvx += ((this.bx - ox) / dt - this.bvx) * a;
+        this.bvz += ((this.bz - oz) / dt - this.bvz) * a;
+      } else if (!this.believes) {
+        this.believes = true;
+        this.bx = this.seenPos.x;
+        this.by = this.seenPos.y;
+        this.bz = this.seenPos.z;
+        this.bvx = this.bvz = 0;
+      } else {
+        // out of sight: they went the way they were going, for a moment; after that it is the corner it watches
+        const since = this.t - this.seenAt;
+        if (since < 1.1) {
+          this.bx += this.bvx * dt * 0.5;
+          this.bz += this.bvz * dt * 0.5;
+        }
+      }
+      const lead = lag * (0.3 + 0.65 * this.aimK);
+      const ax = this.bx + this.bvx * lead, az = this.bz + this.bvz * lead;
       const crouch = (b.flags & F.crouch) !== 0;
-      const aimY = py + (this.headShot ? (crouch ? 1.08 : 1.62) : crouch ? 0.72 : 1.18);
-      const dx = px - m.x, dz = pz - m.z, d = Math.hypot(dx, dz) || 1;
+      const aimY = this.by + (this.headShot ? (crouch ? 1.08 : 1.62) : crouch ? 0.72 : 1.18);
+      const dx = ax - m.x, dz = az - m.z, d = Math.hypot(dx, dz) || 1;
       // someone running across the sights is harder to stay on than someone stood still
       const quick = (b.flags & F.sprint) ? 1.7 : (b.flags & F.moving) ? 0.6 : 0;
       this.err = Math.max((1.4 - this.skill * 1.2) * 0.25 + quick * (1.15 - this.skill * 0.6), this.err - dt * (2 + this.skill * 5));
+      // the hand is never still: it wanders about the point it is held on, and settles as the aim does
+      const q = Math.exp(-dt / 0.32), g = Math.sqrt(1 - q * q);
+      this.nYaw = this.nYaw * q + gauss() * g;
+      this.nPitch = this.nPitch * q + gauss() * g;
       const e = (this.err * Math.PI) / 180;
-      ty = Math.atan2(-dx, -dz) + this.errYaw * e;
-      tp = Math.atan2(aimY - eyeY, d) + this.errPitch * e * 0.7;
-    } else if (this.lamp) {
-      const dx = this.lamp.x - m.x, dz = this.lamp.z - m.z;
-      ty = Math.atan2(-dx, -dz);
-      tp = Math.atan2(this.lamp.y - (m.y + 1.5), Math.hypot(dx, dz) || 1);
-    } else if (speed > 0.1 && this.t >= this.backT) {
-      // eyes on where the way leads: the doorway two steps on, not the floor in front
-      const far = this.path[Math.min(this.path.length - 1, this.pi + 2)];
-      const fx = far ? far.x - m.x : 0, fz = far ? far.z - m.z : 0;
-      const ahead = far && Math.hypot(fx, fz) > 1.2 && fx * wx + fz * wz > 0;
-      ty = ahead ? Math.atan2(-fx, -fz) : Math.atan2(-wx, -wz);
-      tp = far && ahead ? clamp(Math.atan2(far.y - m.y, Math.hypot(fx, fz)), -0.5, 0.5) : 0;
-    } else if (this.t < this.watchT) ty = this.watch;
-    else if (this.t - this.heardAt < 4) ty = Math.atan2(-(this.heard.x - m.x), -(this.heard.z - m.z));
-    const rate = engaged ? 2.6 + this.skill * 7 : 3.4;
-    const dy = angleDiff(ty, this.yaw);
-    this.yaw += Math.sign(dy) * Math.min(Math.abs(dy), rate * dt);
-    this.pitch += (tp - this.pitch) * Math.min(1, dt * rate * 1.3);
-    // sights up in a fight, and when holding an angle
-    const holding = this.order()?.kind === 'hold' && speed < 0.2;
-    this.ads = engaged || (holding && M.cfg.mode === 'siege');
-    // from a corner it leans out to shoot and comes back in between bursts
-    this.leanT -= dt;
-    if (engaged && speed < 0.4 && this.target >= 0 && Math.hypot(M.bodies[this.target].x - m.x, M.bodies[this.target].z - m.z) > 4) {
-      if (this.leanT <= 0) {
-        this.leanTo = Math.random() < 0.35 ? 0 : Math.random() < 0.5 ? -1 : 1;
-        this.leanT = 0.9 + Math.random() * 1.6;
+      ty = Math.atan2(-dx, -dz) + this.nYaw * e * 0.75;
+      tp = Math.atan2(aimY - eyeY, d) + this.nPitch * e * 0.5;
+      firm = true;
+    } else {
+      this.believes = false;
+      if (this.lamp) {
+        const dx = this.lamp.x - m.x, dz = this.lamp.z - m.z;
+        ty = Math.atan2(-dx, -dz);
+        tp = Math.atan2(this.lamp.y - (m.y + 1.5), Math.hypot(dx, dz) || 1);
+        firm = true;
+      } else if (this.t < this.backT) {
+        // backing off something: eyes stay on it
+      } else if (this.lookPt && this.t >= this.gazeT) {
+        const dx = this.lookPt.x - m.x, dz = this.lookPt.z - m.z, d = Math.hypot(dx, dz);
+        if (d > 0.6) {
+          ty = Math.atan2(-dx, -dz);
+          tp = clamp(Math.atan2(this.lookPt.y - eyeY, d), -0.6, 0.6);
+        }
+      } else ty = this.gazeYaw;
+      // hands at rest still breathe
+      const q = Math.exp(-dt / 0.9), g = Math.sqrt(1 - q * q);
+      this.nYaw = this.nYaw * q + gauss() * g;
+      this.nPitch = this.nPitch * q + gauss() * g;
+      ty += this.nYaw * 0.006;
+      tp += this.nPitch * 0.004;
+    }
+    // ---- the hands: swung, not set. A spring toward the point; the steadier the hand, the less it overshoots
+    const glancing = !firm && this.t < this.gazeT;
+    const w = firm ? 11 + 10 * this.aimK : glancing ? 10 : 6.5;
+    const zeta = firm ? 0.68 + 0.26 * this.aimK : 1;
+    const cap = firm ? 8.5 + 7.5 * this.aimK : glancing ? 7 : 5;
+    const dy = angleDiff(ty, this.yaw), dp = tp - this.pitch;
+    this.yawV = clamp(this.yawV + (w * w * dy - 2 * zeta * w * this.yawV) * dt, -cap, cap);
+    this.pitchV = clamp(this.pitchV + (w * w * dp - 2 * zeta * w * this.pitchV) * dt, -cap * 0.6, cap * 0.6);
+    this.yaw += this.yawV * dt;
+    this.pitch = clamp(this.pitch + this.pitchV * dt, -1.3, 1.3);
+    // sights up in a fight, when holding an angle, and when a corner someone may come round is being covered
+    const still = speed < 0.2;
+    const holding = this.order()?.kind === 'hold' && still;
+    this.ads = engaged || (holding && M.cfg.mode === 'siege') || (this.target >= 0 && this.t - this.seenAt < 3) || (!!this.threat && this.lookPt === this.threat && speed < 2.2);
+    // leaning: out from behind something to shoot, never into the open for the sake of it
+    let leanTo = 0;
+    if (this.target >= 0 && still && this.t - this.seenAt < 2.5) {
+      const b = M.bodies[this.target];
+      if (Math.hypot(b.x - m.x, b.z - m.z) > 3.5) {
+        if (this.t > this.leanAt) {
+          this.leanAt = this.t + 0.4;
+          this.leanTo = this.leanFor(engaged ? b : { x: this.bx, y: this.by, z: this.bz });
+        }
+        leanTo = this.leanTo;
       }
     } else this.leanTo = 0;
-    this.lean += (this.leanTo - this.lean) * Math.min(1, dt * 7);
+    this.lean += (leanTo - this.lean) * Math.min(1, dt * 7);
     if (this.lamp && (this.target >= 0 || this.lampShots <= 0 || (this.lampCam >= 0 ? M.cams[this.lampCam]?.dead !== false : !M.pools.some((q) => Math.abs(q[0] - this.lamp!.x) < 0.01 && Math.abs(q[2] - this.lamp!.z) < 0.01)))) {
       this.lamp = null;
       this.lampCam = -1;
     }
-    if (this.lamp && this.cool <= 0 && this.reload <= 0 && Math.abs(dy) < 0.03 && Math.abs(tp - this.pitch) < 0.03) {
+    if (this.lamp && this.cool <= 0 && this.reload <= 0 && Math.abs(dy) < 0.03 && Math.abs(dp) < 0.03) {
       this.lampShots--;
       this.ammo--;
       this.cool = 0.32 + Math.random() * 0.3;
+      this.kick(spec.auto);
       M.botFire(this, WEAPON_LIST.indexOf(this.weapon));
     }
     if (!engaged) {
@@ -965,6 +1393,7 @@ export class Bot {
           this.supp--;
           this.ammo--;
           this.cool = spec.cycle * (spec.auto ? 1.6 : 2.2);
+          this.kick(spec.auto);
           M.botFire(this, WEAPON_LIST.indexOf(this.weapon));
         } else this.supp = 0;
       }
@@ -972,12 +1401,28 @@ export class Bot {
     }
     this.react -= dt;
     if (this.react > 0 || this.reload > 0 || this.cool > 0 || this.ammo <= 0) return;
-    if (Math.abs(dy) > 0.09) return;
+    // behind the corner, between looks
+    if (this.peek && !this.peek.out) return;
     const dd = Math.hypot(M.bodies[this.target].x - m.x, M.bodies[this.target].z - m.z);
     if (this.weapon === 'shotgun' && dd > 22) return;
+    // the trigger goes when the sights are on the body, not before: a tighter picture the further off they are. Once the
+    // burst is running it runs on through a wobble
+    const tol = clamp(0.36 / dd, 0.018, 0.12) * (1.6 - 0.55 * this.aimK) * (this.burst > 0 ? 2.6 : 1);
+    if (Math.abs(dy) > tol || Math.abs(dp) > tol * 1.7) {
+      if (this.burst > 0 && Math.abs(dy) > tol * 1.6) {
+        this.burst = 0;
+        this.cool = 0.12 + Math.random() * 0.15;
+      }
+      return;
+    }
     this.ammo--;
     this.burst++;
-    this.cool = spec.cycle * (spec.auto ? 1 : 1.25);
+    if (this.acqT >= 0) {
+      M.stats.react.push(this.t - this.acqT);
+      this.acqT = -1;
+    }
+    // nobody's finger works a single-shot trigger like a clock
+    this.cool = spec.cycle * (spec.auto ? 1 : 1.1 + Math.random() * 0.45);
     // short bursts at range, longer close in: the pattern climbs, and they know it
     const len = dd > 18 ? 2 + Math.floor(this.skill * 2 + Math.random() * 2) : 3 + Math.floor(this.skill * 5 + Math.random() * 3);
     if (spec.auto && this.burst >= len) {
@@ -985,6 +1430,15 @@ export class Bot {
       this.cool = 0.25 + Math.random() * 0.45 - this.skill * 0.15;
     }
     M.botFire(this, WEAPON_LIST.indexOf(this.weapon));
+    this.kick(spec.auto);
+  }
+
+  /** a round gone: the muzzle jumps, and the hands have to bring it back */
+  private kick(auto: boolean) {
+    const k = (0.0032 + 0.0011 * Math.min(this.burst, 8)) * (auto ? 1 : 2.4) * (1.25 - 0.55 * this.aimK);
+    this.pitch += k;
+    this.pitchV += k * 5;
+    this.yaw += (Math.random() - 0.5) * k * 1.1;
   }
 }
 
@@ -994,4 +1448,9 @@ function pick<T>(a: T[]): T {
 
 function clamp(v: number, a: number, b: number) {
   return Math.min(b, Math.max(a, v));
+}
+
+/** a number from the bell curve, about one wide */
+function gauss() {
+  return Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(6.2831853 * Math.random());
 }

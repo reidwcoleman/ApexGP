@@ -2,7 +2,7 @@ import './ui.css';
 import { TacMap } from './tacmap.ts';
 import type { Game } from './game.ts';
 import { Guest_, Host, makeCode, type Down } from './net.ts';
-import { PRIMARIES, TEAM_NAME, WEAPONS, ZONE_NAME, fmtClock, solo, type Ev, type MatchConfig, type Mode, type PlayerInfo, type Req, type WeaponId , ATK_KITS, DEF_KITS, KITS, type KitId , SIEGE } from './shared.ts';
+import { MAX_PEOPLE, PRIMARIES, TEAM_NAME, WEAPONS, ZONE_NAME, fmtClock, solo, type Ev, type MatchConfig, type Mode, type PlayerInfo, type Req, type WeaponId , ATK_KITS, DEF_KITS, KITS, type KitId , SIEGE } from './shared.ts';
 import type * as THREE from 'three';
 import { BASE, DEFAULT_MAP, MAP_ID } from './world.ts';
 
@@ -407,8 +407,15 @@ export class Hud {
     host.onOpen = () => this.lobby();
     host.onReq = (from, r) => {
       if (r.t === 'hello') {
+        const seen = this.lobbyPlayers.find((p) => p.id === from);
+        if (!seen && this.lobbyPlayers.length >= MAX_PEOPLE) {
+          host.kick(from, 'That room is full.');
+          return;
+        }
         const team = this.lobbyPlayers.filter((p) => p.team === 0).length <= this.lobbyPlayers.filter((p) => p.team === 1).length ? 0 : 1;
-        this.lobbyPlayers.push({ id: from, name: r.name.slice(0, 14) || 'Guest', team, primary: r.primary });
+        // the same browser saying hello twice is still one person
+        if (seen) Object.assign(seen, { name: r.name.slice(0, 14) || 'Guest', primary: r.primary });
+        else this.lobbyPlayers.push({ id: from, name: r.name.slice(0, 14) || 'Guest', team, primary: r.primary });
         host.send(from, { t: 'welcome', slot: 0, cfg: this.config(), players: [], inGame: false, code: this.code });
         this.lobby();
       } else if (r.t === 'me') {
@@ -484,13 +491,20 @@ export class Hud {
       this.home();
     };
     this.menu.querySelector('#j-back')!.addEventListener('click', back);
+    let closed = false;
     guest.onClose = (why) => {
+      closed = true;
       this.guest = null;
       this.home();
       if (why) this.toast(why);
     };
+    // what the host says about a match this browser is not ready to show yet (the location still loading) is kept, in
+    // order, and heard when it is: who is where, which round it is, being put down on the floor
+    let early: Ev[] = [];
+    let starts = 0;
     guest.onDown = (m: Down) => {
-      if (m.t === 'welcome') {
+      if (m.t === 'ev') early.push(m.e);
+      else if (m.t === 'welcome') {
         if ((m.cfg.map ?? 'ward') !== MAP_ID) {
           // the host is on the other location: come back on it and join again
           const u = new URL(location.href);
@@ -502,6 +516,15 @@ export class Hud {
           return;
         }
         this.code = code;
+        if (m.inGame) {
+          // the match is already on: in as soon as the location has loaded
+          this.menu.innerHTML = `<div class="rail"><button class="plain" id="j-back">Leave</button><div class="group"><div class="lab">Room code</div><div class="code">${esc(code)}</div></div><p class="note">The match is on. You go in as soon as the location has loaded.</p></div>${this.viewer()}`;
+          this.menu.querySelector('#j-back')!.addEventListener('click', back);
+          void this.g.whenReady.then(() => {
+            if (!closed) guest.send({ t: 'ready' });
+          });
+          return;
+        }
         this.menu.innerHTML = `<div class="rail"><button class="plain" id="j-back">Leave</button><div class="group"><div class="lab">Room code</div><div class="code">${esc(code)}</div></div><p class="note">You're in. The host starts the match.</p><label class="field"><span>Callsign</span><input id="j-name" maxlength="14" spellcheck="false" autocomplete="off" value="${esc(this.name)}"></label>${this.loadout()}</div>${this.viewer()}`;
         this.bind(this.menu, () => guest.send({ t: 'me', primary: this.primary }));
         (this.menu.querySelector('#j-name') as HTMLInputElement).addEventListener('change', (e) => {
@@ -512,10 +535,16 @@ export class Hud {
         this.menu.querySelector('#j-back')!.addEventListener('click', back);
       } else if (m.t === 'start') {
         const me = m.players.find((p) => p.id === guest.peer.id);
+        // not on the list: still on the way in (the location loading), and will be put in when it says so
+        if (!me) return;
         this.guest = null;
+        // a second start before the first was heard (the host went again): only the last one counts
+        early = [];
+        const mine = ++starts;
         void this.g.whenReady.then(() => {
+          if (mine !== starts || closed) return;
           this.menu.className = 'menu';
-          this.g.startGuest(guest, m.cfg, m.players, me?.slot ?? 0);
+          this.g.startGuest(guest, m.cfg, m.players, me?.slot ?? 0, early);
         });
       }
     };

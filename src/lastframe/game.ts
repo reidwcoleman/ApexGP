@@ -17,7 +17,7 @@ import { Input, LocalPlayer, type PlayerCtx } from './player.ts';
 import { Soldier, angleDiff, loadGear, loadGuns, preparePeople } from './soldier.ts';
 import { stepNade, type NadeSim } from './nade.ts';
 import { Rats } from './vermin.ts';
-import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow , BOARDS, SIEGE , oneLife , DEFAULT_KITS, KITS, kitCharges, kitSheets, type KitId } from './shared.ts';
+import { F, MAX_PEOPLE, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow , BOARDS, SIEGE , oneLife , DEFAULT_KITS, KITS, kitCharges, kitSheets, type KitId } from './shared.ts';
 import { Walls, chargeMesh, chargeModel, siteAt, siteMid, siteOf, siteArr, sitesTouch, type Site } from './walls.ts';
 import { Gear } from './gear.ts';
 import { Barricade, openingsOf } from './fort.ts';
@@ -38,6 +38,19 @@ interface Snap { t: number; x: number; y: number; z: number; yaw: number; pitch:
 class Actor {
   soldier: Soldier | null = null;
   buf: Snap[] = [];
+  /** their clock against mine (mine minus theirs, at the quickest the line has been), and how far arrivals stray from it */
+  off = NaN;
+  jit = 0;
+  /** the spacing their samples come at, and how far behind them they are drawn */
+  gap = 1 / 30;
+  delay = 0.1;
+  /** where they were last put down, until their own machine catches up with it */
+  spawnAt: number[] | null = null;
+  spawnT = 0;
+  /** drawn here; the line says there */
+  tx = 0;
+  ty = -50;
+  tz = 0;
   x = 0;
   y = -50;
   z = 0;
@@ -123,6 +136,10 @@ export class Game {
   match: Match | null = null;
   role: Role = 'solo';
   host: Host | null = null;
+  /** people loading the location, to come in when it has loaded */
+  private arriving = new Map<string, { name: string; primary: WeaponId }>();
+  /** what the match says next goes to this browser alone */
+  private only: string | null = null;
   guest: Guest_ | null = null;
   actors = new Map<number, Actor>();
   private shafts: Shafts | null = null;
@@ -157,6 +174,8 @@ export class Game {
   private time = 0;
   private last = performance.now();
   private netT = 0;
+  /** when this match began, on this browser's clock */
+  private net0 = performance.now();
   private dead = -1;
   private deadFrom = new THREE.Vector3();
   private dropLight: { x: number; y: number; z: number; vy: number; yaw: number; pitch: number } | null = null;
@@ -348,6 +367,7 @@ export class Game {
   camHold: number[] | null = null;
   /** test tools drive the game without pointer lock */
   autoInput = false;
+  noDraw = false;
 
   /** the map loads behind the menu: what's done, and a promise for the rest */
   loaded = false;
@@ -536,6 +556,7 @@ export class Game {
     this.attract = 0.001;
     this.loaded = true;
     this.readyRes();
+    this.keepAlive();
     requestAnimationFrame(this.loop);
   }
 
@@ -736,15 +757,33 @@ export class Game {
     host.all({ t: 'start', cfg, players: this.match!.players });
     this.match!.handle(this.mySlot, { t: 'kits', kits: this.kits });
     host.onReq = (from, m) => {
-      if (m.t === 'hello') return this.lateJoin(from, m.name, m.primary);
       const p = this.match?.players.find((q) => q.id === from);
+      if (m.t === 'hello') {
+        // someone with the invite link, in the middle of it. They are told which location to load; the bot whose place
+        // they will take plays on until they say it has loaded
+        if (!p) this.arriving.set(from, { name: m.name, primary: m.primary });
+        host.send(from, { t: 'welcome', slot: p?.slot ?? -1, cfg: this.cfg!, players: [], inGame: true, code: host.code });
+        return;
+      }
+      if (m.t === 'ready') {
+        const a = this.arriving.get(from);
+        this.arriving.delete(from);
+        if (a || p) this.lateJoin(from, a?.name ?? p!.name, a?.primary ?? p!.primary);
+        return;
+      }
       if (p) this.match!.handle(p.slot, m);
     };
     host.onState = (from, s) => {
       const p = this.match?.players.find((q) => q.id === from);
       if (p) this.remoteState(s, p.slot);
     };
-    host.onLeave = (id) => this.match?.removeHuman(id);
+    host.onLeave = (id) => {
+      this.arriving.delete(id);
+      const name = this.match?.players.find((q) => q.id === id)?.name;
+      if (name === undefined) return;
+      this.match!.removeHuman(id);
+      this.hud.toast(`${name} left. A bot has taken over.`);
+    };
     this.match!.start();
   }
 
@@ -752,15 +791,30 @@ export class Game {
   private lateJoin(id: string, name: string, primary: WeaponId) {
     const m = this.match, h = this.host;
     if (!m || !h) return;
-    const count = [0, 1].map((t) => m.players.filter((p) => p.team === t && !p.bot).length);
-    const team = count[0] <= count[1] ? 0 : 1;
-    m.dropBot(team);
-    const p = m.addHuman(id, name.slice(0, 14) || 'Guest', team, primary);
-    h.send(id, { t: 'welcome', slot: p.slot, cfg: m.cfg, players: m.players, inGame: true, code: h.code });
+    // the same browser asking twice is the same person
+    const was = m.players.find((q) => q.id === id);
+    const count = [0, 1].map((t) => m.players.filter((q) => q.team === t && !q.bot).length);
+    const team = count[0] <= count[1] ? 0 : 1, nm = name.slice(0, 14) || 'Guest';
+    const room = m.players.filter((q) => !q.bot).length < MAX_PEOPLE;
+    // a bot's place if there is one; with no bots in the match, a place of their own
+    const p = was ?? (room ? m.seat(id, nm, primary, team) ?? (m.players.length < 16 ? m.addHuman(id, nm, team, primary) : null) : null);
+    if (!p) {
+      h.kick(id, 'That room is full.');
+      return;
+    }
     h.send(id, { t: 'start', cfg: m.cfg, players: m.players });
+    if (!was) m.emit({ t: 'roster', players: m.players });
+    // how things stand, to them alone: the round, the room and what has been done to it, the lamps shot out, and where
+    // they are standing if the bot whose place this was is still on its feet
+    this.only = id;
     m.emit({ t: 'roster', players: m.players });
     m.resync();
-    window.setTimeout(() => m.joinNow(p), 600);
+    const out = this.L.flicks.map((f, k) => (f.dead ? k : -1)).filter((k) => k >= 0);
+    if (out.length) m.emit({ t: 'lamps', out });
+    if (p.alive) m.joinNow(p);
+    this.only = null;
+    // not on their feet: back in with everyone told, where the rules have people coming back
+    if (!p.alive) m.joinNow(p);
   }
 
   /** same teams, same rules, from the top */
@@ -775,7 +829,8 @@ export class Game {
     } else if (this.host) this.startHosted(this.host, cfg, humans);
   }
 
-  startGuest(guest: Guest_, cfg: MatchConfig, players: PlayerInfo[], slot: number) {
+  /** `early`: what the host said between starting the match and this browser being ready to hear it */
+  startGuest(guest: Guest_, cfg: MatchConfig, players: PlayerInfo[], slot: number, early: Ev[] = []) {
     this.role = 'guest';
     this.guest = guest;
     this.begin(cfg);
@@ -791,6 +846,8 @@ export class Game {
         this.startGuest(guest, m.cfg, m.players, me?.slot ?? slot);
       }
     };
+    // what was said while this browser was still loading: what happened is heard, the noise of it is not
+    for (const e of early) if (e.t !== 'shot' && e.t !== 'chat' && e.t !== 'nade' && e.t !== 'boom' && e.t !== 'spot') this.onEv(e);
     guest.onState = (s) => this.remoteState(s, -1);
     guest.onClose = (why) => {
       this.leave();
@@ -801,6 +858,7 @@ export class Game {
   private begin(cfg: MatchConfig) {
     this.cfg = cfg;
     this.matchT = 0;
+    this.net0 = performance.now();
     this.flareSeen.clear();
     this.inMatch = true;
     this.attract = 0;
@@ -847,6 +905,11 @@ export class Game {
     }
     if (this.role !== 'guest') {
       this.match = new Match(cfg, this.L.world, this.L.map, this.L.doors, this.L.panes, this.nav, (e) => {
+        // for one browser's ears only (someone being told how things stand)
+        if (this.only) {
+          this.host?.send(this.only, { t: 'ev', e });
+          return;
+        }
         this.onEv(e);
         this.host?.all({ t: 'ev', e });
       });
@@ -944,6 +1007,11 @@ export class Game {
         a.yaw = e.yaw;
         a.flags = F.alive;
         a.buf.length = 0;
+        a.spawnAt = e.p;
+        a.spawnT = performance.now() / 1000;
+        a.tx = a.x;
+        a.ty = a.y;
+        a.tz = a.z;
         a.deadAt = -1;
         a.w = WEAPON_LIST.indexOf(e.primary);
         const s = this.body(a);
@@ -1130,6 +1198,16 @@ export class Game {
         }
         break;
       }
+      case 'clk':
+        this.clock = e.clock;
+        for (const [slot, ms] of e.pings) {
+          const a = this.actors.get(slot);
+          if (a) a.info.ping = ms;
+        }
+        break;
+      case 'lamps':
+        for (const k of e.out) this.lampOut(k, false);
+        break;
       case 'phase':
         this.phase = e.phase;
         this.clock = e.clock;
@@ -1650,35 +1728,70 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ net state
+  /** seconds on this browser's own clock since the match began: what every position sample is stamped with */
+  private stamp() {
+    return (performance.now() - this.net0) / 1000;
+  }
+
   private remoteState(s: Float32Array, only: number) {
-    const now = performance.now() / 1000;
+    const now = this.stamp();
     for (let o = 0; o + STRIDE <= s.length; o += STRIDE) {
       const slot = only >= 0 ? only : s[o];
       if (slot === this.mySlot) continue;
       const a = this.actors.get(slot);
       if (!a) continue;
-      a.buf.push({ t: now, x: s[o + 1], y: s[o + 2], z: s[o + 3], yaw: s[o + 4], pitch: s[o + 5], lean: s[o + 6], flags: s[o + 7], w: s[o + 8] });
-      if (a.buf.length > 12) a.buf.shift();
+      const t = s[o + 9], x = s[o + 1], y = s[o + 2], z = s[o + 3];
+      if (!(x === x && y === y && z === z && t === t)) continue;
+      // from someone whose own machine has them off their feet (dead, or not yet told where they have been put): where
+      // that machine thinks they are is nowhere anybody is
+      if (only >= 0 && !(s[o + 7] & F.alive)) continue;
+      // just put down somewhere new: until their own machine has heard, it still says where they fell
+      if (a.spawnAt) {
+        if (Math.hypot(x - a.spawnAt[0], z - a.spawnAt[2]) > 3 && performance.now() / 1000 - a.spawnT < 1.5) continue;
+        a.spawnAt = null;
+      }
+      const d = now - t;
+      const last = a.buf.length ? a.buf[a.buf.length - 1] : null;
+      if (!(a.off === a.off) || Math.abs(d - a.off) > 1.5) {
+        // the first word from them, or a clock that started again (a rematch)
+        a.off = d;
+        a.jit = 0;
+        a.buf.length = 0;
+      } else {
+        // the same sample twice (the host passes on what it has, 30 times a second, whether or not a new one has come), or
+        // one that was overtaken on the way
+        if (last && t <= last.t) continue;
+        a.jit += (Math.abs(d - a.off) - a.jit) * 0.06;
+        a.off += (d - a.off) * (d < a.off ? 0.25 : 0.012);
+        if (last && t - last.t < 0.25) a.gap += (t - last.t - a.gap) * 0.08;
+      }
+      // moved further than legs could: put there, not slid there
+      if (last && Math.hypot(x - last.x, z - last.z) > 6) a.buf.length = 0;
+      a.buf.push({ t, x, y, z, yaw: s[o + 4], pitch: s[o + 5], lean: s[o + 6], flags: s[o + 7], w: s[o + 8] });
+      if (a.buf.length > 24) a.buf.shift();
       if (only >= 0 && this.match) {
         const b = this.match.bodies[slot];
-        if (b) Object.assign(b, { x: s[o + 1], y: s[o + 2], z: s[o + 3], yaw: s[o + 4], pitch: s[o + 5], lean: s[o + 6], crouch: (s[o + 7] & F.crouch) !== 0, flags: s[o + 7], w: s[o + 8] });
+        // on my clock, so that the others can be told when this was
+        if (b) Object.assign(b, { x, y, z, yaw: s[o + 4], pitch: s[o + 5], lean: s[o + 6], crouch: (s[o + 7] & F.crouch) !== 0, flags: s[o + 7], w: s[o + 8], t: t + a.off });
       }
     }
   }
 
   private sendState() {
-    const me = this.me;
+    const me = this.me, now = this.stamp();
     if (this.role === 'guest') {
       const b = new Float32Array(STRIDE);
       const lean = me.leanK;
-      b.set([this.mySlot, me.m.x, me.m.y, me.m.z, me.yaw, me.pitch, lean, me.alive ? me.flags() : 0, WEAPON_LIST.indexOf(me.weapon), 0]);
+      b.set([this.mySlot, me.m.x, me.m.y, me.m.z, me.yaw, me.pitch, lean, me.alive ? me.flags() : 0, WEAPON_LIST.indexOf(me.weapon), now]);
       this.guest?.state(b);
     } else if (this.role === 'host' && this.match) {
       const ps = this.match.players;
       const b = new Float32Array(ps.length * STRIDE);
       ps.forEach((p, i) => {
         const s = this.match!.bodies[p.slot];
-        b.set([p.slot, s.x, s.y, s.z, s.yaw, s.pitch, s.lean, s.flags, s.w, 0], i * STRIDE);
+        // a bot and I are where we are now; one of the others was there when they said so
+        const t = p.bot || p.slot === this.mySlot ? now : s.t ?? now;
+        b.set([p.slot, s.x, s.y, s.z, s.yaw, s.pitch, s.lean, s.flags, s.w, t], i * STRIDE);
       });
       this.host?.states(b);
     }
@@ -1951,11 +2064,48 @@ export class Game {
     const raw = (n - this.last) / 1000;
     const dt = Math.min(0.05, raw);
     this.last = n;
+    this.rafAt = n;
     this.time += dt;
     this.govern(raw);
-    this.tick(dt);
+    this.tick(dt, Math.min(0.5, raw));
     (window as unknown as { __frames: number }).__frames = ((window as unknown as { __frames: number }).__frames | 0) + 1;
   };
+
+  /** The match is everybody's, but it runs in the host's browser, and a browser stops drawing a tab nobody is looking at.
+   *  When the picture has not been drawn for a quarter of a second the match is kept going from here instead, off a timer
+   *  in a worker (those are not slowed down in a hidden tab): the bots, the clock, and where everyone is, to everyone. */
+  private rafAt = performance.now();
+  private keepAlive() {
+    try {
+      const w = new Worker(URL.createObjectURL(new Blob(['setInterval(()=>postMessage(0),33)'], { type: 'text/javascript' })));
+      w.onmessage = () => this.unseen();
+    } catch {
+      // no workers here: a hidden host stalls the match, as it always did
+    }
+  }
+
+  private unseen() {
+    const n = performance.now();
+    if (this.halt || this.role !== 'host' || !this.match || !this.inMatch || n - this.rafAt < 250) return;
+    const raw = Math.min(0.5, (n - this.last) / 1000);
+    this.last = n;
+    this.clock -= raw;
+    for (const d of this.L.doors) d.update(raw);
+    this.stepMatch(raw);
+    this.sendState();
+  }
+
+  /** the match moves on by what the clock on the wall says, in steps no longer than it was built for: a slow frame on the
+   *  host's machine is not a slow second for everyone else */
+  private stepMatch(raw: number) {
+    const m = this.match;
+    if (!m) return;
+    for (let left = raw, n = 0; left > 1e-5 && n < 16 && this.match === m; n++) {
+      const h = Math.min(left, 1 / 30);
+      m.update(h);
+      left -= h;
+    }
+  }
 
   private govern(raw: number) {
     this.fpsAcc += raw;
@@ -2040,16 +2190,16 @@ export class Game {
     }
   }
 
-  tick(dt: number) {
+  tick(dt: number, raw = dt) {
     const L = this.L;
     this.ctx.world = L.world;
     this.ctx.fx = this.fx;
     this.ctx.doors = L.doors;
     this.ctx.phys = this.phys;
     LF.time.value = this.time;
-    this.clock -= dt;
+    this.clock -= raw;
     for (const d of L.doors) d.update(dt);
-    this.match?.update(dt);
+    this.stepMatch(raw);
     if (this.attract > 0) this.attractCam(dt);
     // ---- me
     const me = this.me;
@@ -2112,7 +2262,7 @@ export class Game {
     }
     this.input.endFrame();
     // ---- everyone else
-    const now = performance.now() / 1000 - 0.1;
+    const now = this.stamp();
     for (const [s, a] of this.actors) {
       if (s === this.mySlot && me.alive) continue;
       if (s === this.mySlot && this.dead >= 0) {
@@ -2193,7 +2343,11 @@ export class Game {
     LF.rain.value = (outside ? 1 : 0.6) * (wx?.rain ?? 1);
     const fog = wx?.fog ?? 1;
     this.post.density += ((outside ? 0.0065 : 0.0095) * fog - this.post.density) * Math.min(1, dt * 2);
-    if (this.dead >= 0) {
+    if (this.dead >= 0 && this.spect >= 0 && this.actors.get(this.spect)?.info.alive) {
+      // someone else's camera now, and that one is working: a clean picture
+      u.glitch.value = Math.max(0, u.glitch.value - dt * 1.5);
+      u.caK.value = this.caBase;
+    } else if (this.dead >= 0) {
       // the feed tears at every knock, stutters now and then, and breaks up for good at the end
       const d = this.dead, j = this.dc.jolt;
       u.glitch.value = Math.min(0.5, j * j * j * 0.3 + (d > 3.9 ? ((d - 3.9) / 0.55) ** 2 * 0.09 : 0) + (d > 1.2 && Math.sin(d * 7.3) * Math.sin(d * 2.9) > 0.93 ? 0.12 : 0));
@@ -2254,7 +2408,8 @@ export class Game {
         this.ride(this.time);
         this.lensFlare(dt);
       }
-      this.post.render(this.scene, this.cam, dt, this.time);
+      // tests of the network run several browsers on one machine: they need the match, not the picture
+      if (!this.noDraw) this.post.render(this.scene, this.cam, dt, this.time);
     }
   }
 
@@ -2307,19 +2462,57 @@ export class Game {
       a.lean = b.lean;
       a.flags = b.flags;
       a.w = b.w;
-    } else if (a.buf.length >= 2) {
-      let i = a.buf.length - 1;
-      while (i > 0 && a.buf[i - 1].t > now) i--;
-      const p = a.buf[Math.max(0, i - 1)], q = a.buf[i];
-      const k = q.t > p.t ? THREE.MathUtils.clamp((now - p.t) / (q.t - p.t), 0, 1.2) : 1;
-      a.x = p.x + (q.x - p.x) * k;
-      a.y = p.y + (q.y - p.y) * k;
-      a.z = p.z + (q.z - p.z) * k;
-      a.yaw = p.yaw + Math.atan2(Math.sin(q.yaw - p.yaw), Math.cos(q.yaw - p.yaw)) * k;
-      a.pitch = p.pitch + (q.pitch - p.pitch) * k;
-      a.lean = q.lean;
-      a.flags = q.flags;
-      a.w = q.w;
+    } else if (a.buf.length) {
+      // drawn a little behind what has arrived, far enough that there is nearly always a sample either side of the moment:
+      // two samples' worth, and more on a line that wobbles
+      const want = THREE.MathUtils.clamp(2 * a.gap + 2.5 * a.jit, 0.08, 0.32);
+      a.delay += THREE.MathUtils.clamp(want - a.delay, -dt * 0.04, dt * 0.25);
+      const rt = now - a.off - a.delay;
+      const n = a.buf.length, q0 = a.buf[n - 1];
+      let tx: number, ty: number, tz: number;
+      if (rt >= q0.t || n < 2) {
+        // nothing newer has come: carry on the way they were going for a moment, then stand
+        const p0 = n >= 2 ? a.buf[n - 2] : q0;
+        const span = q0.t - p0.t;
+        const ahead = THREE.MathUtils.clamp(rt - q0.t, 0, 0.14);
+        let vx = 0, vz = 0;
+        if (span > 0.005 && span < 0.2) {
+          vx = (q0.x - p0.x) / span;
+          vz = (q0.z - p0.z) / span;
+          const v = Math.hypot(vx, vz);
+          if (v > 7) {
+            vx *= 7 / v;
+            vz *= 7 / v;
+          }
+        }
+        tx = q0.x + vx * ahead;
+        ty = q0.y;
+        tz = q0.z + vz * ahead;
+        a.yaw = q0.yaw;
+        a.pitch = q0.pitch;
+        a.lean = q0.lean;
+        a.flags = q0.flags;
+        a.w = q0.w;
+      } else {
+        let i = n - 1;
+        while (i > 0 && a.buf[i - 1].t > rt) i--;
+        const p = a.buf[Math.max(0, i - 1)], q = a.buf[i];
+        const k = q.t > p.t ? THREE.MathUtils.clamp((rt - p.t) / (q.t - p.t), 0, 1) : 1;
+        tx = p.x + (q.x - p.x) * k;
+        ty = p.y + (q.y - p.y) * k;
+        tz = p.z + (q.z - p.z) * k;
+        a.yaw = p.yaw + Math.atan2(Math.sin(q.yaw - p.yaw), Math.cos(q.yaw - p.yaw)) * k;
+        a.pitch = p.pitch + (q.pitch - p.pitch) * k;
+        a.lean = p.lean + (q.lean - p.lean) * k;
+        a.flags = q.flags;
+        a.w = q.w;
+      }
+      // a guess put right is eased into, not jumped to; a real jump (put down somewhere new) is a jump
+      const far = Math.hypot(tx - a.x, tz - a.z) > 2.5 || Math.abs(ty - a.y) > 2.5;
+      const e = far ? 1 : 1 - Math.exp(-dt * 45);
+      a.x += (tx - a.x) * e;
+      a.y += (ty - a.y) * e;
+      a.z += (tz - a.z) * e;
     }
     if (a.y < -20) return;
     const dx = a.x - ox, dz = a.z - oz;
