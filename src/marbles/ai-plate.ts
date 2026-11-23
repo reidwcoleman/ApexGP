@@ -56,6 +56,9 @@ export class PlateBrain {
   /** knocked: a moment before it gathers itself */
   private dazed = 0;
   private lastV = 0;
+  /** Bar Hop: when it next picks somewhere new to stand (it doesn't keep to one spot all round) */
+  private roamT = 0;
+  private ringNow = 0;
   constructor(
     readonly m: Marble,
     readonly skill: number,
@@ -86,7 +89,18 @@ export class PlateBrain {
     const rad = Math.hypot(dx, dz);
     const ux = rad > 1e-3 ? dx / rad : 1, uz = rad > 1e-3 ? dz / rad : 0;
     if (Number.isNaN(this.ang)) this.ang = Math.atan2(dz, dx);
-    const ring = Math.min(this.ring, P.radius - 3.6);
+    // Bar Hop: it keeps on the move. Every few seconds it's off to somewhere new, round the plate
+    // one way or the other and nearer the hub or the edge (a bolder one goes further, more often),
+    // walking there between the bars and holding still for each one as it comes
+    // (not in the opening seconds: a bunched-up field on the move goes over like skittles)
+    if (!this.roamT) this.roamT = c.state.go + 4 + this.rnd() * 4;
+    const roam = c.id === 'jumpclub' && t > c.state.go + 4;
+    if (roam && t >= this.roamT) {
+      this.roamT = t + 2.2 + this.rnd() * 3;
+      this.ang += (this.rnd() < 0.5 ? -1 : 1) * (0.4 + this.rnd() * 0.9);
+      this.ringNow = THREE.MathUtils.clamp(this.ring + (this.rnd() - 0.5) * 4.5, 5.5, P.radius - 4.2);
+    }
+    const ring = Math.min(roam && this.ringNow ? this.ringNow : this.ring, P.radius - 3.6);
     if (t >= this.nextThink) {
       this.nextThink = t + 0.2 + this.rnd() * 0.1;
       // spread out: drift round and in or out, away from the neighbours (two hopping side by side collide)
@@ -114,8 +128,10 @@ export class PlateBrain {
     if (m.grounded && t > goT) this.timing(t, c);
     // the spot: a velocity held near zero, gently toward it; still when a bar is near
     const ex = this.tx - m.pos.x, ez = this.tz - m.pos.z;
-    const k = this.due < 0.5 ? 0.25 : 1;
-    const vx = THREE.MathUtils.clamp(ex * 1.1, -2.4, 2.4) * k, vz = THREE.MathUtils.clamp(ez * 1.1, -2.4, 2.4) * k;
+    // (on the move it stops in good time for a bar: standing still is what the hop is timed for)
+    const k = this.due < (roam ? 0.9 : 0.5) ? (roam ? 0.08 : 0.25) : 1;
+    const top = roam ? 3.7 : 2.4;
+    const vx = THREE.MathUtils.clamp(ex * 1.1, -top, top) * k, vz = THREE.MathUtils.clamp(ez * 1.1, -top, top) * k;
     let ix = (vx - m.vel.x) * 0.5, iz = (vz - m.vel.z) * 0.5;
     if (!m.grounded) (ix *= 0.6), (iz *= 0.6);
     // too near the edge: back in, whatever else

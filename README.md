@@ -931,6 +931,14 @@ and bots; the contestants are original bean characters, not marbles.
 - **Controls**, the usual party-game layout: WASD run, Space jump, Ctrl dive (or C), Shift grab
   (hold, or E), the mouse turns the camera (click to lock the pointer, ESC lets go) and tilts it;
   a pad: left stick, A jump, X/Square or B dive, RT grab, right stick camera.
+- **Bots that keep moving**: in Bar Hop a bot no longer keeps to one spot: every few seconds
+  it's off round the plate to somewhere new, and it stops in good time for each bar (the hop is
+  timed for a bean that's standing still). In Volley Folly the side slides across and up and back
+  with the ball, everyone shuffles about their own spot, and two back up whoever's going for it.
+  In Over the Fence a bot with no ball to go for runs to be under one that's coming down in its
+  yard, or patrols. `tools/wobblemove.mjs` measures it: the share of the time a bot stands still
+  went from 74% to 46% (Bar Hop), 75% to 5% (Volley Folly) and 39% to 1% (Over the Fence), with
+  rounds as long and scores as close as before.
 - **Party play** (`net.ts`): PLAY WITH FRIENDS opens a lobby with a 4-letter code and a COPY
   INVITE LINK button (`marbles.html?join=CODE` joins straight in); friends can also type the code under
   JOIN (up to 12 players, bots make up the 24). Peer to peer over WebRTC (PeerJS's broker only

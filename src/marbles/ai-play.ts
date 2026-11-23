@@ -321,6 +321,9 @@ export class CupBrain {
    */
   private land = new THREE.Vector3();
   private err = new THREE.Vector3();
+  /** Volley Folly: one of the two behind whoever's going for it; and its own beat for the shuffle */
+  private cover = false;
+  private seedPh = Math.random() * 6.3;
   private volley(_dt: number, t: number, c: Course, all: Marble[], ease: number) {
     const m = this.m, A = c.cup!, C = A.cfg;
     const team = A.of.get(m.id) ?? 0, dir = team === 0 ? 1 : -1;
@@ -344,12 +347,15 @@ export class CupBrain {
       this.n = mates.length;
       this.slot = mates.indexOf(m);
       this.chase = false;
+      this.cover = false;
       if (ours) {
         const mine = Math.hypot(this.land.x - m.pos.x, this.land.z - m.pos.z);
         let closer = 0;
         for (const o of mates) if (o !== m && Math.hypot(this.land.x - o.pos.x, this.land.z - o.pos.z) < mine) closer++;
         // (the nearest goes; the next one too if that's a long run)
-        this.chase = closer < 1 || (closer < 2 && mine < 7 && eta > 0.5);
+        this.chase = closer < 1 || (closer < 2 && mine < 9 && eta > 0.4);
+        // (and the next two back it up: in behind it, in case it comes off someone's head)
+        this.cover = !this.chase && closer < 4;
         // (how well it reads the flight: a new guess every look)
         const off = (1 - this.skill) * 3.2 + ease * 2.2;
         this.err.set((this.rnd() - 0.5) * off, 0, (this.rnd() - 0.5) * off);
@@ -358,16 +364,27 @@ export class CupBrain {
     if (ours && this.chase) {
       // under it, a step back from the net so it's hit going forward
       W.set(this.land.x + this.err.x, y0, this.land.z + this.err.z - dir * 0.7);
+    } else if (ours && this.cover) {
+      // backing up: a few steps off where it's coming down, each on its own side of it
+      const a = this.slot * 2.4;
+      W.set(this.land.x + Math.cos(a) * 3.6, y0, this.land.z - dir * (1.5 + Math.abs(Math.sin(a)) * 3));
     } else {
-      // the shape: two rows across the yard, leaning toward where the ball is
+      // the shape: two rows across the yard. Nobody stands and watches: the whole side slides
+      // across with the ball and up and back with it, and everyone's on their toes, shuffling
+      // about their own spot
       const per = Math.max(1, Math.ceil(this.n / 2)), row = this.slot % 2, col = Math.floor(this.slot / 2);
       const lane = ((col + 0.5) / per - 0.5) * (C.HW * 1.7);
-      const lean = b.live ? (b.pos.x - A.center.x) * 0.2 : 0;
-      W.set(A.center.x + lane + lean, y0, cz - dir * C.HL * (row ? 0.3 : 0.68));
+      const lean = b.live ? (b.pos.x - A.center.x) * 0.5 : 0;
+      // (the ball deep in the other yard: everyone steps up; near the net or on its way over: back)
+      const far = b.live ? THREE.MathUtils.clamp(((b.pos.z - cz) * dir) / C.HL, -1, 1) : 0;
+      const depth = (row ? 0.3 : 0.68) + far * 0.09 - (b.live && b.vel.z * dir < -2 ? 0.06 : 0);
+      const ph = this.slot * 1.9 + this.seedPh;
+      W.set(A.center.x + lane * 0.82 + lean + Math.sin(t * 1.35 + ph) * 2.3, y0, cz - dir * C.HL * depth + Math.cos(t * 1.05 + ph * 1.7) * 1.9);
+      W.x = THREE.MathUtils.clamp(W.x, A.center.x - C.HW + 1.4, A.center.x + C.HW - 1.4);
     }
-    W.z = cz - dir * Math.max(1.4, (cz - W.z) * dir);
+    W.z = cz - dir * THREE.MathUtils.clamp((cz - W.z) * dir, 1.4, C.HL - 1.2);
     const dx = W.x - m.pos.x, dz = W.z - m.pos.z, d = Math.hypot(dx, dz);
-    if (d > 0.45) m.input.set(dx / d, 0, dz / d).multiplyScalar(ours && this.chase ? 1 : Math.min(1, d / 3));
+    if (d > 0.3) m.input.set(dx / d, 0, dz / d).multiplyScalar(ours && this.chase ? 1 : Math.min(1, 0.25 + d / 2.2));
     else m.input.set(0, 0, 0);
     if (!b.live || m.mode !== Mode.Run || t < this.shotT || !ours) return;
     // the hit: it's nearly down and within a lunge
@@ -397,6 +414,9 @@ export class CupBrain {
    * side, and dives through it to lob it over. Nothing to do: it waits in its lane, half way back.
    */
   private target = -1;
+  /** nothing to go for: where it's patrolling to, and when it picks somewhere new */
+  private beat = new THREE.Vector3();
+  private beatT = 0;
   private fence(_dt: number, t: number, c: Course, all: Marble[], ease: number) {
     const m = this.m, A = c.cup!, C = A.cfg;
     const team = A.of.get(m.id) ?? 0, dir = team === 0 ? 1 : -1;
@@ -421,11 +441,31 @@ export class CupBrain {
     }
     const b = this.target >= 0 ? A.balls[this.target] : null;
     if (!b || !b.live || !mine(b.pos.z)) {
-      const lanes = Math.max(1, this.n);
-      const lane = ((this.slot + 0.5) / lanes - 0.5) * (C.HW * 1.6);
-      W.set(A.center.x + lane, y0, cz - dir * C.HL * (this.slot % 2 ? 0.35 : 0.65));
+      // nothing on the ground to go for. A ball in the air that's coming down in this yard: it runs
+      // to be under it (the nearest of them to where it lands). Otherwise it's on patrol: off to a
+      // new spot in its part of the yard every couple of seconds, never stood waiting
+      let go = false;
+      let bestD = 81;
+      for (const q of A.balls) {
+        if (!q.live || q.pos.y < y0 + C.R + 2.5) continue;
+        const h = q.pos.y - y0 - C.R, e = (q.vel.y + Math.sqrt(q.vel.y * q.vel.y + 2 * C.g * h)) / C.g;
+        const lx = THREE.MathUtils.clamp(q.pos.x + q.vel.x * e * 0.9, A.center.x - C.HW + 1.5, A.center.x + C.HW - 1.5), lz = q.pos.z + q.vel.z * e * 0.9;
+        if (!mine(lz)) continue;
+        const d = (lx - m.pos.x) ** 2 + (lz - m.pos.z) ** 2;
+        if (d < bestD) (bestD = d), (go = true), W.set(lx, y0, lz - dir * (C.R + 1));
+      }
+      if (!go) {
+        if (t > this.beatT || this.beat.distanceToSquared(m.pos) < 1.2) {
+          this.beatT = t + 1.4 + this.rnd() * 1.8;
+          const lanes = Math.max(1, this.n);
+          const lane = ((this.slot + 0.5) / lanes - 0.5) * (C.HW * 1.6);
+          this.beat.set(THREE.MathUtils.clamp(A.center.x + lane + (this.rnd() - 0.5) * 9, A.center.x - C.HW + 1.5, A.center.x + C.HW - 1.5), y0, cz - dir * C.HL * (0.16 + this.rnd() * 0.68));
+        }
+        W.copy(this.beat);
+      }
+      W.z = cz - dir * THREE.MathUtils.clamp((cz - W.z) * dir, 1.6, C.HL - 1.2);
       const dx = W.x - m.pos.x, dz = W.z - m.pos.z, d = Math.hypot(dx, dz);
-      if (d > 0.6) m.input.set(dx / d, 0, dz / d).multiplyScalar(Math.min(1, d / 3));
+      if (d > 0.5) m.input.set(dx / d, 0, dz / d).multiplyScalar(go ? 1 : Math.min(0.62, 0.3 + d / 8));
       else m.input.set(0, 0, 0);
       return;
     }
