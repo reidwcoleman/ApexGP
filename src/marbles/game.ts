@@ -28,7 +28,7 @@ import { Confetti, Puffs, Splashes, Rings } from './fx.ts';
 import { BUMP, DASH_CD, GRAVITY, Marble, Mat, Mode } from './physics.ts';
 import { Stage } from './render.ts';
 import { ordinal, UI, type Row } from './ui.ts';
-import { F, F_POWER, MAX_PLAYERS, PartyGuest, PartyHost, STRIDE, type CtlMsg, type Member, type NetContestant } from './net.ts';
+import { F, F_CHEER, F_POWER, MAX_PLAYERS, PartyGuest, PartyHost, STRIDE, type CtlMsg, type Member, type NetContestant } from './net.ts';
 
 /**
  * Wobble Mania: a knockout show for 24 jelly beans on wooden obstacle courses — races where only
@@ -74,6 +74,9 @@ interface Racer {
   netEv: number;
   /** (someone else's bean) the power-up it has on */
   pw: number;
+  /** cheering (G): until when (my own beans: the clock; someone else's: while they say so) */
+  cheer: number;
+  cheerOn?: boolean;
   /** events since the last state this browser sent */
   ev: number;
   /** a finish or a fall told to the host, not answered yet */
@@ -800,7 +803,7 @@ export class MarbleGame {
       const bot = !wantBot ? null : new Bot(m, x.player ? Number(new URLSearchParams(location.search).get('me') ?? 0.9) : x.skill, x.id * 31 + idx * 7, STYLES[x.style], x.player || menu ? 0 : this.level.boost);
       const hint = c.path ? c.path.projectAll(m.pos).i : 0;
       bot?.reset(hint);
-      const r: Racer = { c: x, m, rig, bot, hint, s: 0, cp: c.checkpoints[0] ?? 0, fin: 0, out: false, fell: 0, hold: 0, local, netPos: m.pos.clone(), netT: performance.now() / 1000, netEv: 0, ev: 0, pw: 0, pend: false, home: g.pos.clone(), homeYaw: g.yaw };
+      const r: Racer = { c: x, m, rig, bot, hint, s: 0, cp: c.checkpoints[0] ?? 0, fin: 0, out: false, fell: 0, hold: 0, local, netPos: m.pos.clone(), netT: performance.now() / 1000, netEv: 0, ev: 0, pw: 0, cheer: 0, pend: false, home: g.pos.clone(), homeYaw: g.yaw };
       this.racers.push(r);
       if (menu && x.player) this.preview = r;
       if (c.team && !menu) c.team.of.set(x.id, order[k] % c.team.teams);
@@ -961,7 +964,23 @@ export class MarbleGame {
     if (net) dt = this.netBefore(dt);
     this.botEase();
     for (const r of this.racers) {
-      if (r.bot && !r.out) r.bot.update(dt, w.time, c, w.marbles);
+      if (r.bot && !r.out) {
+        r.bot.update(dt, w.time, c, w.marbles);
+        // (a mystery box close by, with no power on: it goes for it. In a race only one that's ahead)
+        const m = r.m;
+        if (this.boxes && !r.c.player && this.state === 'play' && m.mode === Mode.Run && w.time > m.pwT) {
+          const b = this.boxes.near(m.pos, c.path ? 7.5 : c.cup ? 4 : 6);
+          if (b) {
+            const dx = b.x - m.pos.x, dz = b.z - m.pos.z, d = Math.hypot(dx, dz) || 1;
+            const il = Math.hypot(m.input.x, m.input.z);
+            const ahead = il < 0.1 ? 1 : (m.input.x * dx + m.input.z * dz) / (il * d);
+            if (!c.path || ahead > 0.55) {
+              const k = c.path ? 0.5 : 0.75, sp = Math.max(il, 0.85);
+              m.input.set(m.input.x * (1 - k) + (dx / d) * sp * k, 0, m.input.z * (1 - k) + (dz / d) * sp * k);
+            }
+          }
+        }
+      }
       else if (r.out && r.m.active && r.local) {
         // (out: it stops trying, and once it's in the paint it's gone)
         r.m.input.set(0, 0, 0);
@@ -1077,6 +1096,11 @@ export class MarbleGame {
       grab ||= pad.grab;
     }
     if (t) t.jump = t.dash = false;
+    // (G: a cheer, arms up, bouncing: for the friends you're playing with to see)
+    if (this.pressed.has('KeyG') && this.state !== 'intro') {
+      p.cheer = performance.now() / 1000 + 1.7;
+      this.sound.voice('yay', p.m.id, p.m.pos.x, p.m.pos.y, p.m.pos.z, true);
+    }
     if (live && jump) p.m.jump = true;
     // (the jump button, held: the jetpacks)
     p.m.jet = live && (k.has('Space') || k.has('MouseLeft') || !!t?.hold || !!pad?.jump);
@@ -1793,6 +1817,12 @@ export class MarbleGame {
     const c = this.course!;
     if (p.m.bonked) {
       p.m.bonked = false;
+      // (the hit lands: a beat of slow motion, solo; online the clock is everyone's)
+      if (!this.online() && performance.now() > this.slowUntil) {
+        this.timeScale = 0.22;
+        this.slowUntil = performance.now() + 85;
+      }
+      this.bursts.burst(p.m.pos.clone().setY(p.m.pos.y + 0.4), 6, 0xffffff, 0.28);
       this.bonks++;
       this.ui.pop('BONK!', true);
       this.sound.notes([60, 72], 0.04, 0.4, true);
@@ -2678,7 +2708,7 @@ export class MarbleGame {
     buf[3] = list.length;
     list.forEach((r, k) => {
       const m = r.m, o = 4 + k * STRIDE;
-      const flags = m.mode | (m.groundT < 0.12 ? F.GROUND : 0) | (m.holding ? F.HOLD : 0) | (m.heldT > 0 ? F.HELD : 0) | (r.fell ? F.FELL : 0) | (r.local ? r.ev : r.ev) | (this.powerOf(r) << F_POWER);
+      const flags = m.mode | (m.groundT < 0.12 ? F.GROUND : 0) | (m.holding ? F.HOLD : 0) | (m.heldT > 0 ? F.HELD : 0) | (r.fell ? F.FELL : 0) | (r.local ? r.ev : r.ev) | (this.powerOf(r) << F_POWER) | (r.local && performance.now() / 1000 < r.cheer ? F_CHEER : 0);
       buf.set([r.c.id, m.pos.x, m.pos.y, m.pos.z, m.vel.x, m.vel.y, m.vel.z, this.kartP ? this.kartP.fx(m.id) : m.yaw, flags, m.quat.x, m.quat.y, m.quat.z, m.quat.w, r.s], o);
       r.ev = 0;
     });
@@ -2712,6 +2742,7 @@ export class MarbleGame {
       // (its power-up: the glow, and an IRON BEAN is one to my beans too)
       r.pw = (f >> F_POWER) & 3;
       m.iron = r.pw === 3;
+      r.cheer = f & F_CHEER ? now + 0.25 : 0;
       m.quat.set(buf[o + 9], buf[o + 10], buf[o + 11], buf[o + 12]);
       if (this.course.path || this.course.kart) r.s = buf[o + 13];
       r.netEv |= f & (F.HOP | F.DIVE | F.KNOCK | F.GRAB);
@@ -2826,9 +2857,15 @@ export class MarbleGame {
     // the streaks and the shells: a bean that's flying (a dive, a boost strip, a ZOOM, a long fall)
     // leaves light behind it in its own colour; one with a power-up glows in the power's
     const wt = this.course!.b.world.time;
+    const nowS = performance.now() / 1000;
     this.auras.begin();
     for (const r of this.racers) {
       const m = r.m;
+      // (cheering: the pose goes on, and comes off when it's over; nobody else's pose is touched)
+      const cheering = nowS < r.cheer && m.mode === Mode.Run && (this.state === 'play' || this.state === 'countdown' || this.state === 'over');
+      if (cheering && r.rig.pose === null) r.rig.pose = 'win';
+      else if (!cheering && r.cheerOn) r.rig.pose = null;
+      r.cheerOn = cheering && r.rig.pose === 'win';
       const seen = m.active && r.rig.root.visible && !r.out;
       const pw = seen ? this.powerOf(r) : 0;
       const sp = m.vel.length();
@@ -3234,7 +3271,7 @@ export class MarbleGame {
     const myPw = p && !p.out ? this.powerOf(p) : 0;
     this.ui.meter(myPw ? (p!.m.pwT - c.b.world.time) / POWERS[myPw].secs : null, myPw ? POWERS[myPw].name.replace('!', '') : '', true);
     const fast = p && !p.out && this.state === 'play' ? Math.hypot(p.m.vel.x, p.m.vel.z) : 0;
-    this.ui.speed(c.kart ? Math.max(THREE.MathUtils.clamp((fast - 27) / 12, 0, 0.32), p ? (this.kartP?.rush(p.m.id) ?? 0) : 0) : THREE.MathUtils.clamp((fast - 12.5) / 9, 0, 0.75));
+    this.ui.speed(c.kart ? Math.max(THREE.MathUtils.clamp((fast - 27) / 12, 0, 0.32), p ? (this.kartP?.rush(p.m.id) ?? 0) : 0) : Math.max(THREE.MathUtils.clamp((fast - 12.5) / 9, 0, 0.75), myPw === 1 && fast > 6 ? 0.5 : 0));
     this.teamPlay?.sync();
     this.cupP?.sync();
     const sdt = THREE.MathUtils.clamp(c.b.world.time - this.syncT, 0, 0.05);

@@ -88,6 +88,8 @@ export const STRIDE = 14;
 export const F = { GROUND: 4, HOLD: 8, HELD: 16, FELL: 32, HOP: 64, DIVE: 128, KNOCK: 256, GRAB: 512 } as const;
 /** and above them, two bits for the power-up it has on (0 none; powers.ts) */
 export const F_POWER = 10;
+/** and one more: it's cheering (the G key) */
+export const F_CHEER = 4096;
 
 function toBuf(d: unknown): ArrayBuffer | null {
   if (d instanceof ArrayBuffer) return d;

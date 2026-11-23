@@ -940,8 +940,12 @@ and bots; the contestants are original bean characters, not marbles.
   power itself is three numbers on the bean (`pw`, `pwT`, `iron` in `physics.ts`), and which one
   a bean has on rides in two bits of its state packet so everyone sees the glow and an IRON BEAN
   is iron on every screen. A dive that bowls someone over is also worth 1.4 s of sprint.
-  `tools/wobblepower.mjs` checks that boxes appear, are picked up, and that each power does what
-  it says.
+  A bot with no power on goes for a box that's close by (in a race, only one that's ahead of
+  it). `tools/wobblepower.mjs` checks that boxes appear, are picked up, and that each power does
+  what it says.
+- **Cheer**: G throws your arms up and bounces you for a couple of seconds; it rides in the state
+  packet, so the friends you're playing with see it. A bonk of yours also gets a beat of slow
+  motion when you're playing solo.
 - **The show-off effects** (`fx-cool.ts`): a soft streak of light in its own colour behind any
   bean that's flying (a dive, a boost strip, a ZOOM, a long fall), a glowing shell round a bean
   with a power-up (bright at the edge, clear in the middle, flickering as it runs out) and a

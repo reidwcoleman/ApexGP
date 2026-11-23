@@ -142,6 +142,16 @@ export class Boxes {
     }
     return 0;
   }
+  /** the nearest box that's there, within `max` metres (a bot that's near one goes for it) */
+  near(p: THREE.Vector3, max: number) {
+    let best: Spot | null = null, bd = max * max;
+    for (const s of this.spots) {
+      if (!s.on || Math.abs(p.y + 0.3 - s.y) > 2) continue;
+      const d = (s.x - p.x) ** 2 + (s.z - p.z) ** 2;
+      if (d < bd) (bd = d), (best = s);
+    }
+    return best;
+  }
   /** where the last one taken was (for its burst) */
   get lastAt() {
     return V;
