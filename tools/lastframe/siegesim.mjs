@@ -24,6 +24,22 @@ for (let r = 0; r < +rounds; r++) {
     const g = __lf.g, m = g.match;
     const dt = 1 / 30;
     const stall = new Map();
+    const ev = { downs: 0, ups: 0, holes: 0, sheets: 0, wires: 0, bangs: 0, cams: 0, spots: 0 };
+    if (!window.__hook) {
+      window.__hook = true;
+      window.__cnt = ev;
+      const on = g.onEv.bind(g);
+      g.onEv = (e) => {
+        const c = window.__cnt;
+        if (e.t === 'down') c.downs++;
+        else if (e.t === 'up') c.ups++;
+        else if (e.t === 'wall') e.kind === 'hole' ? c.holes++ : c.sheets++;
+        else if (e.t === 'trip') e.on ? c.wires++ : e.bang && c.bangs++;
+        else if (e.t === 'spot') c.spots++;
+        on(e);
+      };
+    }
+    window.__cnt = ev;
     const st = { stalls: [], built: 0, maxBars: 0, firstContact: -1, breachAt: -1, enterAt: -1, charges: 0, kicks: 0, live: 0, prepKick: 0 };
     let guard = 0, seenLive = false, barsBefore = 0;
     const alive = (t) => m.players.filter((q) => q.alive && q.team === t).length;
@@ -61,14 +77,17 @@ for (let r = 0; r < +rounds; r++) {
     }
     const e = window.__ev.filter((x) => x.phase === 'between').pop();
     window.__ev.length = 0;
-    return { ...st, round: m.round, room: m.obj?.name, doors: m.obj?.doors.length, winner: e?.winner, atk: m.atk, why: e?.msg, a: alive(m.atk), d: alive(1 - m.atk), prog: +m.secureProg.toFixed(2), guard };
+    ev.cams = m.cams.filter((c) => c.dead).length;
+    return { ...st, ev, round: m.round, room: m.obj?.name, doors: m.obj?.doors.length, winner: e?.winner, atk: m.atk, why: e?.msg, a: alive(m.atk), d: alive(1 - m.atk), prog: +m.secureProg.toFixed(2), guard };
   });
   res.push(out);
-  console.log(`round ${String(out.round).padStart(2)} ${String(out.room).padEnd(10)} doors ${out.doors} boarded ${out.maxBars}${out.prepKick ? ' (own boards lost ' + out.prepKick + ')' : ''} | ${out.winner === out.atk ? 'ATTACK' : 'DEFEND'} wins: ${out.why} after ${out.live.toFixed(0)}s, left ${out.a} v ${out.d} | first blood ${out.firstContact.toFixed(0)}s charge ${out.breachAt.toFixed(0)}s in room ${out.enterAt.toFixed(0)}s${out.stalls.length ? ' | STALLED: ' + out.stalls.join('; ') : ''}`);
+  console.log(`round ${String(out.round).padStart(2)} ${String(out.room).padEnd(10)} doors ${out.doors} boarded ${out.maxBars}${out.prepKick ? ' (own boards lost ' + out.prepKick + ')' : ''} | ${out.winner === out.atk ? 'ATTACK' : 'DEFEND'} wins: ${out.why} after ${out.live.toFixed(0)}s, left ${out.a} v ${out.d} | first blood ${out.firstContact.toFixed(0)}s charge ${out.breachAt.toFixed(0)}s in room ${out.enterAt.toFixed(0)}s | down ${out.ev.downs} up ${out.ev.ups} holes ${out.ev.holes} steel ${out.ev.sheets} wires ${out.ev.wires}/${out.ev.bangs} cams shot ${out.ev.cams}/${out.ev.camN ?? ''} spots ${out.ev.spots}${out.stalls.length ? ' | STALLED: ' + out.stalls.join('; ') : ''}`);
 }
 const aw = res.filter((r) => r.winner === r.atk).length;
 const why = {};
 for (const r of res) why[r.why] = (why[r.why] ?? 0) + 1;
+const sum = (k) => res.reduce((t, r) => t + r.ev[k], 0);
+console.log(`totals: downs ${sum('downs')} revives ${sum('ups')} wall holes ${sum('holes')} steel sheets ${sum('sheets')} wires ${sum('wires')} (went off ${sum('bangs')}) cameras shot ${sum('cams')} scope spots ${sum('spots')}`);
 console.log(`attackers won ${aw} of ${res.length}; mean round ${(res.reduce((s, r) => s + r.live, 0) / res.length).toFixed(0)}s; how: ${JSON.stringify(why)}; rounds with a charge ${res.filter((r) => r.breachAt >= 0).length}, with attackers in the room ${res.filter((r) => r.enterAt >= 0).length}`);
 console.log('page errors:', errs);
 await b.close();

@@ -1,7 +1,7 @@
 import './ui.css';
 import type { Game } from './game.ts';
 import { Guest_, Host, makeCode, type Down } from './net.ts';
-import { PRIMARIES, TEAM_NAME, WEAPONS, ZONE_NAME, fmtClock, solo, type Ev, type MatchConfig, type Mode, type PlayerInfo, type Req, type WeaponId } from './shared.ts';
+import { PRIMARIES, TEAM_NAME, WEAPONS, ZONE_NAME, fmtClock, solo, type Ev, type MatchConfig, type Mode, type PlayerInfo, type Req, type WeaponId , ATK_KITS, DEF_KITS, KITS, type KitId } from './shared.ts';
 import type * as THREE from 'three';
 import { BASE, DEFAULT_MAP, MAP_ID } from './world.ts';
 
@@ -19,7 +19,7 @@ const MAPS: { id: string; name: string; note: string }[] = [
 ];
 const HERE = MAPS.find((x) => x.id === MAP_ID) ?? MAPS[0];
 const thumb = (id: string) => `${BASE}thumbs/${id}.webp`;
-const KEYS: [string, string][] = [['WASD', 'Move'], ['Shift', 'Run'], ['Left click', 'Fire'], ['Right click', 'Aim'], ['C', 'Crouch, slide'], ['Space', 'Jump, climb'], ['Q E', 'Lean'], ['R', 'Reload'], ['F', 'Door, take gun'], ['Hold F', 'Barricade, charge'], ['Z', 'Kick'], ['H', 'Bandage'], ['T', 'Weapon light'], ['G', 'Frag'], ['V', 'Flash'], ['1 2', 'Swap'], ['Tab', 'Case sheet']];
+const KEYS: [string, string][] = [['WASD', 'Move'], ['Shift', 'Run'], ['Left click', 'Fire'], ['Right click', 'Aim'], ['C', 'Crouch, slide'], ['Space', 'Jump, climb'], ['Q E', 'Lean'], ['R', 'Reload'], ['F', 'Door, take gun'], ['Hold F', 'Barricade, charge, wall, revive'], ['Z', 'Kick'], ['B', 'Cameras'], ['X', 'Kit'], ['H', 'Bandage'], ['T', 'Weapon light'], ['G', 'Frag'], ['V', 'Flash'], ['1 2', 'Swap'], ['Tab', 'Case sheet']];
 interface Case { id: string; at: number; mode: Mode; won: number; line: string; k: number; d: number; len: number; marks: [number, number][] }
 const SKILL = [['Rookie', 0.2], ['Regular', 0.5], ['Veteran', 0.85]] as const;
 
@@ -67,6 +67,10 @@ export class Hud {
   private objEl = el('div', 'obj', '<i></i><b></b><span></span>');
   private secEl = el('div', 'secure', '<b></b><div><i></i></div>');
   private objMark = { x: 0, y: 0, on: false, dist: 0, inside: false };
+  /** through a lens: what it is, in the corner */
+  private lensEl = el('div', 'lens');
+  private spotBox = el('div', 'spots');
+  private spotTags: HTMLElement[] = [];
   private ammo = el('div', 'ammo');
   private ammoT = 0;
   private hp = el('div', 'hp', '<i></i>');
@@ -122,8 +126,10 @@ export class Hud {
   private shActs = el('div', 'sh-acts');
 
   constructor(private g: Game) {
+    const ka = store.get('kitA', 'breacher') as KitId, kd = store.get('kitD', 'fortifier') as KitId;
+    g.kits = [ATK_KITS.includes(ka) ? ka : 'breacher', DEF_KITS.includes(kd) ? kd : 'fortifier'];
     this.vitals.append(this.wounds, this.hp);
-    this.hudEl.append(this.tagBox, this.objEl, this.secEl, this.stamp, this.top, this.feedEl, this.center, this.promptEl, this.healBar, this.ammo, this.vitals, this.tick, this.dmgEl, this.scope, this.hint);
+    this.hudEl.append(this.tagBox, this.spotBox, this.objEl, this.secEl, this.lensEl, this.stamp, this.top, this.feedEl, this.center, this.promptEl, this.healBar, this.ammo, this.vitals, this.tick, this.dmgEl, this.scope, this.hint);
     this.sheet.append(this.shTop, this.report, this.tables, this.shActs);
     this.boardEl.append(this.sheet);
     this.root.append(this.hudEl, this.boardEl, this.lostEl, this.pauseEl, this.menu, this.toastEl);
@@ -295,7 +301,13 @@ export class Hud {
       const q = WEAPONS[w];
       return `${q.pellets > 1 ? `${q.dmg}x${q.pellets}` : q.dmg} dmg &nbsp;${Math.round(60 / q.cycle)} rpm &nbsp;${q.mag} rounds`;
     };
-    return `<div class="group"><div class="lab">Weapon</div><div class="list" data-seg="primary">${PRIMARIES.map((w) => `<button data-v="${w}" class="${w === this.primary ? 'sel' : ''}"><b>${WEAPONS[w].name}</b><span class="num">${stat(w)}</span></button>`).join('')}</div></div>`;
+    return `<div class="group"><div class="lab">Weapon</div><div class="list" data-seg="primary">${PRIMARIES.map((w) => `<button data-v="${w}" class="${w === this.primary ? 'sel' : ''}"><b>${WEAPONS[w].name}</b><span class="num">${stat(w)}</span></button>`).join('')}</div></div>${this.kitPickers()}`;
+  }
+
+  /** Breach and Hold: what to carry on each side of the round */
+  private kitPickers() {
+    const one = (id: string, lab: string, list: KitId[], cur: KitId) => `<div class="group"><div class="lab">${lab}</div><div class="list" data-seg="${id}">${list.map((k) => `<button data-v="${k}" class="${k === cur ? 'sel' : ''}"><b>${KITS[k].name}</b><span>${KITS[k].note}</span></button>`).join('')}</div></div>`;
+    return one('kitA', 'Breach and Hold: attacking as', ATK_KITS, this.g.kits[0]) + one('kitD', 'Defending as', DEF_KITS, this.g.kits[1]);
   }
 
   private bind(root: HTMLElement, after: () => void = () => {}) {
@@ -311,6 +323,8 @@ export class Hud {
         if (id === 'skill') this.skill = Number(v);
         if (id === 'team') this.team = Number(v);
         if (id === 'primary') this.primary = v as WeaponId;
+        if (id === 'kitA') this.g.kits = [v as KitId, this.g.kits[1]];
+        if (id === 'kitD') this.g.kits = [this.g.kits[0], v as KitId];
         if (id === 'map') return;
         store.set(id === 'bots' ? 'teamsize' : id, v);
         after();
@@ -626,6 +640,11 @@ export class Hud {
     this.say(`${WEAPONS[id].name}<small>Gun ${Math.floor(step / 2) + 1} of 4</small>`, 1.5, 'kill');
   }
 
+  /** a line in the middle of the screen for something that just happened to you */
+  note(title: string, sub: string) {
+    this.say(`${esc(title)}<small>${esc(sub)}</small>`, 3.2);
+  }
+
   private say(s: string, sec: number, cls = '') {
     this.center.innerHTML = s;
     this.center.className = 'center on ' + cls;
@@ -821,6 +840,21 @@ export class Hud {
       this.secEl.classList.toggle('bad', !g.attacking() && g.secureN[0] > 0);
       (this.secEl.lastChild!.firstChild as HTMLElement).style.transform = `scaleX(${g.secureProg.toFixed(3)})`;
     }
+    const lens = g.viewLabel();
+    this.lensEl.classList.toggle('on', !!lens);
+    if (lens && this.lensEl.textContent !== lens) this.lensEl.textContent = lens;
+    // the other side, where a scope saw them
+    while (this.spotTags.length < g.spots.length) {
+      const t = el('div', 'spot');
+      this.spotTags.push(t);
+      this.spotBox.append(t);
+    }
+    this.spotTags.forEach((t, i) => {
+      const q = g.spots[i];
+      const p = q ? g.project(q.x, q.y + 1.1, q.z) : null;
+      t.style.display = p ? '' : 'none';
+      if (p) t.style.transform = `translate(${(p.x * innerWidth).toFixed(0)}px, ${(p.y * innerHeight).toFixed(0)}px)`;
+    });
     g.mates(this.mateList);
     while (this.tags.length < this.mateList.length) {
       const t = el('div', 'mate');

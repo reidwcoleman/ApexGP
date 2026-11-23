@@ -106,7 +106,7 @@ export const GUN_LADDER: WeaponId[] = ['carbine', 'carbine', 'shotgun', 'shotgun
 export const TEAM_NAME = ['Unit', 'Crew'];
 
 /** actor flags in the state packet */
-export const F = { crouch: 1, ads: 2, sprint: 4, light: 8, reload: 16, alive: 32, moving: 64, cook: 128 };
+export const F = { crouch: 1, ads: 2, sprint: 4, light: 8, reload: 16, alive: 32, moving: 64, cook: 128, down: 256 };
 
 export const STRIDE = 10;
 
@@ -158,7 +158,31 @@ export interface PlayerInfo {
   ping: number;
   hp: number;
   alive: boolean;
+  /** on the floor, bleeding: alive, but out of the fight until someone gets them up */
+  down?: boolean;
+  /** what they carry when attacking, and when defending */
+  kits?: [KitId, KitId];
 }
+
+/** still in the fight */
+export const isUp = (p: { alive: boolean; down?: boolean }) => p.alive && !p.down;
+
+/**
+ * What someone brings to the attack-and-defend game besides a gun: one thing for the rounds they attack, one for the
+ * rounds they defend.
+ */
+export type KitId = 'breacher' | 'scout' | 'point' | 'fortifier' | 'trapper' | 'medic';
+export const KITS: Record<KitId, { name: string; side: 0 | 1; note: string }> = {
+  breacher: { name: 'Breacher', side: 0, note: 'Four breaching charges, set in half the time.' },
+  scout: { name: 'Scout', side: 0, note: 'A scope to push through a barricade (X). What it sees, the whole side sees. Three flashes.' },
+  point: { name: 'Point', side: 0, note: 'One boot takes a whole barricade. An extra frag.' },
+  fortifier: { name: 'Fortifier', side: 1, note: 'Four steel sheets for the walls, and boards up in half the time.' },
+  trapper: { name: 'Trapper', side: 1, note: 'Three tripwires for doorways (X).' },
+  medic: { name: 'Medic', side: 1, note: 'Gets people up in half the time and in better shape. Two bandages.' },
+};
+export const ATK_KITS: KitId[] = ['breacher', 'scout', 'point'];
+export const DEF_KITS: KitId[] = ['fortifier', 'trapper', 'medic'];
+export const DEFAULT_KITS: [KitId, KitId] = ['breacher', 'fortifier'];
 
 export interface MatchConfig {
   /** the location; a room's guests move to it when they join */
@@ -175,6 +199,20 @@ export interface MatchConfig {
 export type Ev =
   | { t: 'roster'; players: PlayerInfo[] }
   | { t: 'spawn'; s: number; p: [number, number, number]; yaw: number; hp?: number; primary: WeaponId }
+  /** on the floor: by whom and how, and how long they have */
+  | { t: 'down'; s: number; by: number; zone: number; w: number; dir: [number, number, number]; secs: number }
+  /** back on their feet */
+  | { t: 'up'; s: number; by: number; hp: number }
+  /** a wall: blown through, or sheeted with steel from one side. site: see walls.ts */
+  | { t: 'wall'; kind: 'hole' | 'reinf'; site: number[]; side: number; by: number }
+  /** a breaching charge on a wall */
+  | { t: 'wcharge'; site: number[]; s: number; side: number; fuse: number }
+  /** this round's cameras: x, y, z, yaw, pitch each; and which still work (a bit each) */
+  | { t: 'cams'; list: number[][]; alive: number }
+  /** a tripwire across doorway i (on: strung; off: gone, and whether it went off) */
+  | { t: 'trip'; i: number; on: boolean; s: number; bang?: boolean }
+  /** seen through a scope or a camera: where, for this side, for a few seconds */
+  | { t: 'spot'; team: number; at: number[][] }
   | { t: 'shot'; s: number; w: number; o: [number, number, number]; e: number[]; surf: string[]; }
   | { t: 'hit'; s: number; by: number; dmg: number; hp: number; zone: number; dir: [number, number, number]; bleed?: number }
   /** health changed without a new wound: the bleed, a bandage */
@@ -220,6 +258,20 @@ export type Req =
   | { t: 'barkick'; i: number }
   /** a breaching charge on barricade i, set from this side (the sign along the doorway's normal) */
   | { t: 'charge'; i: number; side: number }
+  /** a breaching charge on a wall, or a steel sheet on it, from this side */
+  | { t: 'wcharge'; site: number[]; side: number }
+  | { t: 'reinf'; site: number[]; side: number }
+  /** a teammate got back on their feet */
+  | { t: 'revive'; to: number }
+  /** a camera shot out */
+  | { t: 'camhit'; i: number }
+  /** a tripwire strung across doorway i, or shot off it */
+  | { t: 'trip'; i: number }
+  | { t: 'triphit'; i: number }
+  /** the other side, seen through the scope */
+  | { t: 'spot'; slots: number[] }
+  /** which kit for each side of the round */
+  | { t: 'kits'; kits: [KitId, KitId] }
   | { t: 'respawn' };
 
 export const ZONE = { head: 0, torso: 1, limb: 2, blast: 3, leg: 4 };
@@ -236,6 +288,11 @@ export const BOARDS_WAY = (1 << (BOARDS - 1)) - 1;
 /** seconds to nail one up, to set a charge, and its fuse */
 export const BUILD_T = 1.6, CHARGE_T = 1.1, CHARGE_FUSE = 2.6;
 /** the attack-and-defend game: seconds of preparation, of action, to secure the room; charges a life */
-export const SIEGE = { prep: 28, live: 180, secure: 9, charges: 2 };
+export const SIEGE = { prep: 28, live: 180, secure: 9, charges: 2, sheets: 2, trips: 3, cams: 4, bleedOut: 24, revive: 3, upHp: 35, downHp: 20 };
+/** seconds to sheet a wall, and to set a charge on one */
+export const REINF_T = 2.4, WALL_CHARGE_T = 1.6;
+/** what each kit changes */
+export const kitCharges = (k?: KitId) => (k === 'breacher' ? 4 : SIEGE.charges);
+export const kitSheets = (k?: KitId) => (k === 'fortifier' ? 4 : SIEGE.sheets);
 
 export const fmtClock = (s: number) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;

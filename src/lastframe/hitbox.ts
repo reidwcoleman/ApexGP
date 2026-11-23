@@ -6,6 +6,8 @@ export interface Body {
   yaw: number;
   lean: number;
   crouch: boolean;
+  /** on the floor, on their back: head away from where they were facing */
+  down?: boolean;
 }
 
 export function bodyHeight(crouch: boolean) {
@@ -14,6 +16,19 @@ export function bodyHeight(crouch: boolean) {
 
 /** nearest hit of a ray on a body within t; zone 0 head, 1 torso, 2 arm, 4 leg */
 export function hitBody(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, b: Body, maxT: number): { t: number; zone: number } | null {
+  if (b.down) {
+    // lying: the same spheres, laid along the floor from the feet (ahead of where the body stood) to the head (behind it)
+    const fx = -Math.sin(b.yaw), fz = -Math.cos(b.yaw);
+    let hit: { t: number; zone: number } | null = null;
+    const at = (k: number, y: number, r: number, zone: number) => {
+      const t = raySphere(ox, oy, oz, dx, dy, dz, b.x + fx * k, b.y + y, b.z + fz * k, r);
+      if (t >= 0 && t < maxT && (!hit || t < hit.t)) hit = { t, zone };
+    };
+    at(-0.82, 0.16, 0.125, 0);
+    for (let i = 0; i <= 3; i++) at(-0.6 + i * 0.2, 0.17, 0.21, 1);
+    for (let i = 0; i <= 3; i++) at(0.25 + i * 0.2, 0.14, 0.16, 4);
+    return hit;
+  }
   const h = bodyHeight(b.crouch);
   const lx = Math.cos(b.yaw) * b.lean * 0.3, lz = -Math.sin(b.yaw) * b.lean * 0.3;
   let best: { t: number; zone: number } | null = null;

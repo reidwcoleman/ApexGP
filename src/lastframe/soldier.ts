@@ -346,6 +346,7 @@ export class Soldier {
   private spd = 0;
   private aimV = new THREE.Vector3();
   crouch = 0;
+  private downK = 0;
   aim = 0;
   lean = 0;
   kick = 0;
@@ -770,13 +771,20 @@ export class Soldier {
     const fpK = this.firstPerson ? 0.13 : 0;
     P.root.position.set(x + Math.sin(face) * fpK, y, z + Math.cos(face) * fpK);
     P.root.rotation.set(0, face + this.legYaw, 0);
+    // on the floor: over onto the back, head away from where they were facing, feet where the hit boxes have them
+    this.downK += (((flags & F.down) && !this.firstPerson ? 1 : 0) - this.downK) * Math.min(1, dt * 4.5);
+    if (this.downK > 0.01) {
+      const k = this.downK * this.downK * (3 - 2 * this.downK);
+      P.root.rotation.set(-Math.PI / 2 * k, face, 0, 'YXZ');
+      P.root.position.set(x + Math.sin(face) * 0.85 * k, y + 0.13 * k, z + Math.cos(face) * 0.85 * k);
+    }
     P.update(dt);
     // a crouched walk: same clip, bent down
-    if (crouched && moving) P.root.position.y = y - 0.32 * this.crouch;
+    if (crouched && moving && this.downK < 0.05) P.root.position.y = y - 0.32 * this.crouch;
     if (this.firstPerson && crouched) P.root.position.y -= 0.02;
     P.root.updateMatrixWorld(true);
     const right = this.v[0].set(-Math.cos(face), 0, Math.sin(face));
-    if (crouched && moving) {
+    if (crouched && moving && this.downK < 0.05) {
       const k = this.crouch;
       P.rotateWorld('Bip01_L_Thigh', right, 0.95 * k);
       P.rotateWorld('Bip01_R_Thigh', right, 0.95 * k);

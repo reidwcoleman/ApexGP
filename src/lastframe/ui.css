@@ -79,6 +79,10 @@
 .hint.on { opacity: 1; }
 .hint b { color: var(--ink); font-weight: 400; margin-right: 6px; }
 .mates { position: absolute; inset: 0; overflow: hidden; }
+.lens { position: absolute; left: 50%; transform: translateX(-50%); bottom: 110px; font: 400 11px var(--mono); letter-spacing: .1em; color: var(--ink); text-shadow: var(--shadow); opacity: 0; white-space: pre; }
+.lens.on { opacity: .9; }
+.spot { position: absolute; left: 0; top: 0; width: 9px; height: 9px; margin: -5px 0 0 -5px; border: 1px solid var(--red); transform-origin: center; opacity: .85; }
+.spot::after { content: ''; position: absolute; left: 3px; top: 3px; width: 3px; height: 3px; background: var(--red); }
 .obj { position: absolute; left: 0; top: 0; margin: -7px 0 0 -40px; width: 80px; text-align: center; font: 400 10px var(--mono); color: var(--ink); text-shadow: var(--shadow); opacity: 0; transition: opacity .3s ease; pointer-events: none; }
 .obj.on { opacity: .82; }
 .obj i { display: block; width: 9px; height: 9px; margin: 0 auto 4px; border: 1px solid var(--ink); transform: rotate(45deg); }

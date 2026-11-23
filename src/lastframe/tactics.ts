@@ -2,7 +2,8 @@ import type { Match } from './match.ts';
 import type { Node } from './nav.ts';
 import type { Opening } from './fort.ts';
 import { barPassable } from './fort.ts';
-import { BOARDS_ALL } from './shared.ts';
+import { BOARDS_ALL, isUp } from './shared.ts';
+import { siteMid, siteOut, sitesAround, type Site } from './walls.ts';
 
 /**
  * What a side's computer players have been told to do. A bot in a fight fights; the rest of the time it does this.
@@ -20,9 +21,31 @@ export type Order =
   | { kind: 'build'; bar: number; node: Node }
   | { kind: 'breach'; bar: number; node: Node }
   | { kind: 'secure'; node: Node }
+  /** get one of the side's own off the floor */
+  | { kind: 'revive'; slot: number }
+  /** a steel sheet over a piece of wall, from this side of it */
+  | { kind: 'sheet'; site: Site; node: Node; side: number }
+  /** a tripwire across a doorway */
+  | { kind: 'trip'; bar: number; node: Node }
+  /** a look through a barricade with the scope before anyone goes in */
+  | { kind: 'scope'; bar: number; node: Node; done?: boolean }
+  /** a charge on a piece of wall */
+  | { kind: 'wbreach'; site: Site; node: Node; side: number; failed?: boolean }
   | { kind: 'hunt' };
 
 interface Group {
+  /** the way in: a doorway, or a piece of wall standing in for one */
+  entry: Opening;
+  wall?: Site;
+  /** the doorway to fall back on if the wall turns out to be sheeted */
+  alt: Opening;
+  scoped?: number;
+  /** where it forms up first, out of sight of the room, and when it left there */
+  rally: Node | null;
+  rallied?: number;
+  leftAt: number;
+  /** when its way in came open */
+  openAt: number;
   door: number;
   slots: number[];
   stage: Map<number, Node>;
@@ -44,6 +67,7 @@ interface Group {
  */
 export class Tactics {
   private orders = new Map<number, Order>();
+  private sitesDone = false;
   private tick = 0;
   private planned = [false, false];
   /** live seconds */
@@ -65,6 +89,8 @@ export class Tactics {
 
   newRound() {
     this.orders.clear();
+    this.peekPts = null;
+    this.sitesDone = false;
     this.planned = [false, false];
     this.liveT = 0;
     this.role.clear();
@@ -74,6 +100,10 @@ export class Tactics {
     this.retake = false;
     this.contestT = 0;
     this.sweepAt.clear();
+    this.reviving.clear();
+    this.sites = [];
+    this.sheetJob.clear();
+    this.tripJob.clear();
   }
 
   update(dt: number) {
@@ -84,13 +114,86 @@ export class Tactics {
     if (this.tick > 0 || (M.phase !== 'prep' && M.phase !== 'live')) return;
     this.tick = 0.35;
     this.contestT = M.secureN[0] > 0 && M.secureN[1] > 0 ? this.contestT + 0.35 : 0;
+    if (!this.sites.length && !this.sitesDone) {
+      this.sitesDone = true;
+      this.sites = sitesAround(M.world, M.obj.box, M.obj.doors.map((d) => this.door(d)));
+    }
+    if (M.phase === 'live') this.pickUps();
     this.defend();
     if (M.phase === 'live') this.attack();
   }
 
   private bots(team: number) {
     const M = this.M;
-    return M.players.filter((p) => p.bot && p.alive && p.team === team).map((p) => p.slot);
+    return M.players.filter((p) => p.bot && isUp(p) && p.team === team).map((p) => p.slot);
+  }
+
+  private give(slot: number, o: Order) {
+    if (!this.reviving.has(slot)) this.orders.set(slot, o);
+  }
+
+  /** someone of the side is on the floor: the nearest one who is not in a fight goes to them */
+  private pickUps() {
+    const M = this.M;
+    for (const [by, to] of this.reviving) {
+      const p = M.players.find((q) => q.slot === to);
+      const fb = M.bodies[to];
+      const watched = !!p && M.players.some((q) => isUp(q) && q.team !== p.team && q.team < 2 && Math.hypot(M.bodies[q.slot].x - fb.x, M.bodies[q.slot].z - fb.z) < 30 && M.world.sees({ x: M.bodies[q.slot].x, y: M.bodies[q.slot].y + 1.5, z: M.bodies[q.slot].z }, { x: fb.x, y: fb.y + 0.4, z: fb.z }));
+      if (!p?.alive || !p.down || !M.up(by) || (watched && Math.hypot(M.bodies[by].x - fb.x, M.bodies[by].z - fb.z) > 2.5)) {
+        this.reviving.delete(by);
+        this.orders.delete(by);
+      }
+    }
+    for (const p of M.players) {
+      if (!p.alive || !p.down || p.team > 1 || [...this.reviving.values()].includes(p.slot)) continue;
+      const b = M.bodies[p.slot];
+      // lying where the other side can see them: whoever went would lie down beside them. Not yet
+      if (M.players.some((q) => isUp(q) && q.team !== p.team && q.team < 2 && Math.hypot(M.bodies[q.slot].x - b.x, M.bodies[q.slot].z - b.z) < 30 && M.world.sees({ x: M.bodies[q.slot].x, y: M.bodies[q.slot].y + 1.5, z: M.bodies[q.slot].z }, { x: b.x, y: b.y + 0.4, z: b.z }))) continue;
+      let best = -1, bd = 11;
+      for (const q of M.players) {
+        if (!q.bot || !isUp(q) || q.team !== p.team || this.reviving.has(q.slot) || (M.bots.get(q.slot)?.target ?? -1) >= 0) continue;
+        const c = M.bodies[q.slot];
+        const d = Math.hypot(c.x - b.x, c.z - b.z) + Math.abs(c.y - b.y) * 6 - (M.kitOf(q.slot) === 'medic' ? 5 : 0);
+        if (d < bd) {
+          bd = d;
+          best = q.slot;
+        }
+      }
+      if (best < 0) continue;
+      this.reviving.set(best, p.slot);
+      this.orders.set(best, { kind: 'revive', slot: p.slot });
+      M.say(best, pick([`Coming, ${p.name}.`, 'Hold on, I have you.', `Picking ${p.name} up. Cover me.`]), 0.9);
+    }
+  }
+  private reviving = new Map<number, number>();
+  /** this round's places a wall could be gone through, and which the defenders have someone sheeting */
+  private sites: Site[] = [];
+  private sheetJob = new Map<number, Site>();
+  private tripJob = new Map<number, number>();
+
+  /** the inside of a piece of the room's wall: +1 / -1 along its normal */
+  private siteIn(st: Site) {
+    const b = this.M.obj!.box;
+    const mid = st.ax ? (b[2] + b[5]) / 2 : (b[0] + b[3]) / 2;
+    return Math.sign(mid - st.c) || 1;
+  }
+  private siteNode(st: Site, side: number): Node | null {
+    const p = siteOut(st, side, 0.75);
+    let best: Node | null = null, bd = 1.8;
+    for (const n of this.M.nav.nodes) {
+      if (Math.abs(n.y - st.y0) > 0.6 || ((st.ax ? n.z : n.x) - st.c) * side < 0.3) continue;
+      const d = Math.hypot(n.x - p.x, n.z - p.z);
+      if (d < bd) {
+        bd = d;
+        best = n;
+      }
+    }
+    return best;
+  }
+  /** a wall as a doorway, for the code that stacks up on doorways */
+  private asDoor(st: Site): Opening {
+    const m = siteMid(st);
+    return { i: -1, x: m.x, y: st.y0, z: m.z, w: st.u1 - st.u0, alongX: st.ax === 1, h: st.y1 - st.y0 };
   }
 
   private door(i: number): Opening {
@@ -117,6 +220,8 @@ export class Tactics {
       const across = Math.abs(o.alongX ? dx : dz);
       s += Math.min(across, 3) * 1.4;
       if (M.world.open(n.x, n.y + 1.4, n.z, o.x, o.y + 1.2, o.z)) s += 9;
+      // and out of sight of the corridors: whoever wants a shot at this corner has to come to the doorway for it
+      for (const q of this.peeks()) if (M.world.open(q.x, q.y, q.z, n.x, n.y + 1.2, n.z)) s -= 3.5;
       // and not in the eye of another doorway either
       for (const k of M.obj!.doors) {
         const q = this.door(k);
@@ -131,9 +236,25 @@ export class Tactics {
     return best;
   }
 
+  /** where the room can be looked into from, standing back from each of its doorways */
+  private peeks() {
+    if (this.peekPts) return this.peekPts;
+    const M = this.M, obj = M.obj!;
+    const pts: { x: number; y: number; z: number }[] = [];
+    for (const d of obj.doors) {
+      const o = this.door(d), out = -this.inward(o);
+      for (const back of [2.5, 5, 9]) for (const lat of [-1.3, 0, 1.3]) {
+        const x = o.x + (o.alongX ? lat : out * back), z = o.z + (o.alongX ? out * back : lat), y = o.y + 1.5;
+        if (M.world.open(x, y, z, o.x, o.y + 1.3, o.z)) pts.push({ x, y, z });
+      }
+    }
+    return (this.peekPts = pts);
+  }
+  private peekPts: { x: number; y: number; z: number }[] | null = null;
+
   /** the node just this side of a doorway, to build from or to break in from. side: +1/-1 along the doorway's normal */
   private doorNode(o: Opening, side: number, back = 1.1): Node | null {
-    const key = `${o.i}|${side}|${back}`;
+    const key = `${o.x}|${o.z}|${o.y}|${side}|${back}`;
     const hit = this.doorNodes.get(key);
     if (hit !== undefined) return hit;
     const M = this.M;
@@ -164,7 +285,7 @@ export class Tactics {
       this.planned[team] = true;
       // the bold ones roam
       const by = [...bots].sort((a, b) => (M.bots.get(b)?.nerve ?? 0) - (M.bots.get(a)?.nerve ?? 0));
-      const nRoam = bots.length >= 5 ? 2 : bots.length >= 3 ? 1 : 0;
+      const nRoam = bots.length >= 6 ? 2 : bots.length >= 3 ? 1 : 0;
       by.forEach((s, k) => this.role.set(s, k < nRoam ? 'roam' : 'anchor'));
       this.doorNodes.clear();
       const anchors = by.slice(nRoam), roamers = by.slice(0, nRoam);
@@ -206,7 +327,7 @@ export class Tactics {
         }
         if (pick) {
           this.spot.set(s, { node: pick, look });
-          this.orders.set(s, { kind: 'go', node: pick, look, fast: true });
+          this.give(s, { kind: 'go', node: pick, look, fast: true });
         } else this.role.set(s, 'anchor');
       });
       const who = M.players.find((p) => p.slot === anchors[0]);
@@ -235,14 +356,23 @@ export class Tactics {
               near = M.nav.nearest(q.x + (Math.random() - 0.5) * 2, q.y, q.z + (Math.random() - 0.5) * 2);
             }
           }
-          if (near) this.orders.set(s, { kind: 'go', node: near });
+          if (near) this.give(s, { kind: 'go', node: near });
+        }
+        continue;
+      }
+      // the last one standing, outside, with the room full of them: the careful ones don't walk back into that
+      if (attackersIn && !M.inObj(b.x, b.y, b.z) && M.secureN[0] >= 2 && M.players.filter((q) => isUp(q) && q.team === team).length === 1 && M.bots.get(s)!.nerve < LONE_STAYS_OUT) {
+        const cur = this.orders.get(s);
+        if (cur?.kind !== 'hold') {
+          const n = M.nav.nearest(b.x, b.y, b.z);
+          if (n) this.give(s, { kind: 'hold', node: n, look: { x: obj.c.x, z: obj.c.z }, crouch: true });
         }
         continue;
       }
       if (attackersIn && !M.inObj(b.x, b.y, b.z)) {
         // they are in the room: everyone back to it
         const cur = this.orders.get(s);
-        if (cur?.kind !== 'secure') this.orders.set(s, { kind: 'secure', node: this.insideNode(s) });
+        if (cur?.kind !== 'secure') this.give(s, { kind: 'secure', node: this.insideNode(s) });
         if (!this.retake) {
           this.retake = true;
           M.say(s, pick(["They're in the room!", 'Get them off the objective!', 'Back to the room, now!']));
@@ -260,14 +390,48 @@ export class Tactics {
           const n = this.doorNode(o, this.inward(o));
           if (n) {
             const cur = this.orders.get(s);
-            if (cur?.kind !== 'build' || cur.bar !== list[0]) this.orders.set(s, { kind: 'build', bar: list[0], node: n });
+            if (cur?.kind !== 'build' || cur.bar !== list[0]) this.give(s, { kind: 'build', bar: list[0], node: n });
             continue;
           }
           list.shift();
         }
+        if (M.phase === 'prep' || this.liveT < 6) {
+          // then a wire across a doorway, from the ones who carry wire
+          if (M.tripsOf(s) > 0) {
+            let d = this.tripJob.get(s);
+            if (d === undefined || M.trips.has(d)) {
+              d = obj.doors.find((q) => !M.trips.has(q) && ![...this.tripJob.values()].includes(q));
+              if (d !== undefined && this.tripJob.size < 2) this.tripJob.set(s, d);
+              else d = undefined;
+            }
+            const n = d !== undefined ? this.doorNode(this.door(d), this.inward(this.door(d))) : null;
+            if (d !== undefined && n) {
+              const cur = this.orders.get(s);
+              if (cur?.kind !== 'trip' || cur.bar !== d) this.give(s, { kind: 'trip', bar: d, node: n });
+              continue;
+            }
+          }
+          // and steel over the walls a charge would come through: half of them, the rest there is no time for
+          if (M.sheetsOf(s) > 0) {
+            let st = this.sheetJob.get(s);
+            if (!st || M.sheeted(st) || M.holed(st)) {
+              st = M.sheets.length + this.sheetJob.size - (st ? 1 : 0) < Math.ceil(this.sites.length / 2) ? this.sites.find((q) => !M.sheeted(q) && !M.holed(q) && ![...this.sheetJob.values()].includes(q)) : undefined;
+              if (st) this.sheetJob.set(s, st);
+              else this.sheetJob.delete(s);
+            }
+            const side = st ? this.siteIn(st) : 1;
+            const n = st ? this.siteNode(st, side) : null;
+            if (st && n) {
+              const cur = this.orders.get(s);
+              if (cur?.kind !== 'sheet' || cur.site !== st) this.give(s, { kind: 'sheet', site: st, node: n, side });
+              continue;
+            }
+            if (st) this.sheetJob.delete(s);
+          }
+        }
         if (spot) {
           const cur = this.orders.get(s);
-          if (cur?.kind !== 'hold' || cur.node !== spot.node) this.orders.set(s, { kind: 'hold', node: spot.node, look: spot.look, crouch: M.bots.get(s)!.nerve < 0.55 });
+          if (cur?.kind !== 'hold' || cur.node !== spot.node) this.give(s, { kind: 'hold', node: spot.node, look: spot.look, crouch: M.bots.get(s)!.nerve < 0.55 });
           // the doorway they are coming through is the one to watch
           const hot = this.hotDoor();
           if (hot && cur?.kind === 'hold' && Math.random() < 0.3) cur.look = { x: hot.x, z: hot.z };
@@ -276,7 +440,7 @@ export class Tactics {
         if (late) {
           const cur = this.orders.get(s);
           if (cur?.kind !== 'secure') {
-            this.orders.set(s, { kind: 'secure', node: this.insideNode(s) });
+            this.give(s, { kind: 'secure', node: this.insideNode(s) });
             M.say(s, pick(['Falling back to the room.', 'Coming back in. Hold fire.', 'Roamer coming home.']), 0.8);
           }
           continue;
@@ -284,11 +448,11 @@ export class Tactics {
         // an attacker known close by: the roamer goes for them, from where they aren't looking
         const near = this.knownNear(team, b, 16, 6);
         if (near && M.phase === 'live') {
-          if (this.orders.get(s)?.kind !== 'hunt') this.orders.set(s, { kind: 'hunt' });
+          if (this.orders.get(s)?.kind !== 'hunt') this.give(s, { kind: 'hunt' });
         } else if (spot) {
           const cur = this.orders.get(s);
-          if (cur?.kind === 'hunt' || !cur) this.orders.set(s, { kind: 'hold', node: spot.node, look: spot.look, crouch: true });
-          else if (cur.kind === 'go' && Math.hypot(b.x - spot.node.x, b.z - spot.node.z) < 1) this.orders.set(s, { kind: 'hold', node: spot.node, look: spot.look, crouch: true });
+          if (cur?.kind === 'hunt' || !cur) this.give(s, { kind: 'hold', node: spot.node, look: spot.look, crouch: true });
+          else if (cur.kind === 'go' && Math.hypot(b.x - spot.node.x, b.z - spot.node.z) < 1) this.give(s, { kind: 'hold', node: spot.node, look: spot.look, crouch: true });
         }
       }
     }
@@ -397,6 +561,24 @@ export class Tactics {
     return path.find((n) => !M.inBox(obj.box, n.x, n.y, n.z, 0.3)) ?? null;
   }
 
+  /** on the way from where this one stands to a way in: the last place the room cannot see, a little way short of it */
+  private rallyFor(o: Opening, slot: number): Node | null {
+    const M = this.M, obj = M.obj!;
+    const b = M.bodies[slot];
+    const from = M.nav.nearest(b.x, b.y, b.z), to = this.wayOut(o) ?? M.nav.nearest(o.x, o.y, o.z);
+    if (!from || !to) return null;
+    const path = M.nav.path(from, to);
+    let run = 0;
+    for (let k = path.length - 2; k > 0; k--) {
+      const n = path[k];
+      run += Math.hypot(path[k + 1].x - n.x, path[k + 1].z - n.z);
+      if (run < 9) continue;
+      const seen = obj.doors.some((d) => M.world.open(n.x, n.y + 1.5, n.z, this.door(d).x, this.door(d).y + 1.3, this.door(d).z)) || M.world.open(n.x, n.y + 1.5, n.z, o.x, o.y + 1.3, o.z);
+      if (!seen || run > 20) return n;
+    }
+    return path.length > 6 ? path[Math.max(1, path.length - 16)] : null;
+  }
+
   private attack() {
     const M = this.M, obj = M.obj!;
     const team = M.atk;
@@ -415,11 +597,24 @@ export class Tactics {
         const st = this.stageNodes(o, slots.length);
         const stage = new Map<number, Node>();
         slots.forEach((s, k) => stage.set(s, st[k % Math.max(1, st.length)] ?? this.wayOut(o) ?? obj.c));
-        return { door: o.i, slots, stage, readyAt: -1, entered: false, flashed: false, enterAt: 0, breacher: -1 };
+        return { entry: o, alt: o, door: o.i, slots, stage, readyAt: -1, entered: false, flashed: false, enterAt: 0, breacher: -1, rally: this.rallyFor(o, slots[0]), leftAt: -1, openAt: -1 };
       };
       this.groups = [mk(d1, bots.slice(0, n1))];
       if (two) this.groups.push(mk(d2, bots.slice(n1)));
-      for (const g of this.groups) for (const s of g.slots) this.orders.set(s, { kind: 'go', node: g.stage.get(s)!, look: { x: this.door(g.door).x, z: this.door(g.door).z } });
+      // one of the groups may come through a wall instead: the piece of it farthest from the other group's door
+      const g2 = this.groups[this.groups.length - 1], other = this.groups[0].entry;
+      if (this.sites.length && Math.random() < 0.55) {
+        const st = this.sites.reduce((b, q) => (Math.hypot(siteMid(q).x - other.x, siteMid(q).z - other.z) > Math.hypot(siteMid(b).x - other.x, siteMid(b).z - other.z) ? q : b), this.sites[0]);
+        const asd = this.asDoor(st);
+        if (this.siteNode(st, -this.siteIn(st)) && (this.groups.length > 1 || Math.random() < 0.5)) {
+          const ng = mk(asd, g2.slots);
+          ng.wall = st;
+          ng.alt = g2.entry;
+          this.groups[this.groups.length - 1] = ng;
+        }
+      }
+      // first to somewhere near it that the room cannot see, and together from there
+      for (const g of this.groups) for (const s of g.slots) this.give(s, { kind: 'go', node: g.rally ?? g.stage.get(s)!, look: { x: g.entry.x, z: g.entry.z } });
       M.say(bots[0], pick([`Two ways in. Stack up on the ${M.objName()}.`, `Moving on the ${M.objName()}.`, 'On me. Quiet until we breach.']));
     }
     const rush = M.clock < 38;
@@ -427,13 +622,25 @@ export class Tactics {
     for (const g of this.groups) {
       g.slots = g.slots.filter((s) => bots.includes(s));
       if (!g.slots.length) continue;
-      const o = this.door(g.door);
+      const o = g.entry;
       if (g.entered) {
         // in: anyone still outside follows; anyone in stays in
         for (const s of g.slots) {
           const sweep = this.contestT > 4 && this.liveT >= (this.sweepAt.get(s) ?? 0);
           if (sweep) this.sweepAt.set(s, this.liveT + 4 + Math.random() * 3);
-          if (this.orders.get(s)?.kind !== 'secure' || sweep) this.orders.set(s, { kind: 'secure', node: this.insideNode(s) });
+          if (this.orders.get(s)?.kind !== 'secure' || sweep) this.give(s, { kind: 'secure', node: this.insideNode(s) });
+        }
+        continue;
+      }
+      if (g.leftAt < 0 && !rush) {
+        // formed up? then to the wall beside the way in. Nobody waits for ever for someone who is not coming
+        const r = g.rally;
+        const near = r ? g.slots.filter((s) => Math.hypot(M.bodies[s].x - r.x, M.bodies[s].z - r.z) < 4 && Math.abs(M.bodies[s].y - r.y) < 1.5).length : g.slots.length;
+        if (!g.rallied && near >= g.slots.length) g.rallied = this.liveT;
+        if ((g.rallied !== undefined && this.liveT - g.rallied > 5 && this.liveT > 30) || this.liveT > 45) {
+          g.leftAt = this.liveT;
+          for (const s of g.slots) this.give(s, { kind: 'go', node: g.stage.get(s)!, look: { x: o.x, z: o.z } });
+          M.say(g.slots[0], pick(['Moving up. Stack on the wall.', 'On the door. Quiet.', 'Up to it. Slow.']), 0.8);
         }
         continue;
       }
@@ -453,20 +660,59 @@ export class Tactics {
       const others = this.groups.filter((q) => q !== g && q.slots.length);
       const wait = others.some((q) => q.readyAt < 0) && this.liveT - g.readyAt < 14 && !anyEntered;
       // a breath at the door first: everyone in place, a word on the radio
-      if (wait || this.liveT - g.readyAt < 4) continue;
-      if (!barPassable(M.bars[g.door])) {
+      if (!g.wall && (wait || this.liveT - g.readyAt < 4)) continue;
+      if (g.wall && !M.holed(g.wall)) {
+        const cur = g.slots.includes(g.breacher) ? this.orders.get(g.breacher) : undefined;
+        if (M.sheeted(g.wall) || (cur?.kind === 'wbreach' && cur.failed) || this.liveT - g.readyAt > 22) {
+          // steel on the other side of it, or no way to set the thing: the door after all
+          M.say(g.slots[0], pick(['Wall is no good. Take the door.', "It's sheeted. Door, go."]), 0.9);
+          g.wall = undefined;
+          g.entry = g.alt;
+          g.door = g.alt.i;
+          g.breacher = -1;
+          const st2 = this.stageNodes(g.alt, g.slots.length);
+          g.slots.forEach((s, k) => {
+            const n = st2[k % Math.max(1, st2.length)] ?? this.wayOut(g.alt) ?? M.obj!.c;
+            g.stage.set(s, n);
+            this.give(s, { kind: 'go', node: n, look: { x: g.alt.x, z: g.alt.z }, fast: true });
+          });
+          g.readyAt = this.liveT;
+          continue;
+        }
+        if (!g.slots.includes(g.breacher)) {
+          const side = -this.siteIn(g.wall);
+          const n = this.siteNode(g.wall, side);
+          g.breacher = g.slots.reduce((b, s) => (M.chargesOf(s) > M.chargesOf(b) ? s : b), g.slots[0]);
+          if (n && M.chargesOf(g.breacher) > 0) this.give(g.breacher, { kind: 'wbreach', site: g.wall, node: n, side });
+          else g.readyAt = -99;
+        }
+        continue;
+      }
+      if (g.door >= 0 && !barPassable(M.bars[g.door])) {
+        // a look inside first, if anyone here carries the scope
+        if (g.scoped === undefined) {
+          g.scoped = this.liveT;
+          const sc = g.slots.find((s) => M.kitOf(s) === 'scout');
+          const n = sc !== undefined ? this.wayOut(o) : null;
+          if (sc !== undefined && n) this.give(sc, { kind: 'scope', bar: g.door, node: n });
+          else g.scoped = -99;
+        }
+        if (g.scoped > 0 && this.liveT - g.scoped < 6 && g.slots.some((s) => { const c = this.orders.get(s); return c?.kind === 'scope' && !c.done; })) continue;
         // the boards have to come out first
         if (!g.slots.includes(g.breacher)) {
           g.breacher = g.slots.reduce((b, s) => (Math.hypot(M.bodies[s].x - o.x, M.bodies[s].z - o.z) < Math.hypot(M.bodies[b].x - o.x, M.bodies[b].z - o.z) ? s : b), g.slots[0]);
           const n = this.wayOut(o);
-          if (n) this.orders.set(g.breacher, { kind: 'breach', bar: g.door, node: n });
+          if (n) this.give(g.breacher, { kind: 'breach', bar: g.door, node: n });
           M.say(g.breacher, pick(['Breaching!', 'Setting the charge.', 'Taking the door.']));
         }
         // boards that will not come out are not a reason to stand there all day: through them, boots first
         if (this.liveT - g.readyAt > 26) g.entered = true;
         continue;
       }
-      // open: something bright through it, then in
+      // open. A while at the edge of it first, shooting at whatever shows itself, before anyone goes through
+      if (g.openAt < 0) g.openAt = this.liveT + 4 + Math.random() * 5;
+      if (this.liveT < g.openAt && !anyEntered) continue;
+      // then something bright through it, and in
       if (!g.flashed) {
         g.flashed = true;
         // whoever is nearest the frame tosses one round it; the rest go on the bang
@@ -489,6 +735,9 @@ export class Tactics {
     }
   }
 }
+
+/** how careful the last defender has to be to leave a taken room to them (0: nobody does) */
+const LONE_STAYS_OUT = 0.5;
 
 function pick<T>(a: T[]): T {
   return a[Math.floor(Math.random() * a.length)];

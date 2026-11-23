@@ -1,5 +1,6 @@
 import type { Match } from './match.ts';
-import { BUILD_T, CHARGE_T, F, WEAPONS, WEAPON_LIST, type NadeKind, type WeaponId } from './shared.ts';
+import { BUILD_T, CHARGE_T, F, REINF_T, SIEGE, WALL_CHARGE_T, WEAPONS, WEAPON_LIST, type NadeKind, type WeaponId } from './shared.ts';
+import { siteMid } from './walls.ts';
 import { move, type Mover } from './collide.ts';
 import type { Node } from './nav.ts';
 import { angleDiff } from './soldier.ts';
@@ -106,6 +107,10 @@ export class Bot {
   /** heard something and stopped to cover it, until then */
   private holdT = 0;
   private lastOrder: Order | null = null;
+  private called = false;
+  /** the camera it has decided to shoot out (the lamp code does the shooting) */
+  private lampCam = -1;
+  private camAt = 3 + Math.random() * 5;
 
   constructor(private match: Match, readonly slot: number, readonly skill: number) {}
 
@@ -206,6 +211,49 @@ export class Bot {
     this.nades[kind]--;
     this.nadeAt = this.t + 8;
     return true;
+  }
+
+  // ---- on the floor
+  /** dropped: the gun is no use, the legs are no use; it drags itself toward whoever of its side is nearest */
+  wentDown() {
+    this.target = -1;
+    this.path = [];
+    this.goalNode = null;
+    this.crouch = true;
+    this.ads = false;
+    this.lean = 0;
+    this.light = false;
+    this.lamp = null;
+  }
+  gotUp() {
+    this.crouch = false;
+    this.goalAt = 0;
+    this.coverT = this.t + 1.5;
+    this.react = 0.5;
+  }
+  crawl(dt: number) {
+    this.t += dt;
+    const M = this.match, m = this.m;
+    let wx = 0, wz = 0;
+    let best = 1e9;
+    for (const p of M.players) {
+      if (p.slot === this.slot || !M.up(p.slot) || M.foes(this.slot, p.slot)) continue;
+      const b = M.bodies[p.slot];
+      const d = Math.hypot(b.x - m.x, b.z - m.z);
+      if (d < best && Math.abs(b.y - m.y) < 1.5) {
+        best = d;
+        wx = (b.x - m.x) / (d || 1);
+        wz = (b.z - m.z) / (d || 1);
+      }
+    }
+    const sp = best < 1.6 || best > 30 ? 0 : 0.55;
+    const a = Math.min(1, dt * 6);
+    m.vx += (wx * sp - m.vx) * a;
+    m.vz += (wz * sp - m.vz) * a;
+    m.height = 0.7;
+    move(M.world, m, dt);
+    this.pitch = 0;
+    this.lean = 0;
   }
 
   private order(): Order | null {
@@ -343,13 +391,18 @@ export class Bot {
         }
       } else if (!lit && d > 26 && Math.random() < 0.5) continue;
       // seen: the whole side knows where that one is now
+      const known = M.intel[team].get(p.slot);
+      if (p.slot !== this.target) this.called = !!known && M.elapsed - known.t < 4 && Math.hypot(known.x - b.x, known.z - b.z) < 3;
       M.intel[team].set(p.slot, { x: b.x, y: b.y, z: b.z, t: M.elapsed });
-      if (d < bd) {
-        bd = d;
+      // someone on the floor is no threat: only when nobody is standing
+      const rank = p.down ? d + 60 : d;
+      if (rank < bd) {
+        bd = rank;
         best = p.slot;
       }
     }
     if (best >= 0) {
+      if (bd >= 60) bd -= 60;
       if (best !== this.target) {
         if (this.t - this.calledAt > 2) {
           this.calledAt = this.t;
@@ -363,7 +416,9 @@ export class Bot {
         this.react = 0.66 - this.skill * 0.5 + Math.random() * 0.22 + (bd > 25 ? 0.15 : 0);
         // already watching that way with the sights up: the shot comes sooner
         const ord = this.order();
-        if (ord?.kind === 'hold' && M.inObj(m.x, m.y, m.z) && Math.abs(angleDiff(Math.atan2(-(M.bodies[best].x - m.x), -(M.bodies[best].z - m.z)), this.yaw)) < 0.35) this.react *= 0.6;
+        if (ord?.kind === 'hold' && M.inObj(m.x, m.y, m.z) && Math.abs(angleDiff(Math.atan2(-(M.bodies[best].x - m.x), -(M.bodies[best].z - m.z)), this.yaw)) < 0.35) this.react *= 0.5;
+        // somebody already said where that one was: the sights were halfway there
+        if (this.called) this.react *= 0.78;
         this.err = (5.5 - this.skill * 4.2) * (0.7 + Math.random() * 0.6);
         this.errYaw = (Math.random() - 0.5) * 2;
         this.errPitch = (Math.random() - 0.5) * 2;
@@ -467,9 +522,23 @@ export class Bot {
           const at = { x: q[0], y: q[1] - 0.08, z: q[2] };
           if (!M.world.sees(eye, at)) continue;
           this.lamp = at;
+          this.lampCam = -1;
           this.lampShots = 7;
           break;
         }
+      }
+    }
+    // a camera on the wall, watching the way in: the side breaking in puts a round through it
+    if (M.cfg.mode === 'siege' && M.phase === 'live' && !M.isDefender(this.slot) && this.target < 0 && !this.lamp && this.t > this.camAt && this.ammo > 6) {
+      this.camAt = this.t + 2.5 + Math.random() * 3;
+      const eye = { x: m.x, y: m.y + 1.5, z: m.z };
+      for (let i = 0; i < M.cams.length; i++) {
+        const c = M.cams[i];
+        if (c.dead || Math.hypot(c.x - m.x, c.z - m.z) > 13 || Math.abs(c.y - m.y - 2.3) > 1.2 || !M.world.sees(eye, c) || Math.random() > 0.35 + this.skill * 0.5) continue;
+        this.lamp = { x: c.x, y: c.y, z: c.z };
+        this.lampCam = i;
+        this.lampShots = 5;
+        break;
       }
     }
     if (!node) return;
@@ -525,7 +594,7 @@ export class Bot {
     }
     if (lost <= 0.5) return true;       // in its sights: the walking code sidesteps
     // lost them. Whoever has a place to keep, keeps it, sights on where they went
-    const rooted = ord && (ord.kind === 'hold' || ord.kind === 'secure' || ord.kind === 'build' || ord.kind === 'breach');
+    const rooted = ord && ord.kind !== 'go' && ord.kind !== 'hunt';
     if (rooted) return lost < 1.6;
     const chase = this.nerve > 0.45 || lost > 2.6 || this.weapon === 'shotgun';
     if (ord?.kind === 'go' && (lost > 2.2 || !chase)) return false;      // on its way somewhere: a look, then on
@@ -606,8 +675,134 @@ export class Bot {
         face(o.x, o.z, 0.5);
         if (M.tactics.holdBuild) return;
         this.workT += 0.1;
-        if (this.workT >= BUILD_T) {
+        if (this.workT >= (M.kitOf(this.slot) === 'fortifier' ? BUILD_T / 2 : BUILD_T)) {
           this.workT = M.build(this.slot, ord.bar) ? 0 : BUILD_T - 0.5;
+        }
+        return;
+      }
+      case 'revive': {
+        const b = M.bodies[ord.slot];
+        const pl = M.players.find((q) => q.slot === ord.slot);
+        if (!pl?.alive || !pl.down) {
+          this.stand(0.3);
+          return;
+        }
+        if (Math.hypot(b.x - m.x, b.z - m.z) > 1.7 || Math.abs(b.y - m.y) > 1) {
+          this.hurry = true;
+          this.workT = 0;
+          this.walkTo(M.nav.nearest(b.x, b.y, b.z), 0.2, 1);
+          return;
+        }
+        this.stand(0.2);
+        this.crouch = true;
+        face(b.x, b.z, 0.5);
+        this.workT += 0.1;
+        if (this.workT >= (M.kitOf(this.slot) === 'medic' ? SIEGE.revive / 2 : SIEGE.revive)) {
+          this.workT = 0;
+          this.crouch = false;
+          M.revive(this.slot, ord.slot);
+        }
+        return;
+      }
+      case 'sheet': {
+        if (M.sheeted(ord.site) || M.holed(ord.site) || M.sheetsOf(this.slot) <= 0) {
+          this.stand(0.3);
+          return;
+        }
+        if (!at(ord.node, 0.8)) {
+          this.hurry = true;
+          this.workT = 0;
+          this.walkTo(ord.node, 0.2, 1.5);
+          return;
+        }
+        this.stand(0.2);
+        const c = siteMid(ord.site);
+        face(c.x, c.z, 0.5);
+        this.workT += 0.1;
+        if (this.workT >= (M.kitOf(this.slot) === 'fortifier' ? REINF_T / 2 : REINF_T)) {
+          this.workT = 0;
+          M.reinforce(this.slot, [ord.site.ax, ord.site.c, ord.site.u0, ord.site.u1, ord.site.y0, ord.site.y1, ord.site.t], ord.side);
+        }
+        return;
+      }
+      case 'trip': {
+        const o = M.openings[ord.bar];
+        if (!o || M.trips.has(ord.bar) || M.tripsOf(this.slot) <= 0) {
+          this.stand(0.3);
+          return;
+        }
+        if (!at(ord.node, 0.9)) {
+          this.hurry = true;
+          this.walkTo(ord.node, 0.2, 1.5);
+          return;
+        }
+        this.stand(0.2);
+        this.crouch = true;
+        face(o.x, o.z, 0.5);
+        this.workT += 0.1;
+        if (this.workT >= 1.2) {
+          this.workT = 0;
+          this.crouch = false;
+          M.trip(this.slot, ord.bar);
+        }
+        return;
+      }
+      case 'scope': {
+        const o = M.openings[ord.bar];
+        if (!o || ord.done) {
+          this.stand(0.3);
+          return;
+        }
+        if (!at(ord.node, 0.9)) {
+          this.workT = 0;
+          this.walkTo(ord.node, 0.2, 1.5);
+          return;
+        }
+        this.stand(0.2);
+        this.crouch = true;
+        face(o.x, o.z, 0.5);
+        this.workT += 0.1;
+        if (this.workT >= 2.2) {
+          this.workT = 0;
+          this.crouch = false;
+          ord.done = true;
+          const n = M.scopeFrom(this.slot, ord.bar);
+          M.say(this.slot, n ? pick([`Scope: ${n} in the room.`, `I count ${n} inside.`]) : pick(['Scope shows nobody.', "Can't see anyone in there."]), 0.9);
+        }
+        return;
+      }
+      case 'wbreach': {
+        const c = siteMid(ord.site);
+        if (M.holed(ord.site) || M.sheeted(ord.site)) {
+          this.stand(0.3);
+          return;
+        }
+        const d = Math.hypot(c.x - m.x, c.z - m.z);
+        if (M.wallCharged(ord.site)) {
+          // set: along the wall and away from it
+          if (d < 3.6 && this.t > this.backT) {
+            const ax = ord.site.ax ? Math.sign(m.x - c.x) || 1 : ord.side * 0.5, az = ord.site.ax ? ord.side * 0.5 : Math.sign(m.z - c.z) || 1;
+            const l = Math.hypot(ax, az) || 1;
+            this.backT = this.t + 1.3;
+            this.backX = ax / l;
+            this.backZ = az / l;
+          }
+          this.stand(0.3);
+          face(c.x, c.z, 0.5);
+          return;
+        }
+        if (!at(ord.node, 0.9)) {
+          this.workT = 0;
+          this.walkTo(ord.node, 0.2, 1.5);
+          return;
+        }
+        this.stand(0.2);
+        face(c.x, c.z, 0.5);
+        this.workT += 0.1;
+        if (this.workT >= (M.kitOf(this.slot) === 'breacher' ? WALL_CHARGE_T / 2 : WALL_CHARGE_T)) {
+          this.workT = 0;
+          if (M.wallCharge(this.slot, [ord.site.ax, ord.site.c, ord.site.u0, ord.site.u1, ord.site.y0, ord.site.y1, ord.site.t], ord.side)) M.say(this.slot, pick(['Going through the wall!', 'Charge on the wall. Stand clear!', 'Wall breach!']));
+          else ord.failed = true;
         }
         return;
       }
@@ -641,7 +836,7 @@ export class Bot {
         face(o.x, o.z, 0.5);
         this.workT += 0.1;
         if (M.chargesOf(this.slot) > 0) {
-          if (this.workT >= CHARGE_T) {
+          if (this.workT >= (M.kitOf(this.slot) === 'breacher' ? CHARGE_T / 2 : CHARGE_T)) {
             this.workT = 0;
             const side = o.alongX ? Math.sign(m.z - o.z) : Math.sign(m.x - o.x);
             if (M.setCharge(this.slot, ord.bar, side || 1)) M.say(this.slot, pick(['Charge set! Stand clear!', 'Fire in the hole!', 'Breaching, breaching!']));
@@ -749,7 +944,10 @@ export class Bot {
       }
     } else this.leanTo = 0;
     this.lean += (this.leanTo - this.lean) * Math.min(1, dt * 7);
-    if (this.lamp && (this.target >= 0 || this.lampShots <= 0 || !M.pools.some((q) => Math.abs(q[0] - this.lamp!.x) < 0.01 && Math.abs(q[2] - this.lamp!.z) < 0.01))) this.lamp = null;
+    if (this.lamp && (this.target >= 0 || this.lampShots <= 0 || (this.lampCam >= 0 ? M.cams[this.lampCam]?.dead !== false : !M.pools.some((q) => Math.abs(q[0] - this.lamp!.x) < 0.01 && Math.abs(q[2] - this.lamp!.z) < 0.01)))) {
+      this.lamp = null;
+      this.lampCam = -1;
+    }
     if (this.lamp && this.cool <= 0 && this.reload <= 0 && Math.abs(dy) < 0.03 && Math.abs(tp - this.pitch) < 0.03) {
       this.lampShots--;
       this.ammo--;

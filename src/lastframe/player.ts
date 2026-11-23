@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { move, type Mover, type World } from './collide.ts';
-import { F, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, zoneK, type NadeKind, type WeaponId , BUILD_T, CHARGE_T, hitDamage, recoilAt } from './shared.ts';
+import { F, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, zoneK, type NadeKind, type WeaponId , BUILD_T, CHARGE_T, hitDamage, recoilAt , REINF_T, SIEGE, WALL_CHARGE_T, type KitId } from './shared.ts';
 import { trace, type Tracer } from './ballistics.ts';
 import type { Soldier } from './soldier.ts';
 import type { Sound } from './audio.ts';
@@ -146,11 +146,21 @@ export interface PlayerCtx {
     barhit(ids: number[], k: number): void;
     barkick(i: number): void;
     charge(i: number, side: number): void;
+    wcharge(site: number[], side: number): void;
+    reinf(site: number[], side: number): void;
+    revive(to: number): void;
+    trip(i: number): void;
   };
+  /** the piece of partition being looked at, if a hole could go there: which side of it this is, and what is on it already */
+  wallAt(ex: number, ey: number, ez: number, dx: number, dy: number, dz: number, fy: number): { site: number[]; side: number; sheeted: boolean; charged: boolean } | null;
+  /** teammates on the floor */
+  fallen(): { slot: number; x: number; y: number; z: number; name: string }[];
+  /** a round from o that stopped at the points of e: what small things it went through */
+  gearShot(o: THREE.Vector3, e: number[]): void;
   /** the doorways that take a barricade, and which boards each has up */
   forts: { o: { i: number; x: number; y: number; z: number; w: number; alongX: boolean }; boards: number; charge: unknown }[];
   /** the attack-and-defend game: is it on, may this one act now, is it attacking, charges left */
-  siege(): { on: boolean; act: boolean; attacker: boolean; charges: number };
+  siege(): { on: boolean; act: boolean; attacker: boolean; charges: number; sheets: number; trips: number; kit: KitId; tripAt(i: number): boolean };
   muzzleLight(p: THREE.Vector3): void;
   prompt(s: string): void;
   hitMark(kill: boolean): void;
@@ -210,6 +220,10 @@ export class LocalPlayer {
   private climb = 0;
   private climbY = 0;
   private sinceShot = 9;
+  /** on the floor: can crawl, can look, nothing else */
+  down = false;
+  private downK = 0;
+  private workKind = '';
   /** which shot of the burst the next one is, and the spread the burst has gathered, degrees */
   private spray = 0;
   private bloomV = 0;
@@ -364,7 +378,7 @@ export class LocalPlayer {
   }
 
   flags() {
-    return F.alive | (this.crouch ? F.crouch : 0) | (this.adsK > 0.5 ? F.ads : 0) | (this.sprintK > 0.5 ? F.sprint : 0) | (this.light ? F.light : 0) | (this.reloadT > 0 ? F.reload : 0) | (Math.hypot(this.m.vx, this.m.vz) > 0.3 ? F.moving : 0);
+    return F.alive | (this.down ? F.down : 0) | (this.crouch ? F.crouch : 0) | (this.adsK > 0.5 ? F.ads : 0) | (this.sprintK > 0.5 ? F.sprint : 0) | (this.light ? F.light : 0) | (this.reloadT > 0 ? F.reload : 0) | (Math.hypot(this.m.vx, this.m.vz) > 0.3 ? F.moving : 0);
   }
 
   update(dt: number, i: Input, c: PlayerCtx, cam: THREE.PerspectiveCamera, sol: Soldier, freeze: boolean) {
@@ -394,13 +408,15 @@ export class LocalPlayer {
       this.slideZ = m.vz / was;
       c.sound.step(null, c.surfaceAt(m.x, m.y, m.z), 6, 1.1);
     }
-    if (crouchHeld) this.crouch = true;
+    if (crouchHeld || this.down) this.crouch = true;
     else if (this.crouch && !c.world.blocked(m.x, m.y + 0.1, m.z, 0.25, 1.7)) this.crouch = false;
+    this.downK += ((this.down ? 1 : 0) - this.downK) * Math.min(1, dt * 5);
     const wantRun = i.keys.has('ShiftLeft') && f > 0 && !this.crouch && !i.ads && this.stamina > 0.04 && !i.fire && this.healT <= 0 && this.limp < 0.8;
     const run = wantRun && !freeze;
     this.stamina = Math.min(1, Math.max(0, this.stamina + (run ? -dt / 7 : dt / 5)));
     let top = this.crouch ? CROUCH : run ? RUN : WALK;
     top *= spec.speed * (1 - this.adsK * 0.42) * (1 - this.stun * 0.55) * (1 - this.limp * 0.36) * (this.healT > 0 ? 0.5 : 1) * (1 - this.supK * 0.12);
+    if (this.down) top = Math.min(top, 0.7);
     if (freeze) top = 0;
     this.stun = Math.max(0, this.stun - dt * 2.6);
     const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
@@ -437,7 +453,7 @@ export class LocalPlayer {
     }
     // ---- jump, with a little forgiveness either side of the ledge, or a climb onto what's in front
     this.coyote = m.grounded ? 0.1 : Math.max(0, this.coyote - dt);
-    this.jumpBuf = i.take('Space') ? 0.12 : Math.max(0, this.jumpBuf - dt);
+    this.jumpBuf = i.take('Space') && !this.down ? 0.12 : Math.max(0, this.jumpBuf - dt);
     if (!this.mantle && this.jumpBuf > 0 && !freeze && f > 0) this.tryMantle(c);
     if (this.jumpBuf > 0 && this.coyote > 0 && !freeze && !this.crouch && !this.mantle) {
       m.vy = 4.15;
@@ -447,7 +463,7 @@ export class LocalPlayer {
       this.stamina = Math.max(0, this.stamina - 0.07);
       this.inY.v -= 0.25;
     }
-    m.height = this.crouch ? 1.22 : 1.78;
+    m.height = this.down ? 0.7 : this.crouch ? 1.22 : 1.78;
     this.airV = m.vy;
     const wasAir = !m.grounded;
     if (this.mantle) this.climbing(dt, c);
@@ -492,7 +508,7 @@ export class LocalPlayer {
     this.leanK += (lt - this.leanK) * Math.min(1, dt * 10);
     // ---- the head
     // the camera's on the vest, a hand below the eyes: the world sits a little higher in the picture
-    const eyeH = 1.4 - this.crouchK * 0.5 - (this.slideT > 0 ? 0.12 : 0);
+    const eyeH = 1.4 - this.crouchK * 0.5 - (this.slideT > 0 ? 0.12 : 0) - this.downK * 0.52;
     // a camera on a head: every footfall lands in the picture, and a bad leg lands harder on one side
     const bobY = (Math.abs(Math.sin(this.bob)) * 0.046 + this.limp * Math.max(0, Math.sin(this.bob * 0.5)) ** 3 * 0.075) * this.bobK * (1 - this.adsK * 0.6);
     const bobX = Math.cos(this.bob) * 0.046 * this.bobK * (1 - this.adsK * 0.7);
@@ -732,6 +748,10 @@ export class LocalPlayer {
     this.lightPos.set(0.04, 0.043, spec.muzzle[2] + 0.03).applyQuaternion(this.gunQuat).add(this.gunPos);
     this.body(dt, c);
     if (freeze) return;
+    if (this.down) {
+      this.workT = 0;
+      return;
+    }
     this.actions(dt, i, c, cam, sol);
   }
 
@@ -927,24 +947,65 @@ export class LocalPlayer {
     }
     this.fortNear = fort;
     let work = '';
+    const bar = (k: number) => '\u25ae'.repeat(Math.round(Math.max(0, Math.min(1, k)) * 8)) + '\u25af'.repeat(8 - Math.round(Math.max(0, Math.min(1, k)) * 8));
+    /** one thing done by holding a key: which, how long it takes, what it says, and what happens at the end */
+    let job: { kind: string; need: number; key: string; doing: string; ask: string; done: () => void; tick?: boolean } | null = null;
+    const free = !near && !closer && !this.busy && this.healT <= 0;
+    // someone of ours on the floor, close and in front: that comes before anything else
+    let lift: { slot: number; name: string } | null = null;
+    if (sg.on && free) {
+      let ld = 2.1;
+      for (const f of c.fallen()) {
+        const dx = f.x - this.m.x, dz = f.z - this.m.z, dist = Math.hypot(dx, dz);
+        if (dist < ld && Math.abs(f.y - this.m.y) < 1.2 && (dist < 0.7 || (dx * fw.x + dz * fw.z) / dist > 0.2)) {
+          ld = dist;
+          lift = f;
+        }
+      }
+    }
     const canCharge = !!fort && fort.boards !== 0 && sg.attacker && sg.charges > 0 && !fort.charge;
-    if (fort && !near && !closer && !this.busy && this.healT <= 0 && (fort.boards === 0 || canCharge)) {
-      const need = fort.boards === 0 ? BUILD_T : CHARGE_T;
-      if (i.keys.has('KeyF')) {
+    const wall = sg.on && sg.act && free && !lift && !(fort && (fort.boards === 0 || canCharge)) ? c.wallAt(this.eye.x, this.eye.y, this.eye.z, fw.x, fw.y, fw.z, this.m.y) : null;
+    if (lift) {
+      const l = lift;
+      job = { kind: 'lift' + l.slot, need: sg.kit === 'medic' ? SIEGE.revive / 2 : SIEGE.revive, key: 'KeyF', doing: `Getting ${l.name} up`, ask: `Hold F  Get ${l.name} up`, done: () => c.send.revive(l.slot) };
+    } else if (fort && free && fort.boards === 0) {
+      const f = fort;
+      job = { kind: 'bar' + f.o.i, need: sg.kit === 'fortifier' && !sg.attacker ? BUILD_T / 2 : BUILD_T, key: 'KeyF', doing: 'Barricading', ask: 'Hold F  Barricade', done: () => c.send.bar(f.o.i), tick: true };
+    } else if (fort && free && canCharge) {
+      const f = fort;
+      job = { kind: 'chg' + f.o.i, need: sg.kit === 'breacher' ? CHARGE_T / 2 : CHARGE_T, key: 'KeyF', doing: 'Setting charge', ask: `Hold F  Breaching charge (${sg.charges})   Z  Kick`, done: () => c.send.charge(f.o.i, f.o.alongX ? Math.sign(this.m.z - f.o.z) || 1 : Math.sign(this.m.x - f.o.x) || 1) };
+    } else if (wall && sg.attacker) {
+      const wl = wall;
+      if (wl.sheeted) work = 'Steel behind this wall';
+      else if (wl.charged) work = 'Charge set. Stand clear';
+      else if (sg.charges > 0) job = { kind: 'wch' + wl.site.join(), need: sg.kit === 'breacher' ? WALL_CHARGE_T / 2 : WALL_CHARGE_T, key: 'KeyF', doing: 'Setting charge on the wall', ask: `Hold F  Breach this wall (${sg.charges})`, done: () => c.send.wcharge(wl.site, wl.side) };
+    } else if (wall && !sg.attacker) {
+      const wl = wall;
+      if (!wl.sheeted && !wl.charged && sg.sheets > 0) job = { kind: 'sht' + wl.site.join(), need: sg.kit === 'fortifier' ? REINF_T / 2 : REINF_T, key: 'KeyF', doing: 'Bolting steel on', ask: `Hold F  Reinforce this wall (${sg.sheets})`, done: () => c.send.reinf(wl.site, wl.side), tick: true };
+    }
+    // the kit's own key: a wire across the doorway in front (X wins over F while it is held)
+    if (fort && free && !lift && sg.act && sg.kit === 'trapper' && !sg.attacker && sg.trips > 0 && !sg.tripAt(fort.o.i) && (!job || i.keys.has('KeyX'))) {
+      const f = fort, also = job ? `   ${job.ask}` : '';
+      job = { kind: 'trp' + f.o.i, need: 1.2, key: 'KeyX', doing: 'Stringing a wire', ask: `Hold X  Tripwire (${sg.trips})${also}`, done: () => c.send.trip(f.o.i) };
+    } else if (job && fort && sg.kit === 'trapper' && !sg.attacker && sg.trips > 0 && !sg.tripAt(fort.o.i)) job.ask += `   Hold X  Tripwire (${sg.trips})`;
+    if (job) {
+      if (job.kind !== this.workKind) {
+        this.workKind = job.kind;
+        this.workT = Math.min(0, this.workT);
+      }
+      if (i.keys.has(job.key)) {
         const b = this.workT;
         this.workT += dt;
-        if (fort.boards === 0 && Math.floor(b / 0.4) !== Math.floor(this.workT / 0.4)) c.sound.clack(null, 'pump_b');
-        if (this.workT >= need) {
+        if (job.tick && Math.floor(b / 0.4) !== Math.floor(this.workT / 0.4)) c.sound.clack(null, 'pump_b');
+        if (this.workT >= job.need) {
           this.workT = -0.6;
-          if (fort.boards === 0) c.send.bar(fort.o.i);
-          else c.send.charge(fort.o.i, fort.o.alongX ? Math.sign(this.m.z - fort.o.z) || 1 : Math.sign(this.m.x - fort.o.x) || 1);
+          job.done();
         }
       } else this.workT = Math.min(0, this.workT + dt);
-      const bar = (k: number) => '\u25ae'.repeat(Math.round(Math.max(0, k) * 8)) + '\u25af'.repeat(8 - Math.round(Math.max(0, k) * 8));
-      work = this.workT > 0 ? `${fort.boards === 0 ? 'Barricading' : 'Setting charge'}  ${bar(this.workT / need)}` : fort.boards === 0 ? 'Hold F  Barricade' : `Hold F  Breaching charge (${sg.charges})   Z  Kick`;
+      work = this.workT > 0 ? `${job.doing}  ${bar(this.workT / job.need)}` : job.ask;
     } else {
       this.workT = Math.min(0, this.workT + dt);
-      if (fort && fort.boards !== 0 && !near && !closer) work = fort.charge ? 'Charge set. Stand clear' : 'Z  Kick the boards out';
+      if (!work && fort && fort.boards !== 0 && !near && !closer) work = fort.charge ? 'Charge set. Stand clear' : 'Z  Kick the boards out';
     }
     c.prompt(this.healT > 0 ? 'Bandaging' : closer ? `F  Take ${WEAPONS[gunId!].name}` : near ? (near.want > 0 ? 'F  Close' : 'F  Open') : work);
     if (closer && i.take('KeyF') && !this.busy) this.takeGun(lying.i, gunId!, c, sol, fw);
@@ -1121,6 +1182,7 @@ export class LocalPlayer {
     }
     out.panes.forEach((i, n) => c.send.pane(i, out.paneAt?.[n]));
     if (out.bars?.length) c.send.barhit(out.bars, spec.wreck);
+    c.gearShot(o, out.e);
     c.send.shot(wi, [muz.x, muz.y, muz.z], out.e, out.surf);
     // sum the pellets on each body
     const per = new Map<number, { dmg: number; zone: number; dist: number; at: [number, number, number] }>();

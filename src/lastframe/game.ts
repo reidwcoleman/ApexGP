@@ -17,7 +17,9 @@ import { Input, LocalPlayer, type PlayerCtx } from './player.ts';
 import { Soldier, angleDiff, loadGear, loadGuns, preparePeople } from './soldier.ts';
 import { stepNade, type NadeSim } from './nade.ts';
 import { Rats } from './vermin.ts';
-import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow , BOARDS, SIEGE , oneLife } from './shared.ts';
+import { F, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow , BOARDS, SIEGE , oneLife , DEFAULT_KITS, kitCharges, kitSheets, type KitId } from './shared.ts';
+import { Walls, chargeModel, siteAt, siteMid, siteOf, siteArr, sitesTouch, type Site } from './walls.ts';
+import { Gear } from './gear.ts';
 import { Barricade, openingsOf } from './fort.ts';
 
 /** how far from the room its defenders may go before the round is on, metres */
@@ -500,6 +502,13 @@ export class Game {
     progress(0.95, 'Paths');
     const seeds = [...L.map.spawns.a, ...L.map.spawns.b, ...L.map.spawns.ffa];
     this.nav = new Nav(L.world, seeds, (x, y, z) => this.zone(x, y, z) !== 'street');
+    const casters = this.scene.getObjectByName('casters');
+    this.walls = new Walls(L.world, this.nav, casters ? [L.group, casters] : [L.group], this.scene, {
+      plaster: applyLF(new THREE.MeshStandardMaterial({ color: 0x8d887c, roughness: 0.96, metalness: 0, side: THREE.DoubleSide })),
+      timber: L.plankMat,
+      steel: applyLF(new THREE.MeshStandardMaterial({ color: 0x7b8084, roughness: 0.62, metalness: 0.25 })),
+    });
+    this.gear = new Gear(this.scene);
     if (L.map.night && this.L.map.rooms?.length) {
       this.rats = new Rats(this.nav.nodes);
       this.rats.onBolt = (p) => this.sound.squeak(p);
@@ -709,6 +718,7 @@ export class Game {
     this.begin(cfg);
     const p = this.match!.addHuman('me', name, team, primary);
     this.mySlot = p.slot;
+    this.match!.handle(p.slot, { t: 'kits', kits: this.kits });
     this.match!.start();
   }
 
@@ -723,6 +733,7 @@ export class Game {
     }
     this.match!.fillBots();
     host.all({ t: 'start', cfg, players: this.match!.players });
+    this.match!.handle(this.mySlot, { t: 'kits', kits: this.kits });
     host.onReq = (from, m) => {
       if (m.t === 'hello') return this.lateJoin(from, m.name, m.primary);
       const p = this.match?.players.find((q) => q.id === from);
@@ -769,6 +780,7 @@ export class Game {
     this.begin(cfg);
     this.mySlot = slot;
     this.roster(players);
+    this.req({ t: 'kits', kits: this.kits });
     guest.onDown = (m: Down) => {
       if (m.t === 'ev') this.onEv(m.e);
       else if (m.t === 'end') this.leave();
@@ -804,6 +816,14 @@ export class Game {
     this.obj = null;
     this.secureProg = 0;
     this.secureN = [0, 0];
+    this.walls.reset();
+    this.gear.reset();
+    this.gear.setCams([], 0);
+    for (const c of this.wallCharges) this.scene.remove(c.mesh);
+    this.wallCharges = [];
+    this.spots = [];
+    this.endView();
+    this.me.down = false;
     for (const a of this.actors.values()) a.soldier?.dispose();
     this.actors.clear();
     this.mySoldier = null;
@@ -1121,8 +1141,22 @@ export class Game {
           this.objName = e.objName ?? '';
         }
         if (e.phase === 'warmup') {
-          this.myCharges = SIEGE.charges;
           this.secureProg = 0;
+          this.walls.reset();
+          this.gear.reset();
+          for (const c of this.wallCharges) this.scene.remove(c.mesh);
+          this.wallCharges = [];
+          this.spots = [];
+          this.endView();
+          this.me.down = false;
+          for (const a of this.actors.values()) a.info.down = false;
+          this.r.shadowMap.needsUpdate = true;
+          if (e.atk !== undefined) {
+            const kit = this.myKit();
+            this.myCharges = kitCharges(kit);
+            this.mySheets = kitSheets(kit);
+            this.myTrips = kit === 'trapper' ? SIEGE.trips : 0;
+          }
         }
         this.hud.phase(e);
         break;
@@ -1169,6 +1203,102 @@ export class Game {
         // it counts itself down
         const at = m.position.clone();
         for (let k = 0; k < 5; k++) window.setTimeout(() => { if (f.charge === m) this.sound.tink(at); }, (e.fuse * 1000 * k) / 5);
+        break;
+      }
+      case 'down': {
+        const a = this.actors.get(e.s);
+        if (!a) break;
+        a.info.down = true;
+        a.flags |= F.down;
+        const by = this.actors.get(e.by);
+        this.hud.feed(by?.info.name ?? '?', a.info.name, e.w, e.zone, by?.info.team ?? 2, a.info.team, e.by === this.mySlot || e.s === this.mySlot);
+        a.soldier?.flinch(e.zone, this.tmp.set(e.dir[0], e.dir[1], e.dir[2]).clone());
+        if (e.by === this.mySlot && e.s !== this.mySlot) {
+          this.hud.hitTick(true);
+          this.hud.note(`${a.info.name} is down`, 'Not dead. Someone can still get them up.');
+        }
+        if (e.s === this.mySlot) {
+          this.me.down = true;
+          this.downLeft = e.secs;
+          this.endView();
+          this.sound.hurt();
+          this.sound.deafen(0.8);
+          this.hud.note('Down', 'You can crawl. A teammate can get you up before you bleed out.');
+        }
+        break;
+      }
+      case 'up': {
+        const a = this.actors.get(e.s);
+        if (!a) break;
+        a.info.down = false;
+        a.info.hp = e.hp;
+        a.flags &= ~F.down;
+        if (e.s === this.mySlot) {
+          this.me.down = false;
+          this.me.hp = e.hp;
+          this.hud.note('On your feet', `${this.actors.get(e.by)?.info.name ?? 'Someone'} got you up.`);
+        }
+        break;
+      }
+      case 'wcharge': {
+        const st = siteOf(e.site);
+        if (!st) break;
+        if (e.s === this.mySlot) this.myCharges = Math.max(0, this.myCharges - 1);
+        const m = chargeModel(st, e.side);
+        this.scene.add(m);
+        this.wallCharges.push({ site: st, mesh: m });
+        const at = m.position.clone();
+        for (let k = 0; k < 5; k++) window.setTimeout(() => { if (m.parent) this.sound.tink(at); }, (e.fuse * 1000 * k) / 5);
+        break;
+      }
+      case 'wall': {
+        const st = siteOf(e.site);
+        if (!st) break;
+        const c = siteMid(st), at = new THREE.Vector3(c.x, st.y0 + 1.1, c.z);
+        if (e.kind === 'hole') {
+          for (let k = this.wallCharges.length - 1; k >= 0; k--) if (sitesTouch(this.wallCharges[k].site, st)) {
+            this.scene.remove(this.wallCharges[k].mesh);
+            this.wallCharges.splice(k, 1);
+          }
+          this.walls.hole(st, e.side);
+          this.r.shadowMap.needsUpdate = true;
+          // plaster in the air on the side it went to
+          const nx = st.ax ? 0 : e.side, nz = st.ax ? e.side : 0;
+          for (let k = 0; k < 14; k++) {
+            const u = st.u0 + Math.random() * (st.u1 - st.u0), y = st.y0 + Math.random() * (st.y1 - st.y0);
+            this.fx.impact(st.ax ? u : st.c + nx * 0.1, y, st.ax ? st.c + nz * 0.1 : u, nx, 0.15, nz, 'plaster');
+          }
+          this.sound.impact(at, 'plaster');
+        } else {
+          if (e.by === this.mySlot) this.mySheets = Math.max(0, this.mySheets - 1);
+          this.walls.reinforce(st, e.side);
+          this.sound.door(at, false);
+          this.sound.impact(at, 'metal');
+        }
+        break;
+      }
+      case 'cams': {
+        const went = this.gear.setCams(e.list, e.alive);
+        for (const i of went) this.sound.impact(this.gear.cams[i].pos, 'glass');
+        if (this.camView >= 0 && this.gear.cams[this.camView]?.dead !== false) this.endView();
+        break;
+      }
+      case 'trip': {
+        const f = this.forts[e.i];
+        if (!f) break;
+        const was = this.gear.setTrip(e.i, e.on, f.o);
+        if (e.on && e.s === this.mySlot) this.myTrips = Math.max(0, this.myTrips - 1);
+        if (e.on) this.sound.tink(new THREE.Vector3(f.o.x, f.o.y + 0.3, f.o.z));
+        else if (was && !e.bang) this.sound.tink(was);
+        break;
+      }
+      case 'spot': {
+        if (e.team !== (this.player(this.mySlot)?.team ?? 0)) break;
+        for (const p of e.at) {
+          const old = this.spots.find((q) => Math.hypot(q.x - p[0], q.z - p[2]) < 1.2);
+          if (old) Object.assign(old, { x: p[0], y: p[1], z: p[2], until: this.time + 4 });
+          else this.spots.push({ x: p[0], y: p[1], z: p[2], until: this.time + 4 });
+        }
         break;
       }
       case 'secure':
@@ -1521,7 +1651,7 @@ export class Game {
   private* bodies(): Iterable<[number, Body]> {
     for (const [s, a] of this.actors) {
       if (!a.info.alive || s === this.mySlot) continue;
-      yield [s, { x: a.x, y: a.y, z: a.z, yaw: a.yaw, lean: a.lean, crouch: (a.flags & F.crouch) !== 0 }];
+      yield [s, { x: a.x, y: a.y, z: a.z, yaw: a.yaw, lean: a.lean, crouch: (a.flags & F.crouch) !== 0, down: !!a.info.down }];
     }
   }
 
@@ -1541,11 +1671,35 @@ export class Game {
       barhit: (ids, k) => this.req({ t: 'barhit', ids, k }),
       barkick: (i) => this.req({ t: 'barkick', i }),
       charge: (i, side) => this.req({ t: 'charge', i, side }),
+      wcharge: (site, side) => this.req({ t: 'wcharge', site, side }),
+      reinf: (site, side) => this.req({ t: 'reinf', site, side }),
+      revive: (to) => this.req({ t: 'revive', to }),
+      trip: (i) => this.req({ t: 'trip', i }),
     },
     forts: [],
     siege: () => {
       const on = this.cfg?.mode === 'siege', attacker = this.attacking();
-      return { on, attacker, act: this.phase === 'live' || (this.phase === 'prep' && !attacker), charges: this.myCharges };
+      return { on, attacker, act: this.phase === 'live' || (this.phase === 'prep' && !attacker), charges: this.myCharges, sheets: this.mySheets, trips: this.myTrips, kit: this.myKit(), tripAt: (i: number) => this.gear.trips.has(i) };
+    },
+    wallAt: (ex, ey, ez, dx, dy, dz, fy) => {
+      const taken = this.walls.holes.map((h) => h.s);
+      const st = siteAt(this.L.world, ex, ey, ez, dx, dy, dz, fy, taken);
+      if (!st) return null;
+      const m = siteMid(st);
+      return { site: siteArr(st), side: (st.ax ? Math.sign(ez - m.z) : Math.sign(ex - m.x)) || 1, sheeted: this.walls.sheeted(st), charged: this.wallCharges.some((q) => sitesTouch(q.site, st)) };
+    },
+    fallen: () => {
+      const out: { slot: number; x: number; y: number; z: number; name: string }[] = [];
+      const myTeam = this.player(this.mySlot)?.team ?? 0;
+      for (const a of this.actors.values()) if (a.info.alive && a.info.down && a.info.team === myTeam && a.info.slot !== this.mySlot) out.push({ slot: a.info.slot, x: a.x, y: a.y, z: a.z, name: a.info.name });
+      return out;
+    },
+    gearShot: (o, e) => {
+      if (this.cfg?.mode !== 'siege') return;
+      const hit = { cams: [] as number[], trips: [] as number[] };
+      this.gear.shot(o, e, hit);
+      for (const i of hit.cams) this.req({ t: 'camhit', i });
+      for (const i of hit.trips) this.req({ t: 'triphit', i });
     },
     muzzleLight: (p) => this.muzzleLight(p),
     prompt: (s) => this.hud.prompt(s),
@@ -1556,6 +1710,124 @@ export class Game {
   /** bench tools stop the loop and call tick themselves */
   halt = false;
   // ---- the attack-and-defend game, as this screen knows it
+  walls!: Walls;
+  gear!: Gear;
+  private wallCharges: { site: Site; mesh: THREE.Mesh }[] = [];
+  /** looking through a camera (which), or the scope (through which doorway); and where the look is turned to */
+  camView = -1;
+  scopeView = -1;
+  private viewYaw = 0;
+  private viewPitch = 0;
+  private scopeBase = { x: 0, y: 0, z: 0, yaw: 0 };
+  private spotT = 0;
+  private wasViewing = false;
+  /** the other side, as a scope saw them: where, and until when it is worth showing */
+  spots: { x: number; y: number; z: number; until: number }[] = [];
+  /** what I carry attacking, and defending */
+  kits: [KitId, KitId] = [...DEFAULT_KITS];
+  private mySheets = 0;
+  private myTrips = 0;
+  /** seconds left on the floor */
+  downLeft = 0;
+  myKit(): KitId {
+    return this.kits[this.attacking() ? 0 : 1];
+  }
+  /** what a view through a lens says in its corner */
+  viewLabel(): string {
+    if (this.camView >= 0) return `CAM ${this.camView + 1} / ${this.gear.cams.length}   click: next   B: back`;
+    if (this.scopeView >= 0) return 'SCOPE   X: back';
+    return '';
+  }
+  private endView() {
+    this.camView = -1;
+    this.scopeView = -1;
+  }
+  /** B, X and the mouse while a lens is up; opening one */
+  private lenses(me: LocalPlayer) {
+    const i = this.input;
+    const live = this.cfg?.mode === 'siege' && me.alive && !me.down && (this.phase === 'live' || this.phase === 'prep');
+    if (!live) {
+      this.endView();
+      return;
+    }
+    const viewing = this.camView >= 0 || this.scopeView >= 0;
+    if (viewing) {
+      this.viewYaw = THREE.MathUtils.clamp(this.viewYaw - i.dx * 0.0016, -1.15, 1.15);
+      this.viewPitch = THREE.MathUtils.clamp(this.viewPitch - i.dy * 0.0016, -0.6, 0.6);
+      i.dx = i.dy = 0;
+      if (i.take('KeyB') || i.take('KeyX') || i.take('Escape') || i.keys.has('KeyW') || i.keys.has('KeyS') || i.keys.has('KeyA') || i.keys.has('KeyD')) return this.endView();
+      if (this.camView >= 0 && i.firePressed) {
+        const n = this.gear.cams.length;
+        for (let k = 1; k <= n; k++) if (!this.gear.cams[(this.camView + k) % n].dead) {
+          this.camView = (this.camView + k) % n;
+          this.viewYaw = this.viewPitch = 0;
+          this.sound.beep(false);
+          break;
+        }
+      }
+      if (this.camView >= 0 && this.gear.cams[this.camView]?.dead !== false) this.endView();
+      if (this.scopeView >= 0 && !this.forts[this.scopeView]?.boards) this.endView();
+      // what the scope sees, the side is told
+      this.spotT -= 0.016;
+      if (this.scopeView >= 0 && this.spotT <= 0) {
+        this.spotT = 0.4;
+        const eye = this.cam.position, fw = this.tmp.set(0, 0, -1).applyQuaternion(this.cam.quaternion).clone();
+        const myTeam = this.player(this.mySlot)?.team ?? 0;
+        const seen: number[] = [];
+        for (const a of this.actors.values()) {
+          if (!a.info.alive || a.info.team === myTeam) continue;
+          const dx = a.x - eye.x, dy = a.y + 0.9 - eye.y, dz = a.z - eye.z, d = Math.hypot(dx, dy, dz) || 1;
+          if (d < 25 && (dx * fw.x + dy * fw.y + dz * fw.z) / d > 0.72 && this.L.world.sees(eye, { x: a.x, y: a.y + 0.9, z: a.z })) seen.push(a.info.slot);
+        }
+        if (seen.length) this.req({ t: 'spot', slots: seen });
+      }
+      return;
+    }
+    if (i.take('KeyB') && !this.attacking()) {
+      const k = this.gear.cams.findIndex((c) => !c.dead);
+      if (k >= 0) {
+        this.camView = k;
+        this.viewYaw = this.viewPitch = 0;
+        this.sound.beep(false);
+      } else this.hud.toast('No cameras left');
+    }
+    if (this.myKit() === 'scout' && this.attacking() && this.phase === 'live' && i.take('KeyX')) {
+      const m = me.m;
+      let best = -1, bd = 2;
+      for (const f of this.forts) {
+        const d = Math.hypot(f.o.x - m.x, f.o.z - m.z);
+        if (f.boards && d < bd && Math.abs(f.o.y - m.y) < 1.2) {
+          bd = d;
+          best = f.o.i;
+        }
+      }
+      if (best >= 0) {
+        const o = this.forts[best].o;
+        const side = -(o.alongX ? Math.sign(m.z - o.z) : Math.sign(m.x - o.x)) || 1;
+        this.scopeBase = { x: o.x + (o.alongX ? 0 : side * 0.32), y: o.y + 0.3, z: o.z + (o.alongX ? side * 0.32 : 0), yaw: o.alongX ? (side > 0 ? Math.PI : 0) : (side > 0 ? -Math.PI / 2 : Math.PI / 2) };
+        this.scopeView = best;
+        this.viewYaw = 0;
+        this.viewPitch = 0.25;
+        this.spotT = 0;
+      } else this.hud.toast('The scope goes through a barricade');
+    }
+  }
+  /** the picture from the lens instead of from the vest */
+  private lensCam() {
+    if (this.camView >= 0) {
+      const c = this.gear.cams[this.camView];
+      this.cam.position.copy(c.pos);
+      this.cam.rotation.set(c.pitch + this.viewPitch, c.yaw + this.viewYaw, 0, 'YXZ');
+    } else {
+      this.cam.position.set(this.scopeBase.x, this.scopeBase.y, this.scopeBase.z);
+      this.cam.rotation.set(this.viewPitch, this.scopeBase.yaw + this.viewYaw, 0, 'YXZ');
+    }
+    if (this.cam.fov !== 78) {
+      this.cam.fov = 78;
+      this.cam.updateProjectionMatrix();
+    }
+    this.cam.updateMatrixWorld();
+  }
   forts: Barricade[] = [];
   siegeAtk = 0;
   obj: number[] | null = null;
@@ -1566,6 +1838,12 @@ export class Game {
   /** is this player on the attacking side this round? */
   attacking() {
     return (this.player(this.mySlot)?.team ?? 0) === this.siegeAtk;
+  }
+  /** a point of the building on the screen (0..1), or null behind the lens */
+  project(x: number, y: number, z: number): { x: number; y: number } | null {
+    const v = this.tmp.set(x, y, z).project(this.cam);
+    if (v.z > 1 || Math.abs(v.x) > 1.05 || Math.abs(v.y) > 1.05) return null;
+    return { x: v.x * 0.5 + 0.5, y: -v.y * 0.5 + 0.5 };
   }
   /** where the objective is on the screen (0..1), whether it is in front, and how far off */
   objMark(out: { x: number; y: number; on: boolean; dist: number; inside: boolean }) {
@@ -1698,8 +1976,25 @@ export class Game {
         const sol = this.body(mine);
         const freeze = this.phase === 'warmup' && oneLife(this.cfg?.mode) || this.phase === 'over' || (this.phase === 'prep' && this.attacking());
         // damage sticks in the attack-and-defend game: nothing to bandage with
-        if (this.cfg?.mode === 'siege') me.wraps = 0;
-        me.update(dt, this.input, this.ctx, this.cam, sol, freeze);
+        if (this.cfg?.mode === 'siege' && this.myKit() !== 'medic') me.wraps = 0;
+        this.lenses(me);
+        const viewing = this.camView >= 0 || this.scopeView >= 0;
+        me.update(dt, this.input, this.ctx, this.cam, sol, freeze || viewing);
+        if (viewing) {
+          this.lensCam();
+          this.hud.prompt('');
+        }
+        // through a lens there is no vest in the picture, and no camera in front of its own glass
+        if (viewing !== this.wasViewing) {
+          this.wasViewing = viewing;
+          this.mySoldier?.setDrawn(!viewing);
+        }
+        this.gear.cams.forEach((c, k) => (c.mesh.visible = k !== this.camView));
+        if (me.down) {
+          this.downLeft = Math.max(0, this.downLeft - dt);
+          this.hud.prompt(`Down. Bleeding out in ${Math.ceil(this.downLeft)} s`);
+        }
+        if (this.spots.length) this.spots = this.spots.filter((q) => q.until > this.time);
         // getting the room ready is done at the room: nobody goes to wait where the other side comes in
         if (this.phase === 'prep' && this.cfg?.mode === 'siege' && !this.attacking() && this.obj) {
           const o = this.obj, cx = (o[0] + o[3]) / 2, cz = (o[2] + o[5]) / 2;

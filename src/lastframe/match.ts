@@ -3,7 +3,8 @@ import type { Door, MapData, Pane } from './world.ts';
 import { Nav, type Node } from './nav.ts';
 import { Bot, botName } from './bots.ts';
 import { trace, type Tracer } from './ballistics.ts';
-import { BOARDS, BOARDS_ALL, CHARGE_FUSE, F, GUN_LADDER, PRIMARIES, SIEGE, W_BOOT, WEAPONS, WEAPON_LIST, ZONE, hitDamage, oneLife, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow } from './shared.ts';
+import { BOARDS, BOARDS_ALL, CHARGE_FUSE, F, GUN_LADDER, PRIMARIES, SIEGE, W_BOOT, WEAPONS, WEAPON_LIST, ZONE, hitDamage, oneLife, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow , ATK_KITS, DEF_KITS, isUp, kitCharges, kitSheets, type KitId } from './shared.ts';
+import { siteArr, siteMid, siteOf, siteOut, siteValid, sitesTouch, type Site } from './walls.ts';
 import { barPassable, openingsOf, type Opening } from './fort.ts';
 import { Tactics } from './tactics.ts';
 import { stepNade, type NadeSim } from './nade.ts';
@@ -61,6 +62,260 @@ export class Match {
   private barEdge = new Map<number, number>();
   private charges: { i: number; s: number; t: number; side: number }[] = [];
   private chargesLeft = new Map<number, number>();
+  // ---- on the floor
+  private downT = new Map<number, { t: number; by: number; zone: number; w: number }>();
+  private wasDown = new Set<number>();
+  // ---- walls
+  holes: Site[] = [];
+  sheets: Site[] = [];
+  private wcharges: { site: Site; s: number; t: number; side: number }[] = [];
+  private sheetsLeft = new Map<number, number>();
+  // ---- cameras and tripwires
+  cams: { x: number; y: number; z: number; yaw: number; pitch: number; dead: boolean }[] = [];
+  private camTick = 0;
+  trips = new Map<number, number>();
+  private tripsLeft = new Map<number, number>();
+  private tripSeen = new Set<number>();
+
+  /** what this one carries this round */
+  kitOf(slot: number): KitId {
+    const p = this.players.find((q) => q.slot === slot);
+    if (!p) return 'breacher';
+    // the computer's players each have their own, the same all match
+    p.kits ??= [ATK_KITS[(slot * 5 + 1) % 3], DEF_KITS[(slot * 7 + 2) % 3]];
+    return p.kits[this.isDefender(slot) ? 1 : 0];
+  }
+
+  /** on their feet and in the fight */
+  up(slot: number) {
+    const p = this.players.find((q) => q.slot === slot);
+    return !!p && isUp(p);
+  }
+
+  /** a teammate gets one of the fallen up: close by, and on their own feet */
+  revive(by: number, to: number) {
+    const p = this.players.find((q) => q.slot === to), h = this.players.find((q) => q.slot === by);
+    if (!p?.alive || !p.down || !h || !isUp(h) || h.team !== p.team || by === to) return false;
+    const a = this.bodies[by], b = this.bodies[to];
+    if (Math.hypot(a.x - b.x, a.z - b.z) > 2.6 || Math.abs(a.y - b.y) > 1.2) return false;
+    p.down = false;
+    p.hp = this.kitOf(by) === 'medic' ? 65 : SIEGE.upHp;
+    this.downT.delete(to);
+    this.bodies[to].flags &= ~F.down;
+    this.bodies[to].down = false;
+    this.bots.get(to)?.gotUp();
+    this.emit({ t: 'up', s: to, by, hp: p.hp });
+    this.say(to, pick(["I'm up.", 'Back in it.', 'Thanks. Moving.']), 0.8);
+    return true;
+  }
+
+  /** a breaching charge on a piece of wall, from `side` of it */
+  wallCharge(slot: number, arr: number[], side: number) {
+    const s = siteOf(arr);
+    const left = this.chargesOf(slot);
+    if (!s || left <= 0 || this.isDefender(slot) || !this.up(slot) || !siteValid(this.world, s)) return false;
+    if (this.holes.some((q) => sitesTouch(q, s)) || this.sheets.some((q) => sitesTouch(q, s, 0)) || this.wcharges.some((q) => sitesTouch(q.site, s))) return false;
+    const b = this.bodies[slot], m = siteMid(s);
+    if (Math.hypot(b.x - m.x, b.z - m.z) > 3 || Math.abs(b.y - s.y0) > 1.2) return false;
+    this.chargesLeft.set(slot, left - 1);
+    const sd = side >= 0 ? 1 : -1;
+    this.wcharges.push({ site: s, s: slot, t: CHARGE_FUSE, side: sd });
+    this.emit({ t: 'wcharge', site: siteArr(s), s: slot, side: sd, fuse: CHARGE_FUSE });
+    return true;
+  }
+  wallCharged(s: Site) {
+    return this.wcharges.some((q) => sitesTouch(q.site, s));
+  }
+  sheeted(s: Site) {
+    return this.sheets.some((q) => sitesTouch(q, s, 0));
+  }
+  holed(s: Site) {
+    return this.holes.some((q) => sitesTouch(q, s, -0.05));
+  }
+
+  /** a steel sheet over a piece of wall, on `side` of it */
+  reinforce(slot: number, arr: number[], side: number) {
+    const s = siteOf(arr);
+    const left = this.sheetsOf(slot);
+    if (!s || left <= 0 || !this.isDefender(slot) || !this.up(slot) || !siteValid(this.world, s)) return false;
+    if (this.holes.some((q) => sitesTouch(q, s)) || this.sheets.some((q) => sitesTouch(q, s, -0.05)) || this.wcharges.some((q) => sitesTouch(q.site, s))) return false;
+    const b = this.bodies[slot], m = siteMid(s);
+    if (Math.hypot(b.x - m.x, b.z - m.z) > 3 || Math.abs(b.y - s.y0) > 1.2) return false;
+    this.sheetsLeft.set(slot, left - 1);
+    this.sheets.push(s);
+    this.emit({ t: 'wall', kind: 'reinf', site: siteArr(s), side: side >= 0 ? 1 : -1, by: slot });
+    this.noise({ x: m.x, y: s.y0 + 1, z: m.z }, 30);
+    return true;
+  }
+  sheetsOf(slot: number) {
+    return this.sheetsLeft.get(slot) ?? kitSheets(this.kitOf(slot));
+  }
+
+  /** this round's cameras: one looking at each way into the room, up where a wall meets the ceiling */
+  private placeCams() {
+    this.cams = [];
+    const obj = this.obj;
+    if (!obj) return;
+    for (const d of obj.doors) {
+      if (this.cams.length >= SIEGE.cams) break;
+      const o = this.openings[d];
+      const mid = o.alongX ? (obj.box[2] + obj.box[5]) / 2 : (obj.box[0] + obj.box[3]) / 2;
+      const out = -(Math.sign(mid - (o.alongX ? o.z : o.x)) || 1);
+      let best: { x: number; y: number; z: number; s: number } | null = null;
+      for (const n of this.nav.nodes) {
+        if (Math.abs(n.y - o.y) > 0.6 || this.inBox(obj.box, n.x, n.y, n.z, 0.2)) continue;
+        const across = ((o.alongX ? n.z - o.z : n.x - o.x)) * out, d2 = Math.hypot(n.x - o.x, n.z - o.z);
+        if (across < 2 || d2 < 3.5 || d2 > 9 || !this.world.open(n.x, n.y + 2.3, n.z, o.x, o.y + 1.2, o.z)) continue;
+        // up the nearest wall from there
+        for (let a = 0; a < 8; a++) {
+          const dx = Math.cos(a * Math.PI / 4), dz = Math.sin(a * Math.PI / 4);
+          const h = this.world.ray(n.x, n.y + 2.35, n.z, dx, 0, dz, 2.6, false, true);
+          if (!h || Math.abs(h.ny) > 0.3) continue;
+          const x = n.x + dx * (h.t - 0.09), z = n.z + dz * (h.t - 0.09), y = n.y + 2.35;
+          if (!this.world.open(x, y, z, o.x, o.y + 1.2, o.z)) continue;
+          const s = -Math.abs(d2 - 6.5) - h.t * 0.3 + Math.random() * 1.5;
+          if (this.cams.some((c) => Math.hypot(c.x - x, c.z - z) < 3)) continue;
+          if (!best || s > best.s) best = { x, y, z, s };
+        }
+      }
+      if (!best) continue;
+      const dx = o.x - best.x, dz = o.z - best.z, dd = Math.hypot(dx, dz) || 1;
+      this.cams.push({ x: best.x, y: best.y, z: best.z, yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(o.y + 1.0 - best.y, dd), dead: false });
+    }
+  }
+  private camsEv(): Ev {
+    return { t: 'cams', list: this.cams.map((c) => [c.x, c.y, c.z, c.yaw, c.pitch]), alive: this.cams.reduce((m, c, i) => m | (c.dead ? 0 : 1 << i), 0) };
+  }
+  camHit(i: number, by: number) {
+    const c = this.cams[i];
+    if (!c || c.dead) return;
+    c.dead = true;
+    this.emit(this.camsEv());
+    const w = this.players.find((q) => q.bot && isUp(q) && q.team !== this.atk);
+    if (w && this.foes(by, w.slot)) this.say(w.slot, pick(['Lost a camera.', 'Camera down. They are close.', "They shot the camera out."]), 0.8);
+  }
+
+  /** a tripwire across a doorway */
+  trip(slot: number, i: number) {
+    const o = this.openings[i], b = this.bodies[slot];
+    const left = this.tripsLeft.get(slot) ?? (this.kitOf(slot) === 'trapper' ? SIEGE.trips : 0);
+    if (!o || left <= 0 || this.trips.has(i) || !this.isDefender(slot) || !this.up(slot)) return false;
+    if (Math.hypot(b.x - o.x, b.z - o.z) > 2.6 || Math.abs(b.y - o.y) > 1.2) return false;
+    this.tripsLeft.set(slot, left - 1);
+    this.trips.set(i, slot);
+    this.emit({ t: 'trip', i, on: true, s: slot });
+    return true;
+  }
+  tripsOf(slot: number) {
+    return this.tripsLeft.get(slot) ?? (this.kitOf(slot) === 'trapper' ? SIEGE.trips : 0);
+  }
+  tripOff(i: number, bang: boolean) {
+    const s = this.trips.get(i);
+    if (s === undefined) return;
+    this.trips.delete(i);
+    this.emit({ t: 'trip', i, on: false, s, bang });
+    const o = this.openings[i];
+    if (bang && o) this.blast({ id: this.nadeId++, s, kind: 'frag', x: o.x, y: o.y + 0.5, z: o.z }, 0.42);
+  }
+
+  /** the other side seen by one of this side, through a scope: everyone on it is told */
+  spot(by: number, slots: number[]) {
+    const team = this.teamOf(by);
+    if (team > 1) return;
+    const at: number[][] = [];
+    for (const s of slots.slice(0, 8)) {
+      const p = this.players.find((q) => q.slot === s);
+      if (!p?.alive || !this.foes(by, s)) continue;
+      const b = this.bodies[s];
+      this.intel[team].set(s, { x: b.x, y: b.y, z: b.z, t: this.elapsed });
+      at.push([b.x, b.y, b.z]);
+    }
+    if (at.length) this.emit({ t: 'spot', team, at });
+  }
+
+  /** a scope pushed through doorway i by `slot`: what it can see of the room from the floor just inside */
+  scopeFrom(slot: number, i: number) {
+    const o = this.openings[i], obj = this.obj;
+    if (!o || !obj) return 0;
+    const mid = o.alongX ? (obj.box[2] + obj.box[5]) / 2 : (obj.box[0] + obj.box[3]) / 2;
+    const inw = Math.sign(mid - (o.alongX ? o.z : o.x)) || 1;
+    const eye = { x: o.x + (o.alongX ? 0 : inw * 0.3), y: o.y + 0.3, z: o.z + (o.alongX ? inw * 0.3 : 0) };
+    const seen: number[] = [];
+    for (const p of this.players) {
+      if (!p.alive || !this.foes(slot, p.slot)) continue;
+      const b = this.bodies[p.slot];
+      if (Math.hypot(b.x - eye.x, b.z - eye.z) < 22 && this.world.sees(eye, { x: b.x, y: b.y + 0.9, z: b.z })) seen.push(p.slot);
+    }
+    this.spot(slot, seen);
+    return seen.length;
+  }
+
+  /** the things of this mode that run on the clock: the fallen, charges on walls, cameras, tripwires */
+  private gearUpdate(dt: number) {
+    for (const [slot, d] of this.downT) {
+      d.t -= dt;
+      if (d.t <= 0) this.damage(d.by, slot, 999, d.zone, d.w, [0, 0, 1], 0);
+    }
+    for (let k = this.wcharges.length - 1; k >= 0; k--) {
+      const c = this.wcharges[k];
+      c.t -= dt;
+      if (c.t > 0) continue;
+      this.wcharges.splice(k, 1);
+      this.holes.push(c.site);
+      this.emit({ t: 'wall', kind: 'hole', site: siteArr(c.site), side: -c.side, by: c.s });
+      const p = siteOut(c.site, -c.side, 0.7);
+      this.blast({ id: this.nadeId++, s: c.s, kind: 'frag', x: p.x, y: c.site.y0 + 1, z: p.z }, 0.5);
+      for (const b of this.bots.values()) {
+        const q = this.bodies[b.slot];
+        const d = Math.hypot(q.x - p.x, q.z - p.z, q.y - c.site.y0);
+        if (d < 5.5 && this.up(b.slot)) b.flashed(0.6 * (1 - d / 5.5));
+      }
+    }
+    if (this.phase !== 'live') return;
+    // a camera nobody has shot out tells the defenders who walks past it
+    this.camTick -= dt;
+    if (this.camTick <= 0) {
+      this.camTick = 0.5;
+      const team = 1 - this.atk;
+      for (const c of this.cams) {
+        if (c.dead) continue;
+        const fx = -Math.sin(c.yaw), fz = -Math.cos(c.yaw);
+        for (const p of this.players) {
+          if (!isUp(p) || p.team !== this.atk) continue;
+          const b = this.bodies[p.slot];
+          const dx = b.x - c.x, dz = b.z - c.z, d = Math.hypot(dx, dz);
+          if (d > 16 || d < 0.5 || Math.abs(b.y - c.y + 2.3) > 1.5 || (dx * fx + dz * fz) / d < 0.45) continue;
+          if (this.world.sees(c, { x: b.x, y: b.y + 1.2, z: b.z })) this.intel[team].set(p.slot, { x: b.x, y: b.y, z: b.z, t: this.elapsed });
+        }
+      }
+    }
+    // a tripwire: whoever of the other side walks through it; the sharp-eyed see it first and cut it
+    for (const [i, owner] of this.trips) {
+      const o = this.openings[i];
+      for (const p of this.players) {
+        if (!isUp(p) || !this.foes(owner, p.slot)) continue;
+        const b = this.bodies[p.slot];
+        if (Math.abs(b.y - o.y) > 1) continue;
+        const across = Math.abs(o.alongX ? b.z - o.z : b.x - o.x), along = Math.abs(o.alongX ? b.x - o.x : b.z - o.z);
+        if (along > o.w / 2 + 0.2) continue;
+        const bot = this.bots.get(p.slot);
+        if (bot && across < 2.4 && !this.tripSeen.has(p.slot * 256 + i)) {
+          this.tripSeen.add(p.slot * 256 + i);
+          if (Math.random() < 0.25 + bot.skill * 0.5) {
+            this.say(p.slot, pick(['Tripwire. Cutting it.', 'Wire on the door. Got it.', 'Watch the wire.']), 0.9);
+            this.tripOff(i, false);
+            break;
+          }
+        }
+        if (across < 0.35) {
+          this.intel[Math.min(2, this.teamOf(owner))].set(p.slot, { x: b.x, y: b.y, z: b.z, t: this.elapsed });
+          this.say(owner, pick(['Tripwire went!', 'That was my wire.', 'They hit the wire.']), 0.9);
+          this.tripOff(i, true);
+          break;
+        }
+      }
+    }
+  }
   secureProg = 0;
   /** who is in the room: attackers, defenders */
   secureN: [number, number] = [0, 0];
@@ -101,6 +356,18 @@ export class Match {
         q.push(this.nav.nodes[k]);
       }
       if (seen.size < inside.length * 0.9) continue;
+      // and shut once its doorways are boarded: no way out of it on foot that boards cannot go across
+      let leaks = 0;
+      for (const n of this.nav.nodes) {
+        if (!this.inBox(box, n.x, n.y, n.z, 0.25)) continue;
+        for (const k of n.next) {
+          const o2 = this.nav.nodes[k];
+          if (this.inBox(box, o2.x, o2.y, o2.z, 0.25) || Math.abs(o2.y - n.y) > 0.7) continue;
+          const e = this.barEdge.get(n.i * 65536 + k);
+          if (e === undefined || !doors.includes(e)) leaks++;
+        }
+      }
+      if (leaks > 0) continue;
       const cx = (box[0] + box[3]) / 2, cz = (box[2] + box[5]) / 2;
       const c = inside.reduce((b, n) => (Math.hypot(n.x - cx, n.z - cz) < Math.hypot(b.x - cx, b.z - cz) ? n : b), inside[0]);
       out.push({ name: r.name, box, c, doors });
@@ -157,7 +424,7 @@ export class Match {
       const across = o.alongX ? Math.abs(q.z - o.z) : Math.abs(q.x - o.x), along = o.alongX ? Math.abs(q.x - o.x) : Math.abs(q.z - o.z);
       if (across < 0.36 && along < o.w / 2 + 0.3 && Math.abs(q.y - o.y) < 1.2) return false;
     }
-    this.barHp[i] = new Array(BOARDS).fill(2);
+    this.barHp[i] = new Array(BOARDS).fill(BOARD_HP);
     this.setBar(i, BOARDS_ALL, slot);
     this.noise({ x: o.x, y: o.y + 1, z: o.z }, 22);
     return true;
@@ -169,7 +436,7 @@ export class Match {
     for (const id of ids) {
       const i = id >> 3, b = id & 7;
       if (!(this.bars[i] >> b & 1)) continue;
-      const hp = (this.barHp[i] ??= new Array(BOARDS).fill(2));
+      const hp = (this.barHp[i] ??= new Array(BOARDS).fill(BOARD_HP));
       hp[b] -= k;
       if (hp[b] <= 0) {
         this.bars[i] &= ~(1 << b);
@@ -184,7 +451,8 @@ export class Match {
     const o = this.openings[i];
     if (!o || !this.bars[i]) return;
     let m = this.bars[i], n = 0;
-    for (let b = 0; b < BOARDS && n < 3; b++) if (m >> b & 1) {
+    const all = this.kitOf(slot) === 'point' && !this.isDefender(slot);
+    for (let b = 0; b < BOARDS && (all || n < 3); b++) if (m >> b & 1) {
       m &= ~(1 << b);
       n++;
     }
@@ -194,7 +462,7 @@ export class Match {
 
   /** a breaching charge on a barricade, from `side` of it */
   setCharge(slot: number, i: number, side: number) {
-    const left = this.chargesLeft.get(slot) ?? SIEGE.charges;
+    const left = this.chargesOf(slot);
     if (left <= 0 || !this.bars[i] || this.charges.some((c) => c.i === i)) return false;
     this.chargesLeft.set(slot, left - 1);
     this.charges.push({ i, s: slot, t: CHARGE_FUSE, side: side >= 0 ? 1 : -1 });
@@ -202,7 +470,7 @@ export class Match {
     return true;
   }
   chargesOf(slot: number) {
-    return this.chargesLeft.get(slot) ?? SIEGE.charges;
+    return this.chargesLeft.get(slot) ?? kitCharges(this.kitOf(slot));
   }
   chargeOn(i: number) {
     return this.charges.some((c) => c.i === i);
@@ -217,6 +485,7 @@ export class Match {
       const o = this.openings[c.i];
       if (!o) continue;
       this.setBar(c.i, 0, c.s, true);
+      this.tripOff(c.i, false);
       // it goes off into the room behind: whoever stood close to the boards is hurt, and nobody near sees for a moment
       const x = o.x - (o.alongX ? 0 : c.side * 0.7), z = o.z - (o.alongX ? c.side * 0.7 : 0);
       this.blast({ id: this.nadeId++, s: c.s, kind: 'frag', x, y: o.y + 1, z }, 0.45);
@@ -229,7 +498,7 @@ export class Match {
     if (this.phase !== 'live' || !this.obj) return;
     const n: [number, number] = [0, 0];
     for (const p of this.players) {
-      if (!p.alive || p.team > 1) continue;
+      if (!isUp(p) || p.team > 1) continue;
       const b = this.bodies[p.slot];
       if (this.inObj(b.x, b.y, b.z)) n[p.team === this.atk ? 0 : 1]++;
     }
@@ -337,6 +606,10 @@ export class Match {
     this.emit({ t: 'phase', phase: this.phase, round: this.round, clock: this.clock, score: this.score, hold: this.holdZone, ...this.siegeInfo() });
     if (this.cfg.mode !== 'siege') return;
     this.bars.forEach((b, i) => { if (b) this.emit({ t: 'bar', i, boards: b }); });
+    for (const h of this.holes) this.emit({ t: 'wall', kind: 'hole', site: siteArr(h), side: 1, by: -1 });
+    for (const h of this.sheets) this.emit({ t: 'wall', kind: 'reinf', site: siteArr(h), side: 1, by: -1 });
+    this.emit(this.camsEv());
+    for (const [i, s2] of this.trips) this.emit({ t: 'trip', i, on: true, s: s2 });
     this.emit({ t: 'secure', prog: this.secureProg, n: this.secureN });
   }
 
@@ -390,6 +663,18 @@ export class Match {
       for (let i = 0; i < this.bars.length; i++) this.setBar(i, 0);
       this.charges = [];
       this.chargesLeft.clear();
+      this.downT.clear();
+      this.wasDown.clear();
+      this.holes = [];
+      this.sheets = [];
+      this.wcharges = [];
+      this.sheetsLeft.clear();
+      this.trips.clear();
+      this.tripsLeft.clear();
+      this.tripSeen.clear();
+      for (const p of this.players) p.down = false;
+      this.placeCams();
+      this.emit(this.camsEv());
       this.secureProg = 0;
       this.secureN = [0, 0];
       this.overtime = false;
@@ -428,7 +713,8 @@ export class Match {
     for (const b of this.bots.values()) {
       const p = this.players.find((q) => q.slot === b.slot);
       if (!p?.alive) continue;
-      b.update(dt, live || this.active(b.slot));
+      if (p.down) b.crawl(dt);
+      else b.update(dt, live || this.active(b.slot));
       const s = this.bodies[b.slot];
       s.x = b.m.x;
       s.y = b.m.y;
@@ -439,7 +725,11 @@ export class Match {
       s.lean = b.lean;
       s.w = WEAPON_LIST.indexOf(b.weapon);
       s.flags = F.alive | (b.crouch ? F.crouch : 0) | (b.ads ? F.ads : 0) | (b.light ? F.light : 0) | (b.reload > 0 ? F.reload : 0) | (Math.hypot(b.m.vx, b.m.vz) > 0.3 ? F.moving : 0) | (Math.hypot(b.m.vx, b.m.vz) > 4.2 ? F.sprint : 0);
+      if (p.down) s.flags = F.alive | F.down | F.crouch;
+      s.down = !!p.down;
     }
+    // the people playing: the host says who is on the floor, whatever their own machine thinks
+    for (const p of this.players) if (!p.bot && this.bodies[p.slot]) this.bodies[p.slot].down = !!p.down && p.alive;
     const now = performance.now() / 1000;
     for (const [slot, at] of this.respawn) {
       if (now >= at && this.phase !== 'over' && !oneLife(this.cfg.mode)) {
@@ -471,7 +761,10 @@ export class Match {
       }
     }
     if (live && this.cfg.mode === 'hold') this.holdUpdate(dt);
-    if (this.cfg.mode === 'siege') this.siegeUpdate(dt);
+    if (this.cfg.mode === 'siege') {
+      this.siegeUpdate(dt);
+      this.gearUpdate(dt);
+    }
     this.tactics.update(dt);
   }
 
@@ -814,6 +1107,7 @@ export class Match {
     const yaw = Math.atan2(-(cx - x), -(cz - z));
     p.hp = 100;
     p.alive = true;
+    p.down = false;
     this.bleed.delete(p.slot);
     this.wraps.set(p.slot, 2);
     const b = this.bodies[p.slot];
@@ -839,7 +1133,7 @@ export class Match {
         this.noise({ x: r.o[0], y: r.o[1], z: r.o[2] }, WEAPONS[WEAPON_LIST[r.w]].loud);
         break;
       case 'hit':
-        if (me.alive && this.foes(slot, r.to)) this.damage(slot, r.to, r.dmg, r.zone, r.w, r.dir, r.dist);
+        if (isUp(me) && this.foes(slot, r.to)) this.damage(slot, r.to, r.dmg, r.zone, r.w, r.dir, r.dist);
         break;
       case 'door':
         this.useDoor(r.i, r.from);
@@ -855,7 +1149,7 @@ export class Match {
       }
       case 'heal': {
         const left = this.wraps.get(slot) ?? 2;
-        if (!me.alive || left <= 0 || this.cfg.mode === 'siege') break;
+        if (!isUp(me) || left <= 0 || (this.cfg.mode === 'siege' && this.kitOf(slot) !== 'medic')) break;
         this.wraps.set(slot, left - 1);
         me.hp = Math.min(100, me.hp + 35);
         this.bleed.delete(slot);
@@ -875,16 +1169,43 @@ export class Match {
         this.emit({ t: 'chat', from: me.name, text: String(r.text).slice(0, 120) });
         break;
       case 'bar':
-        if (me.alive && this.active(slot)) this.build(slot, r.i);
+        if (isUp(me) && this.active(slot)) this.build(slot, r.i);
         break;
       case 'barhit':
         if (me.alive) this.barHit(r.ids.slice(0, 24), Math.min(2, Math.max(0.5, r.k)), slot);
         break;
       case 'barkick':
-        if (me.alive && this.active(slot)) this.barKick(slot, r.i);
+        if (isUp(me) && this.active(slot)) this.barKick(slot, r.i);
         break;
       case 'charge':
-        if (me.alive && this.phase === 'live') this.setCharge(slot, r.i, r.side);
+        if (isUp(me) && this.phase === 'live') this.setCharge(slot, r.i, r.side);
+        break;
+      case 'wcharge':
+        if (this.phase === 'live') this.wallCharge(slot, r.site, r.side);
+        break;
+      case 'reinf':
+        if (this.active(slot)) this.reinforce(slot, r.site, r.side);
+        break;
+      case 'revive':
+        this.revive(slot, r.to);
+        break;
+      case 'camhit':
+        if (me.alive) this.camHit(r.i, slot);
+        break;
+      case 'trip':
+        if (this.active(slot)) this.trip(slot, r.i);
+        break;
+      case 'triphit':
+        if (me.alive && this.trips.has(r.i)) this.tripOff(r.i, false);
+        break;
+      case 'spot':
+        if (isUp(me) && this.kitOf(slot) === 'scout') this.spot(slot, r.slots);
+        break;
+      case 'kits':
+        if (Array.isArray(r.kits) && ATK_KITS.includes(r.kits[0]) && DEF_KITS.includes(r.kits[1])) {
+          me.kits = [r.kits[0], r.kits[1]];
+          this.emit({ t: 'roster', players: this.players });
+        }
         break;
       case 'me':
         if (r.primary && PRIMARIES.includes(r.primary) && this.cfg.mode !== 'gun') me.primary = r.primary;
@@ -984,6 +1305,19 @@ export class Match {
     }
     out.panes.forEach((i, n) => this.emit({ t: 'pane', i, at: out.paneAt?.[n] }));
     if (out.bars?.length) this.barHit(out.bars, spec.wreck, b.slot);
+    // a camera on the line of any of those rounds
+    if (this.cams.length) for (let i = 0; i < this.cams.length; i++) {
+      const c = this.cams[i];
+      if (c.dead) continue;
+      for (let k = 0; k + 2 < out.e.length; k += 6) {
+        const dx = out.e[k] - ox, dy = out.e[k + 1] - oy, dz = out.e[k + 2] - oz;
+        const t = Math.min(1, Math.max(0, ((c.x - ox) * dx + (c.y - oy) * dy + (c.z - oz) * dz) / (dx * dx + dy * dy + dz * dz || 1)));
+        if (Math.hypot(ox + dx * t - c.x, oy + dy * t - c.y, oz + dz * t - c.z) < 0.2) {
+          this.camHit(i, b.slot);
+          break;
+        }
+      }
+    }
     this.emit({ t: 'shot', s: b.slot, w, o: [ox, oy, oz], e: out.e, surf: out.surf });
     this.noise({ x: ox, y: oy, z: oz }, spec.loud);
     for (const h of out.hits) {
@@ -1015,6 +1349,15 @@ export class Match {
     }
   }
 
+  /** a side with nobody left standing has lost the round (the fallen can't win it) */
+  private sideCheck() {
+    if (this.phase !== 'live' && this.phase !== 'prep') return;
+    const a = this.players.some((q) => q.team === 0 && isUp(q)), b = this.players.some((q) => q.team === 1 && isUp(q));
+    if (a && b) return;
+    const win = a ? 0 : 1;
+    this.endRound(win, this.cfg.mode === 'siege' ? (win === this.atk ? 'Defenders eliminated' : 'Attackers eliminated') : 'Eliminated');
+  }
+
   damage(by: number, to: number, dmg: number, zone: number, w: number, dir: [number, number, number], dist: number) {
     const p = this.players.find((q) => q.slot === to);
     if (!p?.alive || this.phase === 'over' || this.phase === 'between') return;
@@ -1030,10 +1373,30 @@ export class Match {
       this.emit({ t: 'hit', s: to, by, dmg, hp: p.hp, zone, dir: d, bleed: this.bleed.get(to) ?? 0 });
       return;
     }
+    if (this.cfg.mode === 'siege' && this.phase === 'live' && !p.down && zone !== ZONE.head && by !== to && !this.wasDown.has(to)) {
+      // not dead: on the floor, once a round, for as long as the bleeding takes or until someone finishes it
+      p.down = true;
+      p.hp = SIEGE.downHp;
+      this.wasDown.add(to);
+      this.downT.set(to, { t: SIEGE.bleedOut, by, zone, w });
+      this.bodies[to].flags |= F.down;
+      this.bodies[to].down = true;
+      this.bots.get(to)?.wentDown();
+      const kd = this.players.find((q) => q.slot === by);
+      if (kd && kd !== p) kd.score += 50;
+      this.emit({ t: 'down', s: to, by, zone, w, dir: d, secs: SIEGE.bleedOut });
+      const w4 = this.witness(p.team, this.bodies[to], to);
+      if (w4 >= 0) this.say(w4, pick([`${p.name} is down! Get to him!`, 'Man down, still breathing!', `${p.name} needs picking up!`]), 0.8);
+      this.sideCheck();
+      return;
+    }
     p.alive = false;
+    p.down = false;
+    this.downT.delete(to);
+    this.bodies[to].down = false;
     p.deaths++;
     this.bleed.delete(to);
-    this.bodies[to].flags &= ~F.alive;
+    this.bodies[to].flags &= ~(F.alive | F.down);
     const killer = this.players.find((q) => q.slot === by);
     if (killer && killer !== p) {
       killer.kills++;
@@ -1070,14 +1433,14 @@ export class Match {
     if (solo(mode) && killer && killer.kills >= this.cfg.limit) this.finish(killer.slot);
     // nobody goes looking for the dead
     for (const k of this.intel) k.delete(to);
-    if (oneLife(mode)) {
-      const a = this.players.some((q) => q.team === 0 && q.alive), b = this.players.some((q) => q.team === 1 && q.alive);
-      if ((this.phase === 'live' || this.phase === 'prep') && (!a || !b)) this.endRound(a ? 0 : 1, mode === 'siege' ? ((a ? 0 : 1) === this.atk ? 'Defenders eliminated' : 'Attackers eliminated') : 'Eliminated');
-    } else this.respawn.set(to, performance.now() / 1000 + (p.bot ? 5 : 7.4));
+    if (oneLife(mode)) this.sideCheck();
+    else this.respawn.set(to, performance.now() / 1000 + (p.bot ? 5 : 7.4));
     this.emit({ t: 'roster', players: this.players });
   }
 }
 
+/** what a board takes: four carbine rounds, two from the pump gun or the bolt rifle */
+const BOARD_HP = 4;
 /** rooms worth fighting over, and what they are called */
 const SIEGE_ROOMS = ['pharm', 'theatre', 'records', 'morgue', 'kitchen', 'xray', 'children', 'office', 'lab', 'staff', 'canteen', 'dorm', 'iso_a', 'boiler', 'cold_meat', 'cold_frozen', 'loft', 'triage', 'exam', 'side_a', 'side_b', 'dayroom', 'ward_n', 'scrub', 'stockroom', 'chapel', 'nurse'];
 const ROOM_NAMES: Record<string, string> = {
