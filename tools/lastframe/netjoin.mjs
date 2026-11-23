@@ -2,7 +2,8 @@
 import { chromium } from 'playwright-core';
 import { CHROME, ANGLE } from '../chrome.mjs';
 const port = process.argv[2] ?? '5281', map = process.argv[3] ?? 'ward';
-const base = `http://localhost:${port}/lastframe.html`;
+// BASE=https://.../lastframe.html tries the published game instead of the dev server
+const base = process.env.BASE ?? `http://localhost:${port}/lastframe.html`;
 const b = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--use-gl=angle', '--autoplay-policy=no-user-gesture-required'] });
 const t0 = Date.now();
 const log = (...a) => console.log(((Date.now() - t0) / 1000).toFixed(1) + 's', ...a);
