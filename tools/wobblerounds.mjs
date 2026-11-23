@@ -6,7 +6,7 @@ import { CHROME, ANGLE } from './chrome.mjs';
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
 const port = opt('port', '5197');
-const rounds = opt('rounds', '2,4,6,16,20,25,26,27,32,33,34,35,36,37,38,39,40').split(',').map((x) => (/^\d+$/.test(x) ? Number(x) : x));
+const rounds = opt('rounds', '2,4,6,16,20,25,26,27,32,33,34,35,36,37,38,39,40,41').split(',').map((x) => (/^\d+$/.test(x) ? Number(x) : x));
 const runs = Number(opt('runs', 2));
 const cut = opt('cut', '0');
 const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });

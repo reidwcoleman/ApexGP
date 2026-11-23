@@ -262,12 +262,24 @@ export class UI {
   private shoutT = 0;
 
   /** the stars you've got */
-  stars(n: number | null) {
+  /** the rows of the board down the left (the stars sit under it) */
+  private boardRows = 0;
+  /** where the stars go when something else has their corner (the kart race's panel and standings): px from the top, 0 for the usual place */
+  starsTop = 0;
+  stars(n: number | null, sub = '', ready = false) {
     const el = this.starsEl ?? (this.starsEl = this.layer('mm-stars mm-hide'));
     el.classList.toggle('mm-hide', n === null);
-    if (n === null || el.dataset.k === `${n}`) return;
+    el.classList.toggle('ready', ready);
+    if (n === null) return;
+    const top = this.starsTop ? `${this.starsTop}px` : this.boardRows ? `${80 + this.boardRows * 30}px` : '';
+    if (el.style.top !== top) el.style.top = top;
+    if (el.dataset.s !== sub) {
+      el.dataset.s = sub;
+      el.dataset.k = '';
+    }
+    if (el.dataset.k === `${n}`) return;
     el.dataset.k = `${n}`;
-    el.innerHTML = `<b>★ ${n}</b>`;
+    el.innerHTML = `<b>★ ${n}</b>${sub ? `<i>${sub}</i>` : ''}`;
     el.classList.remove('bump');
     void el.offsetWidth;
     el.classList.add('bump');
@@ -351,8 +363,9 @@ export class UI {
   teams(list: { name: string; color: number; share: number; mine: boolean; label?: string }[] | null) {
     const el = this.teamEl ?? (this.teamEl = this.hudEl.appendChild(h('div', 'mm-teams')));
     el.classList.toggle('mm-hide', !list);
-    if (!list) return;
+    if (!list) return void (this.boardRows = 0);
     el.classList.toggle('board', list.some((t) => t.label !== undefined));
+    this.boardRows = el.classList.contains('board') ? list.length : 0;
     const key = list.map((t) => t.name).join();
     if (el.dataset.k !== key) {
       el.dataset.k = key;

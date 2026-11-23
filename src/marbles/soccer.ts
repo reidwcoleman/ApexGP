@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Mode, type Marble } from './physics.ts';
 import type { Course } from './courses.ts';
+import { GATES } from './course-gates.ts';
 import { CUP_COLORS, CUP_NAMES, cupBallArt, fenceBallArt, hoopBallArt, pushBallArt, volleyBallArt, type CupArena, type CupBall, type CupCfg } from './course-soccer.ts';
 
 /**
@@ -20,7 +21,9 @@ export type CupEvent =
   | { k: 'goal'; team: number; by: number; own: boolean; ball: number; a: number; b: number; pts?: number }
   | { k: 'kick'; ball: number; id: number; v: number; shot: boolean }
   | { k: 'hit'; id: number; vx: number; vy: number; vz: number }
-  | { k: 'bang'; ball: number; v: number };
+  | { k: 'bang'; ball: number; v: number }
+  /** Gate Crashers: a ball's gone through a gate (whose it was is the gate's to say) */
+  | { k: 'gate'; ball: number; gate: number; by: number };
 
 const P = new THREE.Vector3(), N = new THREE.Vector3(), AX = new THREE.Vector3();
 /** Bean Hoops: how near the iron the middle of the ball can come (less than the ball: a rim that size and a ball that size would never go in) */
@@ -85,7 +88,7 @@ export class CupPlay {
   }
   mine() {
     const p = this.who().find((r) => r.c.player);
-    if (!p) return null;
+    if (!p || this.arena.gates) return null;
     const t = this.teamOf(p.c.id);
     return { name: CUP_NAMES[t], color: CUP_COLORS[t] };
   }
@@ -107,6 +110,14 @@ export class CupPlay {
     return this.score[team === 0 ? 1 : 0];
   }
   board() {
+    // (the final: who's still in, the ones still in first)
+    if (this.arena.gates) {
+      const G = this.arena.gates;
+      return this.who()
+        .map((r) => ({ name: r.c.player ? 'YOU' : r.c.name.toUpperCase().slice(0, 9), color: G.list.find((g) => g.owner === r.c.id)?.col ?? 0xffffff, share: r.out ? 0 : 1, mine: r.c.player, label: r.out ? 'OUT' : '♥'.repeat(Math.max(1, G.lives.get(r.c.id) ?? 1)), out: r.out }))
+        .sort((a, b) => Number(a.out) - Number(b.out))
+        .slice(0, 8);
+    }
     const me = this.mine()?.name;
     if (this.cfg.rule === 'fence') {
       const n = this.arena.balls.length;
@@ -117,6 +128,7 @@ export class CupPlay {
   }
   /** the score line, as the HUD and the banner say it */
   line() {
+    if (this.arena.gates) return `${this.who().filter((r) => !r.out).length} LEFT`;
     if (this.cfg.rule === 'fence') return `${CUP_NAMES[0]} YARD ${this.inYard(0)} · ${CUP_NAMES[1]} YARD ${this.inYard(1)}`;
     return `${CUP_NAMES[0]} ${this.score[0]} - ${this.score[1]} ${CUP_NAMES[1]}`;
   }
@@ -137,6 +149,7 @@ export class CupPlay {
   /** kick off: the first ball down */
   start() {
     const A = this.arena, C = this.cfg;
+    if (A.gates) return this.dropIn(A.balls[0]);
     if (C.rule === 'volley') return this.serve(Math.random() < 0.5 ? 0 : 1);
     if (C.rule !== 'fence') return this.drop(A.balls[0], 0);
     // (Over the Fence: half the balls in each yard, spread across it)
@@ -145,6 +158,17 @@ export class CupPlay {
       this.drop(b, ((k + 0.5) / half - 0.5) * (C.HW * 1.5), (i % 2 ? 1 : -1) * C.HL * 0.45);
     });
   }
+
+  /** Gate Crashers: a ball comes down a little way out from the middle, anywhere round it */
+  private dropIn(b: CupBall) {
+    const a = Math.random() * Math.PI * 2;
+    this.drop(b, Math.cos(a) * 4.5, Math.sin(a) * 4.5);
+  }
+  /** which of the later balls have come in */
+  private more = [true, false, false, false];
+  /** half the angle of an open gate, now (the game sets it), and the gate a ball's just gone through */
+  gateHalf = 0.2;
+  private through = -1;
 
   /** Volley Folly: the ball comes down from high over the middle of a team's yard (theirs to play) */
   private serve(team: number) {
@@ -193,6 +217,39 @@ export class CupPlay {
     if (b.pos.y > y0 + C.ceil - R) {
       b.pos.y = y0 + C.ceil - R;
       if (b.vel.y > 0) b.vel.y *= -0.5;
+    }
+    // Gate Crashers: the ring. Through an open gate it's gone; anywhere else it comes back off the wall
+    if (A.gates) {
+      const G = A.gates, dx = b.pos.x - A.center.x, dzz = b.pos.z - A.center.z, rr = Math.hypot(dx, dzz), lim = G.R - R;
+      if (rr > lim && rr > 1e-3) {
+        const ang = Math.atan2(dzz, dx);
+        let hit = -1;
+        if (b.pos.y < y0 + G.H)
+          for (let k = 0; k < G.list.length; k++) {
+            const g = G.list[k];
+            if (!g.open) continue;
+            let d = Math.abs(ang - g.a) % (Math.PI * 2);
+            if (d > Math.PI) d = Math.PI * 2 - d;
+            // (all of the ball between the posts)
+            if (d < this.gateHalf - (R * 0.55) / G.R) hit = k;
+          }
+        if (hit >= 0 && b.live) {
+          if (rr > lim + R * 1.1 && ev) this.through = hit;
+          // (a guest's copy waits just outside for the host to say)
+          const far = G.R + R * 1.6;
+          if (rr > far) b.pos.set(A.center.x + (dx / rr) * far, b.pos.y, A.center.z + (dzz / rr) * far);
+        } else {
+          const nx = dx / rr, nz = dzz / rr;
+          b.pos.x = A.center.x + nx * lim;
+          b.pos.z = A.center.z + nz * lim;
+          const vn = b.vel.x * nx + b.vel.z * nz;
+          if (vn > 0) {
+            b.vel.x -= nx * vn * 1.74;
+            b.vel.z -= nz * vn * 1.74;
+            if (ev && vn > 6) ev.push({ k: 'bang', ball: i, v: 9 });
+          }
+        }
+      }
     }
     // in the goal, under the bar: the roof
     const dz = Math.abs(b.pos.z - A.center.z);
@@ -271,6 +328,7 @@ export class CupPlay {
     const top = b.vel.length();
     if (top > C.top) b.vel.multiplyScalar(C.top / top);
     // (and however it got there, it isn't leaving)
+    if (A.gates) return;
     const lim = C.HL + C.goalD - R, limX = C.HW - R;
     b.pos.x = THREE.MathUtils.clamp(b.pos.x, A.center.x - limX, A.center.x + limX);
     b.pos.z = THREE.MathUtils.clamp(b.pos.z, A.center.z - lim, A.center.z + lim);
@@ -294,6 +352,7 @@ export class CupPlay {
       b.prev = b.last;
       b.last = id;
     }
+    if (this.arena.gates) return;
     const team = this.teamOf(id);
     b.by[team] = id;
     b.byT[team] = t;
@@ -511,10 +570,22 @@ export class CupPlay {
       this.drop(A.balls[1], 6);
       A.balls[0].backAt && (A.balls[0].backAt = t + 0.5);
     }
+    // Gate Crashers: more balls as it goes on (never more than there are gates left to guard, less one)
+    if (A.gates) {
+      const left = all.filter((r) => !r.out).length;
+      A.balls.forEach((b, k) => {
+        if (k && !this.more[k] && x > GATES.ballAt[k] && left > k) {
+          this.more[k] = true;
+          this.dropIn(b);
+          ev.push({ k: 'bang', ball: k, v: -1 });
+        }
+      });
+    }
     const n = 4, h = dt / n;
     A.balls.forEach((b, i) => {
       if (b.backAt && t >= b.backAt) {
-        if (C.rule === 'volley') this.serve(this.serveTo);
+        if (A.gates) this.dropIn(b);
+        else if (C.rule === 'volley') this.serve(this.serveTo);
         else this.drop(b, i ? 6 : this.second ? -6 : 0);
       }
       if (!b.live && !b.backAt) return;
@@ -527,6 +598,16 @@ export class CupPlay {
         for (const r of all) if (r.m.active && !r.out && !r.m.frozen) this.touch(b, i, r, t, ev);
         this.hold(b, was, 0, null, i);
         const dz = b.pos.z - A.center.z;
+        // Gate Crashers: through a gate
+        if (A.gates) {
+          if (this.through < 0) continue;
+          const gate = this.through;
+          this.through = -1;
+          b.live = false;
+          b.backAt = t + C.restart;
+          ev.push({ k: 'gate', ball: i, gate, by: b.last });
+          continue;
+        }
         // Bean Hoops: down through a rim is a basket for the side that shoots at it
         if (C.rule === 'hoops') {
           for (let team = 0; team < 2 && b.live; team++) {
@@ -651,7 +732,7 @@ export class CupPlay {
       const lift = THREE.MathUtils.clamp(1 - (r.m.pos.y - y0 - 0.5) * 0.2, 0.45, 1) * (r.c.player ? 1.25 : 1);
       M.makeScale(lift, 1, lift).setPosition(S.set(r.m.pos.x, y0 + 0.06, r.m.pos.z));
       this.rings.setMatrixAt(n, M);
-      this.rings.setColorAt(n, C.set(CUP_COLORS[this.teamOf(r.c.id)]));
+      this.rings.setColorAt(n, C.set(A.colors ? A.colors[this.teamOf(r.c.id) % A.colors.length] : CUP_COLORS[this.teamOf(r.c.id)]));
       n++;
     }
     this.rings.count = n;

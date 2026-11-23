@@ -68,6 +68,13 @@ export type CtlMsg =
   /** Bean Cup: where the balls are, and the goals; a goal going in */
   | { t: 'cup'; s: number[]; a: number; b: number }
   | { t: 'goal'; team: number; by: number; own: boolean; ball: number; a: number; b: number; pts?: number }
+  /** Gate Crashers: a ball's gone through gate `g`, bean `id`'s, knocked in by `by`; it has `left` lives now (0: out) */
+  | { t: 'gate'; g: number; id: number; by: number; left: number }
+  /** a ghost (someone out of the show, flying on): where it is, and a BOO (its owner → the host → all) */
+  | { t: 'ghost'; id: number; p: [number, number, number, number]; boo?: 1 }
+  /** stars for a revive (guest → host: mine's coming back; host → all: this bean is back next round) */
+  | { t: 'revive'; id: number }
+  | { t: 'revived'; id: number }
   | { t: 'ping'; ts: number; ht: number; rtt: number }
   | { t: 'pong'; ts: number }
   | { t: 'kick'; why: string };

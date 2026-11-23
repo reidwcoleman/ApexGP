@@ -394,6 +394,7 @@ export const ROUND_BIOME: Record<string, BiomeId> = {
   rumblehill: 'desert',
   crownpeak: 'royal',
   crownkeep: 'royal',
+  gatecrashers: 'royal',
   lavarush: 'volcano',
   meltdown: 'arctic',
   jumpclub: 'space',

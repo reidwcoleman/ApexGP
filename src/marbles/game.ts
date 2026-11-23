@@ -19,7 +19,8 @@ import { KartPlay } from './modes-kart.ts';
 import { RACE } from './kart-race.ts';
 import { ROCKET } from './course-rocket.ts';
 import { Fireworks } from './fx.ts';
-import { Stars } from './stars.ts';
+import { Stars, STARS } from './stars.ts';
+import { Ghosts, GHOST, REVIVE, type Spook } from './ghost.ts';
 import { BeanRig, OUTFITS, randomOutfit, type Outfit } from './bean.ts';
 import { Confetti, Puffs, Splashes, Rings } from './fx.ts';
 import { BUMP, DASH_CD, GRAVITY, Marble, Mat, Mode } from './physics.ts';
@@ -408,6 +409,7 @@ export class MarbleGame {
     this.bonks = 0;
     this.kos = 0;
     this.starCount = 0;
+    this.reviveReset();
     this.deal();
     this.showGen++;
     void this.startRound();
@@ -457,6 +459,183 @@ export class MarbleGame {
   private starsP: Stars | null = null;
   /** stars this show, and bowled-off beans */
   private starCount = 0;
+  /** the ghosts of the people who are out (ghost.ts); mine is flown here */
+  private ghostsI: Ghosts | null = null;
+  private get ghosts() {
+    return (this.ghostsI ??= new Ghosts(this.scene));
+  }
+  private ghostIn = new THREE.Vector2();
+  /** revives: who's back next round (the host's list), how many I've had this show, one I'm waiting on */
+  private reviving = new Set<number>();
+  /** everyone who's spent their stars since the round began (for the results: they're through) */
+  private backSoon = new Set<number>();
+  private reviveN = 0;
+  private reviveAsked = false;
+  private reviveReset() {
+    this.reviving.clear();
+    this.backSoon.clear();
+    this.reviveN = 0;
+    this.reviveAsked = false;
+  }
+  private reviveCost() {
+    return REVIVE.cost + REVIVE.more * this.reviveN;
+  }
+  /**
+   * I'm out and I've the stars for it: they're spent, and I'm back in the show from the next round
+   * (`saved`: straight away, on being knocked out; otherwise earned since, as a ghost). Not in the
+   * final: there's no round after it to come back to.
+   */
+  private tryRevive(saved = false) {
+    const me = this.roster.find((x) => x.player);
+    if (!me || !me.out || this.reviveAsked || this.state === 'menu' || this.course?.kind === 'final' || !SHOW[this.roundIdx + 1]) return false;
+    const cost = this.reviveCost();
+    if (this.starCount < cost) return false;
+    this.starCount -= cost;
+    this.reviveN++;
+    this.reviveAsked = true;
+    this.backSoon.add(me.id);
+    if (this.guest) this.guest.send({ t: 'revive', id: me.id });
+    else this.revive(me.id);
+    this.ui.banner(saved ? 'SAVED BY YOUR STARS!' : 'REVIVED!', 'gold', `${cost} stars spent · you are back in the next round`, 3600);
+    this.sound.qualified();
+    this.sound.coins();
+    const at = this.ghostsI?.me?.pos ?? this.player()?.m.pos;
+    if (at) this.confetti.burst(at.clone().setY(at.y + 1.5), 160, 9);
+    return true;
+  }
+  /** (the host, or solo) a bean that's out has spent its stars: it's in the next round */
+  private revive(id: number) {
+    const x = this.roster.find((q) => q.id === id);
+    if (!x || !x.out || !x.human || this.reviving.has(id)) return;
+    this.reviving.add(id);
+    this.backSoon.add(id);
+    this.host?.broadcast({ t: 'revived', id });
+    if (!x.player) this.ui.note(`${x.name} had the stars for a revive: back next round!`, 3200);
+  }
+  /** a round's about to load: I'm back in it */
+  private backIn() {
+    const me = this.roster.find((x) => x.player);
+    if (!this.reviveAsked || !me || me.out) return;
+    this.reviveAsked = false;
+    this.ui.note('You are back in the show!', 2600);
+  }
+  /** a friend's ghost, said over the net */
+  private ghostHeard(m: { id: number; p: [number, number, number, number]; boo?: 1 }) {
+    const x = this.roster.find((q) => q.id === m.id);
+    if (!x || !this.course || this.state === 'menu') return;
+    if (this.ghosts.heard(m.id, x.name, x.outfit.a, m.p, !!m.boo, performance.now() / 1000)) this.booFx(new THREE.Vector3(m.p[0], m.p[1], m.p[2]), false);
+  }
+  private booFx(at: THREE.Vector3, mine: boolean) {
+    this.puffs.dust(at, 12, 0.34, 3.4);
+    this.rings.ring(at.clone(), 3.2, 0xffffff, 0.4);
+    if (mine || at.distanceTo(this.camera.position) < 40) this.sound.notes([55, 50, 43], 0.07, mine ? 0.5 : 0.3);
+    if (mine) this.ui.pop('BOO!', true);
+  }
+  /** my ghost: the stick flies it, jump is a BOO, dive takes it to the next bean along */
+  private ghostControls(pad: ReturnType<MarbleGame['gamepad']>) {
+    const k = this.keys, t = this.ui.touch;
+    let fx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+    let fy = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
+    if (t && (t.x || t.y)) (fx = t.x), (fy = t.y);
+    if (pad && (pad.x || pad.y)) (fx = pad.x), (fy = pad.y);
+    const yaw = this.camYaw + this.yawOff;
+    this.ghostIn.set(Math.sin(yaw) * fy - Math.cos(yaw) * fx, Math.cos(yaw) * fy + Math.sin(yaw) * fx);
+    if (this.ghostIn.lengthSq() > 1) this.ghostIn.normalize();
+    let boo = this.pressed.has('Space') || this.pressed.has('MouseLeft') || !!t?.jump;
+    let zip = this.pressed.has('MouseRight') || this.pressed.has('ControlLeft') || this.pressed.has('ControlRight') || this.pressed.has('KeyC') || this.pressed.has('KeyE') || !!t?.dash;
+    if (pad) {
+      if (pad.jump && !this.padJump) boo = true;
+      if (pad.dash && !this.padDash) zip = true;
+      this.padJump = pad.jump;
+      this.padDash = pad.dash;
+    }
+    if (t) t.jump = t.dash = false;
+    const G = this.ghosts, s = G.me!;
+    if (boo && G.boo(performance.now() / 1000)) this.booFx(s.pos, true);
+    if (zip) {
+      this.spectate++;
+      const f = this.focus();
+      if (f) G.zip(f.m.pos);
+      this.snapCam = true;
+      this.sound.notes([79, 86], 0.05, 0.25, true);
+    }
+  }
+  /** the ghosts this frame: mine flown (and its stars taken), everyone's drawn, mine said to the others */
+  private hauntT = 0;
+  private ghostTick(dt: number) {
+    const c = this.course!, w = c.b.world, now = performance.now() / 1000;
+    // (knocked out of an arena with the round still going: a moment to see it, then I'm a ghost in it)
+    const p = this.player();
+    if (p && p.out && !p.fin && c.plate && this.state === 'play' && !this.ghostsI?.me) {
+      this.hauntT += dt;
+      if (this.hauntT > 2.2) {
+        const by = this.focus();
+        this.ghosts.haunt(p.c.id, p.c.name, p.c.outfit.a, (by && by !== p ? by.m.pos : c.plate.center).clone().add(new THREE.Vector3(1.5, 2, 1.5)));
+        this.snapCam = true;
+        this.ui.hideBanner();
+        this.sound.notes([67, 74, 79], 0.08, 0.3, true);
+      }
+    } else this.hauntT = 0;
+    const G = this.ghostsI;
+    if (!G) return;
+    const s = G.me;
+    if (s && (this.state === 'play' || this.state === 'over' || this.state === 'countdown')) {
+      // (it keeps the height of the star it's near, or of the bean it's by)
+      let home: Racer | null = null, hd = Infinity;
+      for (const r of this.racers) {
+        if (r.out || !r.m.active) continue;
+        const d = r.m.pos.distanceToSquared(s.pos);
+        if (d < hd) (hd = d), (home = r);
+      }
+      home ??= this.focus();
+      const star = this.starsP?.near(s.pos, 18) ?? null;
+      let ix = this.ghostIn.x, iz = this.ghostIn.y;
+      if (this.autopilot) {
+        const to = this.starsP?.near(s.pos) ?? home?.m.pos;
+        const dx = to ? to.x - s.pos.x : 0, dz = to ? to.z - s.pos.z : 0, d = Math.hypot(dx, dz);
+        (ix = d > 0.3 ? dx / d : 0), (iz = d > 0.3 ? dz / d : 0);
+      }
+      G.fly(dt, ix, iz, c.kart ? GHOST.kartSpeed : GHOST.speed, star ? star.y + 0.1 : home ? home.m.pos.y + 1.3 : s.pos.y, home?.m.pos ?? null);
+      if (this.starsP && this.state === 'play') {
+        const n = this.starsP.take(s, w.time, GHOST.reach);
+        if (n) {
+          this.starCount += n;
+          this.sound.notes([84 + (this.starCount % 10)], 0, 0.22, true);
+          this.tryRevive();
+        }
+      }
+    }
+    const pk = s && this.online() ? G.packet(now) : null;
+    if (pk && s) {
+      const m: CtlMsg = { t: 'ghost', id: s.id, p: pk.p, ...(pk.boo ? { boo: 1 as const } : {}) };
+      this.host?.broadcast(m);
+      this.guest?.send(m);
+    }
+    G.sync(dt, now);
+  }
+  private ghostCam(dt: number, s: Spook) {
+    const cam = this.camera;
+    // (it comes round behind the way the ghost's flying, unless you've turned it yourself)
+    const hs = Math.hypot(s.vel.x, s.vel.z);
+    if (!this.dragging && hs > 3) {
+      const vy = Math.atan2(s.vel.x, s.vel.z);
+      const fwd = Math.max(0, Math.cos(vy - (this.camYaw + this.yawOff)));
+      this.camYaw = lerpAngle(this.camYaw, vy - this.yawOff, Math.min(1, dt * 1.5 * fwd));
+    }
+    const yaw = this.camYaw + this.yawOff, pitch = THREE.MathUtils.clamp(0.42 + this.pitchOff * 0.6, 0.12, 1.1), d = 10.5;
+    const pos = this.camTmp.set(s.pos.x - Math.sin(yaw) * Math.cos(pitch) * d, s.pos.y + 0.6 + Math.sin(pitch) * d, s.pos.z - Math.cos(yaw) * Math.cos(pitch) * d);
+    if (this.snapCam) {
+      this.camPos.copy(pos);
+      this.camLook.copy(s.pos);
+      this.snapCam = false;
+    } else {
+      this.camPos.lerp(pos, Math.min(1, dt * 6));
+      this.camLook.lerp(PT.copy(s.pos).setY(s.pos.y + 0.5), Math.min(1, dt * 10));
+    }
+    cam.position.copy(this.camPos);
+    cam.lookAt(this.camLook);
+    this.camEnd(dt);
+  }
   private kos = 0;
   private lastLeft = Infinity;
   private climbCalled = false;
@@ -490,6 +669,13 @@ export class MarbleGame {
   }
 
   private async startRound() {
+    // (revived: back in the show from this round)
+    for (const id of this.reviving) {
+      const x = this.roster.find((q) => q.id === id);
+      if (x) x.out = false;
+    }
+    this.reviving.clear();
+    this.backIn();
     const alive = this.roster.filter((x) => !x.out).length;
     const info = SHOW[this.roundIdx];
     this.slots = info.kind === 'final' ? 1 : BALL_ROUNDS.includes(info.id) ? Math.ceil(alive / 2) : info.kind === 'team' ? alive - Math.floor(alive / (alive >= 9 ? 3 : 2)) : Math.max(2, (info.kind === 'survival' ? Math.ceil : Math.round)(alive * info.keep));
@@ -511,7 +697,7 @@ export class MarbleGame {
     const c = this.course!;
     const alive = this.roster.filter((x) => !x.out).length;
     const info = SHOW[this.roundIdx];
-    const goal = c.keep ? `Hold the crown for ${KEEP.hold} seconds to win the show` : c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} standing go through` : c.cup ? c.cup.cfg.goalLine : c.kind === 'team' ? `${c.team!.teams} teams. The team with the ${c.team!.game === 'spots' ? 'fewest points' : 'least floor'} goes home` : `First ${this.slots} of ${alive} qualify`;
+    const goal = c.cup?.gates ? c.cup.cfg.goalLine : c.keep ? `Hold the crown for ${KEEP.hold} seconds to win the show` : c.kind === 'final' ? 'First across the line wins the crown' : c.kind === 'survival' ? `Last ${this.slots} standing go through` : c.cup ? c.cup.cfg.goalLine : c.kind === 'team' ? `${c.team!.teams} teams. The team with the ${c.team!.game === 'spots' ? 'fewest points' : 'least floor'} goes home` : `First ${this.slots} of ${alive} qualify`;
     this.ui.card({ n: this.roundIdx + 1, total: SHOW.length, name: info.name, kind: modeName(info.id), goal, blurb: info.blurb, team: this.teamPlay?.mine() ?? this.cupP?.mine() ?? undefined });
     this.state = 'intro';
     this.stateT = 0;
@@ -546,6 +732,9 @@ export class MarbleGame {
     this.cupP = null;
     this.cupOT = this.cupTwo = false;
     this.kickAt = 0;
+    this.gateGone.clear();
+    this.gateKos.clear();
+    this.gateCall = 0;
     this.padsGone = 0;
     this.keepP?.dispose();
     this.keepP = null;
@@ -587,7 +776,7 @@ export class MarbleGame {
     // (team games: friends playing together are on the same team. The first of them keeps the side
     // the deal gave them, the rest are moved onto it and the bots fill what's left; every browser
     // works it out the same from the host's order)
-    if (!menu && (c.team || c.cup)) friendsTogether(field, order, c.team ? c.team.teams : 2);
+    if (!menu && (c.team || (c.cup && !c.cup.gates))) friendsTogether(field, order, c.team ? c.team.teams : 2);
     field.forEach((x, k) => {
       const g = grid[order[k]];
       const local = menu || this.isLocal(x);
@@ -608,12 +797,27 @@ export class MarbleGame {
       this.racers.push(r);
       if (menu && x.player) this.preview = r;
       if (c.team && !menu) c.team.of.set(x.id, order[k] % c.team.teams);
-      if (c.cup && !menu) c.cup.of.set(x.id, order[k] % 2);
+      if (c.cup && !menu) {
+        // (the final: a gate each, and every bean its own side)
+        if (c.cup.gates) {
+          c.cup.of.set(x.id, order[k]);
+          c.cup.gates.own(order[k], x.id, x.name, x.player);
+        } else c.cup.of.set(x.id, order[k] % 2);
+      }
       if (menu) this.menuMarbles.push(r);
     });
     if (c.team && !menu) this.teamPlay = new TeamPlay(c, this.scene, () => this.racers, this.sound);
     if (c.cup && !menu) this.cupP = new CupPlay(c, this.scene, () => this.racers);
-    if (c.path && !menu) this.starsP = new Stars(c, this.scene);
+    // (out of the show: my ghost goes into the round, by one of the beans)
+    this.ghostsI?.clear();
+    if (!menu) this.backSoon.clear();
+    const mine = menu ? null : this.roster.find((x) => x.player);
+    if (!menu) this.starsP = new Stars(c, this.scene, !!mine?.out);
+    if (mine?.out && this.racers.length) {
+      const by = this.racers[Math.floor(Math.random() * this.racers.length)];
+      this.ghosts.haunt(mine.id, mine.name, mine.outfit.a, by.m.pos.clone().add(new THREE.Vector3(1.5, 2, 1.5)));
+      this.snapCam = true;
+    }
     this.lastLeft = Infinity;
     this.climbCalled = false;
     if (c.keep && !menu) this.keepP = new KeepPlay(c, this.scene, () => this.racers);
@@ -759,6 +963,8 @@ export class MarbleGame {
     w.step(dt);
     this.kartP?.step(dt, w.time, c.state.go);
     c.b.sync(w.time);
+    if (this.state === 'play') this.starsP?.feed(w.time, this.racers, !!(c.kart || c.rocket), c.kart ? 70 : undefined);
+    this.ghostTick(dt);
     if (net) this.netAfter(dt);
     this.sounds(dt);
     this.visuals(dt, now / 1000);
@@ -820,6 +1026,7 @@ export class MarbleGame {
     const pad = this.gamepad();
     if (pad?.cam) (this.yawOff -= pad.cam * 0.045), (this.manualCam = true);
     if (pad?.tilt) this.pitchOff = THREE.MathUtils.clamp(this.pitchOff + pad.tilt * 0.025, -0.55, 0.9);
+    if (this.ghostsI?.me && this.state !== 'menu' && !this.autopilot) return this.ghostControls(pad);
     if (!p || p.out || this.state === 'menu' || this.autopilot) return;
     const k = this.keys;
     let fx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
@@ -1214,6 +1421,7 @@ export class MarbleGame {
     const A = c.cup!;
     const x = w.time - c.state.go;
     const on = this.state === 'play';
+    if (A.gates) return this.gateRules(dt);
     if (on) {
       if (x < 5) this.ui.call(x > 0.4 ? A.cfg.call : null, 0x37c25a);
       else if (x < 5.3) this.ui.call(null);
@@ -1274,6 +1482,148 @@ export class MarbleGame {
         r.m.mode = Mode.Run;
         r.m.tumbleT = r.m.upT = 0;
       }
+    }
+  }
+
+  /**
+   * Gate Crashers, the final: the balls (the host's), the gates growing, a ball through one and
+   * its bean fired out of the arena, the last bean left.
+   */
+  private gateGone = new Map<number, number>();
+  private gateKos = new Map<number, number>();
+  private gateCall = 0;
+  private gateRules(dt: number) {
+    const c = this.course!, w = c.b.world, G = this.cupP!, A = c.cup!, GA = A.gates!;
+    const x = w.time - c.state.go, on = this.state === 'play';
+    const alive = this.racers.filter((r) => !r.out).length;
+    GA.cur = G.gateHalf = GA.half(Math.max(0, x), alive);
+    if (on) {
+      if (x < 5) this.ui.call(x > 0.4 ? A.cfg.call : null, 0xffc534);
+      else if (x < 5.3) this.ui.call(null);
+      if (!this.guest) {
+        if (!A.balls[0].live && !A.balls[0].backAt) G.start();
+        for (const e of G.tick(dt, w.time, x)) {
+          if (e.k === 'gate') {
+            // (the last bean in can't be put out: it's won)
+            const g = GA.list[e.gate];
+            if (alive > 1 && g?.open) {
+              const left = Math.max(0, (GA.lives.get(g.owner) ?? 1) - 1);
+              this.host?.broadcast({ t: 'gate', g: e.gate, id: g.owner, by: e.by, left });
+              this.gateIn(e.gate, g.owner, e.by, left);
+            }
+          } else if (e.k === 'bang' && e.v < 0) {
+            this.ui.shout('ANOTHER BALL!', 'Watch your gate', 1500);
+            this.sound.notes([72, 79, 84], 0.07, 0.45, true);
+          } else this.cupEvent(e);
+        }
+        if (this.host && w.time > this.cupSent) {
+          this.cupSent = w.time + 1 / 15;
+          this.host.broadcast({ t: 'cup', s: G.packet(), a: 0, b: 0 });
+        }
+        if (this.racers.filter((r) => !r.out).length <= 1 || x > A.cfg.T) this.endRound();
+      } else G.follow(dt);
+      if (this.gateCall && w.time > this.gateCall) {
+        this.gateCall = 0;
+        if (alive === 2) {
+          this.ui.shout('FINAL TWO!', 'One gate each. One crown.', 2000);
+          this.sound.notes([67, 72, 76, 79, 84], 0.09, 0.5, true);
+          this.shake = Math.max(this.shake, 0.2);
+        } else if (alive === 3) this.ui.note('THREE LEFT!', 1400);
+      }
+    } else if (this.guest) G.follow(dt);
+    // a bean that's out is gone in a puff of stars; one that's got out some other way is put back by its gate
+    for (const r of this.racers) {
+      const gone = this.gateGone.get(r.c.id);
+      if (gone && w.time > gone) {
+        this.gateGone.delete(r.c.id);
+        this.puffs.stars(r.m.pos);
+        this.puffs.dust(r.m.pos, 12, 0.4, 4);
+        if (r.local) {
+          r.m.active = false;
+          r.m.vel.set(0, 0, 0);
+          r.m.pos.y = c.lakeY - 6;
+        }
+      }
+      if (!r.local || r.out || r.m.pos.y > c.killY) continue;
+      const gi = GA.list.findIndex((g) => g.owner === r.c.id);
+      GA.at(Math.max(0, gi), r.m.pos).lerp(A.center, 0.25);
+      r.m.pos.y = A.center.y + 2;
+      r.m.vel.set(0, 0, 0);
+      r.m.ang.set(0, 0, 0);
+      r.m.mode = Mode.Run;
+      r.m.tumbleT = r.m.upT = 0;
+    }
+  }
+
+  /** a ball through a gate, as everyone sees it: a life gone (the gate flashes), or the last of them */
+  private gateIn(gi: number, id: number, by: number, left: number) {
+    const c = this.course!, A = c.cup!, GA = A.gates!, w = c.b.world;
+    GA.lives.set(id, left);
+    if (left <= 0) return this.gateDown(gi, id, by);
+    GA.hit(gi, w.time);
+    const at = GA.at(gi, new THREE.Vector3());
+    this.rings.ring(at.clone().setY(A.center.y + 0.1), 6, 0xffffff, 0.45);
+    at.y += 2;
+    this.confetti.burst(at, 50, 8);
+    this.sound.boom(at.x, at.y, at.z);
+    this.sound.cheer(0.7);
+    const r = this.racers.find((q) => q.c.id === id), who = this.racers.find((q) => q.m.id === by);
+    if (!r) return;
+    const lives = `${left} ${left === 1 ? 'life' : 'lives'} left`;
+    if (r.c.player) {
+      this.ui.shout(left === 1 ? 'LAST LIFE!' : 'OUCH!', `A ball got through your gate · ${lives}`, 1700);
+      this.sound.notes([64, 58, 52], 0.07, 0.5);
+      this.shake = Math.max(this.shake, 0.35);
+    } else if (who?.c.player && who !== r) {
+      this.ui.pop('GOT ONE!', true);
+      this.ui.note(`${r.c.name}: ${lives}`, 1600);
+      this.sound.notes([72, 76, 79, 84], 0.05, 0.45, true);
+    } else this.ui.note(`${r.c.name} loses a life${who && who !== r ? ` to ${who.c.name}` : ''} · ${lives}`, 1600);
+  }
+
+  /** the last life gone: the gate shuts, its bean goes up like a rocket */
+  private gateDown(gi: number, id: number, by: number) {
+    const c = this.course!, A = c.cup!, GA = A.gates!, w = c.b.world;
+    const col = GA.list[gi]?.col ?? 0xffffff;
+    GA.close(gi, w.time);
+    const at = GA.at(gi, new THREE.Vector3());
+    this.rings.ring(at.clone().setY(A.center.y + 0.1), 8, col, 0.55);
+    at.y += 2.2;
+    this.confetti.burst(at, 140, 11);
+    this.sound.boom(at.x, at.y, at.z);
+    this.sound.cheer(1.3);
+    this.shake = Math.max(this.shake, 0.4);
+    this.fovKick = Math.max(this.fovKick, 5);
+    const r = this.racers.find((q) => q.c.id === id);
+    if (!r || r.out) return;
+    r.out = true;
+    this.gateGone.set(id, w.time + 1.15);
+    this.gateCall = w.time + 1.9;
+    if (r.local) {
+      r.m.vel.set(0, 23, 0);
+      r.m.knock(2.5);
+      r.m.input.set(0, 0, 0);
+      r.m.grab = false;
+    }
+    const who = this.racers.find((q) => q.m.id === by);
+    const left = this.racers.filter((q) => !q.out).length;
+    if (who && who !== r) this.gateKos.set(who.c.id, (this.gateKos.get(who.c.id) ?? 0) + 1);
+    if (r.c.player) {
+      this.ui.banner('ELIMINATED', 'bad', 'Your last life went through your gate', 2600);
+      this.sound.eliminated();
+      this.sound.voice('aww', r.m.id, r.m.pos.x, r.m.pos.y, r.m.pos.z, true);
+    } else {
+      this.ui.shout(`${r.c.name.toUpperCase()} IS OUT!`, `${who && who !== r ? `${who.c.player ? 'You' : who.c.name} knocked it in · ` : ''}${left} left`, 1800);
+      this.sound.voice('wah', r.m.id, r.m.pos.x, r.m.pos.y, r.m.pos.z, false);
+    }
+    if (who?.c.player && who !== r) {
+      this.kos++;
+      this.ui.pop('GATE CRASHED!', true);
+      this.sound.notes([72, 76, 79, 84, 88], 0.05, 0.5, true);
+    }
+    if (!this.host && !this.guest) {
+      this.timeScale = 0.4;
+      this.slowUntil = performance.now() + 650;
     }
   }
 
@@ -1468,8 +1818,8 @@ export class MarbleGame {
       this.sound.cheer(0.6);
     }
     // stars
-    if (this.starsP && !p.out && !p.fin) {
-      const n = this.starsP.take(p.m, w.time);
+    if (this.starsP && !p.out && !p.fin && this.state === 'play') {
+      const n = this.starsP.take(p.m, w.time, c.kart ? 2.6 : STARS.r);
       if (n) {
         this.starCount += n;
         this.sound.notes([84 + (this.starCount % 10)], 0, 0.22, true);
@@ -1675,7 +2025,7 @@ export class MarbleGame {
     const c = this.course!;
     if (this.guest || this.state !== 'play' || this.autopilot) return;
     const people = this.racers.filter((r) => r.c.human);
-    const skip = this.pressed.has('Enter') || this.pressed.has('Space');
+    const skip = this.pressed.has('Enter') || (this.pressed.has('Space') && !this.ghostsI?.me);
     const done = people.every((r) => r.out || r.fin > 0);
     if (!done) {
       this.wrapAt = 0;
@@ -1683,6 +2033,11 @@ export class MarbleGame {
     }
     if (!people.length) {
       if (skip) this.wrapUp();
+      return;
+    }
+    // (the final with only bots left in it: enter, and it's settled as it stands)
+    if (c.cup?.gates) {
+      if (this.pressed.has('Enter')) this.endRound();
       return;
     }
     if (c.team || c.cup) return;
@@ -1722,7 +2077,15 @@ export class MarbleGame {
       const w = this.keepP.ranking()[0] as Racer | undefined;
       if (w) w.fin = 1;
     }
-    const rich = this.keepP ? new Set(this.keepP.ranking().slice(0, 1)) : null;
+    // (Gate Crashers: the last bean in; if the clock ran out on it, whoever has the most lives, then put the most out)
+    let champ: Racer | null = null;
+    if (c.cup?.gates) {
+      const L = c.cup.gates.lives;
+      const still = this.racers.filter((r) => !r.out).sort((a, b) => (L.get(b.c.id) ?? 0) - (L.get(a.c.id) ?? 0) || (this.gateKos.get(b.c.id) ?? 0) - (this.gateKos.get(a.c.id) ?? 0));
+      champ = still[0] ?? this.racers[0] ?? null;
+      if (champ) champ.fin = 1;
+    }
+    const rich = this.keepP ? new Set(this.keepP.ranking().slice(0, 1)) : champ ? new Set([champ]) : null;
     const through = this.racers.filter((r) => (rich ? rich.has(r) : c.cup ? this.cupP!.teamOf(r.m.id) !== loser : c.team ? this.teamPlay!.teamOf(r.m.id) !== loser : c.plate ? !r.out : r.fin > 0 && r.fin <= this.slots)).map((r) => r.c.id);
     this.host?.broadcast({ t: 'end', through, fins: this.racers.filter((r) => r.fin).map((r) => [r.c.id, r.fin] as [number, number]) });
     this.roundOver(new Set(through));
@@ -1746,7 +2109,16 @@ export class MarbleGame {
     for (const x of this.roster) if (!through.has(x.id)) x.out = true;
     const p = this.player();
     if (p && p.out && !p.c.out) p.c.out = true;
-    if (p && (c.team || c.cup)) {
+    if (c.cup?.gates) {
+      const win = this.racers.find((r) => through.has(r.c.id));
+      this.slowUntil = performance.now() + 1800;
+      this.timeScale = 0.35;
+      this.sound.crowned();
+      if (win) this.confetti.burst(win.m.pos, 260, 11);
+      this.fireworks.show(c.cup.center, 14, 36, 28, 0.22);
+      if (win?.c.player) this.ui.banner('CROWNED!', 'gold', 'Last bean standing: you win the show!', 0);
+      else if (win) this.ui.banner(`${win.c.name.toUpperCase()} WINS!`, 'gold', 'Last bean standing', 0);
+    } else if (p && (c.team || c.cup)) {
       const ok = through.has(p.c.id);
       this.ui.banner(ok ? 'QUALIFIED!' : 'ELIMINATED', ok ? 'good' : 'bad', c.cup ? this.cupP!.line() : c.team!.game === 'spots' ? (ok ? 'Your team hogged enough spots' : 'Your team had the fewest points') : ok ? 'Your team painted enough floor' : 'Your team painted the least', 3200);
       if (ok) this.sound.qualified();
@@ -1774,6 +2146,8 @@ export class MarbleGame {
       this.sound.voice('aww', p.m.id, p.m.pos.x, p.m.pos.y, p.m.pos.z, true);
     }
     if (c.kind !== 'final') this.sound.cheer(0.6);
+    // (out, with the stars for it: saved)
+    this.tryRevive(true);
   }
 
   private toResults() {
@@ -1793,10 +2167,10 @@ export class MarbleGame {
     const rows: Row[] = order.map((r) => ({
       name: r.c.name,
       color: r.c.outfit.a,
-      state: final ? (r.fin === 1 ? 'win' : 'out') : r.c.out ? 'out' : 'q',
+      state: final ? (r.fin === 1 ? 'win' : 'out') : r.c.out && !this.backSoon.has(r.c.id) ? 'out' : 'q',
       me: r.c.player,
       style: r.c.human ? (r.c.player ? undefined : 'Player') : STYLES[r.c.style].name,
-      note: this.keepP ? (r.fin === 1 ? 'CROWN' : `${(this.keepP.held.get(r.m.id) ?? 0).toFixed(1)}s`) : final ? (r.fin === 1 ? 'CROWN' : r.fin ? `${r.fin}${ordinal(r.fin)}` : '') : c.team && this.teamPlay ? this.teamPlay.nameOf(r.m.id) : this.cupP ? this.cupP.nameOf(r.m.id) : !c.plate && r.fin ? `${r.fin}${ordinal(r.fin)}` : undefined,
+      note: !final && this.backSoon.has(r.c.id) ? 'REVIVED' : this.keepP ? (r.fin === 1 ? 'CROWN' : `${(this.keepP.held.get(r.m.id) ?? 0).toFixed(1)}s`) : final ? (r.fin === 1 ? 'CROWN' : r.fin ? `${r.fin}${ordinal(r.fin)}` : '') : c.team && this.teamPlay ? this.teamPlay.nameOf(r.m.id) : this.cupP ? this.cupP.nameOf(r.m.id) : !c.plate && r.fin ? `${r.fin}${ordinal(r.fin)}` : undefined,
     }));
     const online = this.online();
     if (final) {
@@ -1819,8 +2193,14 @@ export class MarbleGame {
       });
       return;
     }
-    const playerIn = p ? !p.c.out : false;
-    const left = this.roster.filter((x) => !x.out).length;
+    // (out, but with the stars for a revive: as good as through)
+    const back = this.reviveAsked;
+    const playerIn = (p ? !p.c.out : false) || back;
+    const mine = this.roster.find((x) => x.player);
+    const toFinal = SHOW[this.roundIdx + 1]?.kind === 'final';
+    // (out for now: the show goes on with you as a ghost)
+    const haunting = !playerIn && !!mine && !!SHOW[this.roundIdx + 1];
+    const left = this.roster.filter((x) => !x.out).length + this.reviving.size + (this.guest && back ? 1 : 0);
     let moved = false;
     const next = () => {
       // (once: the countdown running out and a press of the button in the same moment is one round on, not two)
@@ -1837,22 +2217,22 @@ export class MarbleGame {
       void this.startRound();
     };
     this.ui.results({
-      title: playerIn ? 'YOU QUALIFIED!' : p ? 'YOU ARE OUT' : 'ROUND OVER',
-      sub: `${left} beans go through to ${SHOW[this.roundIdx + 1]?.name ?? "the next round"}`,
+      title: back ? (p ? 'SAVED BY YOUR STARS!' : 'YOU ARE BACK IN!') : playerIn ? 'YOU QUALIFIED!' : p ? 'YOU ARE OUT' : 'ROUND OVER',
+      sub: `${left} beans go through to ${SHOW[this.roundIdx + 1]?.name ?? "the next round"}${haunting ? (toFinal ? ' · you fly on as a ghost' : ` · fly on as a ghost: ${Math.max(0, this.reviveCost() - this.starCount)} more stars and you are revived`) : ''}`,
       rows,
-      next: this.guest ? 'NEXT ROUND SOON' : playerIn || this.host ? 'NEXT ROUND' : 'NEW SHOW',
+      next: this.guest ? 'NEXT ROUND SOON' : playerIn || this.host ? 'NEXT ROUND' : haunting ? 'FLY ON AS A GHOST' : 'NEW SHOW',
       wait: !!this.guest,
       onNext: () => {
         if (this.guest) return;
-        if (playerIn || this.host) next();
+        if (playerIn || this.host || haunting) next();
         else (this.ui.hideResults(), this.newShow());
       },
-      extra: online ? { label: 'LEAVE', on: () => this.leaveParty() } : playerIn ? undefined : { label: 'WATCH THE REST', on: next },
-      auto: (playerIn || this.host) && !this.guest ? RESULTS_T : undefined,
+      extra: online ? { label: 'LEAVE', on: () => this.leaveParty() } : playerIn ? undefined : haunting ? { label: 'NEW SHOW', on: () => (this.ui.hideResults(), this.newShow()) } : { label: 'WATCH THE REST', on: next },
+      auto: (playerIn || this.host || haunting) && !this.guest ? RESULTS_T : undefined,
     });
     this.resultsT = RESULTS_T;
     // (online the host moves the show on, whether it's still in or not)
-    this.resultsNext = playerIn || this.host ? next : null;
+    this.resultsNext = playerIn || this.host || haunting ? next : null;
     if (this.guest) this.resultsNext = null;
     // (the next course goes up behind the results, not after them)
     const up = SHOW[this.roundIdx + 1];
@@ -1954,6 +2334,14 @@ export class MarbleGame {
         if (r.local) this.applyShove(r, m.kind, m.v);
         else h.send(r.c.owner, m);
         break;
+      case 'revive':
+        if (this.roster.some((q) => q.id === m.id && q.owner === from) && this.course?.kind !== 'final') this.revive(m.id);
+        break;
+      case 'ghost':
+        if (!this.roster.some((q) => q.id === m.id && q.owner === from)) return;
+        h.broadcast(m);
+        this.ghostHeard(m);
+        break;
     }
   }
 
@@ -1984,6 +2372,8 @@ export class MarbleGame {
         break;
       case 'show':
         this.roster = m.roster.map((x: NetContestant) => ({ ...x, style: x.style as StyleId, player: x.owner === g.id, out: false }));
+        this.starCount = 0;
+        this.reviveReset();
         this.ui.hideLobby();
         this.ui.hideResults();
         this.ui.hideMenu();
@@ -1994,6 +2384,7 @@ export class MarbleGame {
         this.slots = m.slots;
         this.showNo = Math.floor(m.key / 100);
         for (const x of this.roster) x.out = m.out.includes(x.id);
+        this.backIn();
         this.pendingGo = NaN;
         this.worldOff = NaN;
         this.ui.hideResults();
@@ -2032,6 +2423,9 @@ export class MarbleGame {
           this.cupP.score[1] = m.b;
           this.cupGoal(m.team, m.by, m.own, m.ball, m.pts);
         }
+        break;
+      case 'gate':
+        if (this.cupP && this.course?.cup?.gates) this.gateIn(m.g, m.id, m.by, m.left);
         break;
       case 'keep':
         if (this.keepP) {
@@ -2080,6 +2474,15 @@ export class MarbleGame {
         this.toMenu();
         this.showLobby();
         break;
+      case 'ghost':
+        this.ghostHeard(m);
+        break;
+      case 'revived': {
+        const x = this.roster.find((q) => q.id === m.id);
+        this.backSoon.add(m.id);
+        if (x && !x.player) this.ui.note(`${x.name} had the stars for a revive: back next round!`, 3200);
+        break;
+      }
     }
   }
 
@@ -2120,6 +2523,7 @@ export class MarbleGame {
     this.bonks = 0;
     this.kos = 0;
     this.starCount = 0;
+    this.reviveReset();
     this.deal();
     this.showGen++;
     void this.startRound();
@@ -2385,6 +2789,7 @@ export class MarbleGame {
     if (this.state === 'intro') return this.introCam();
     if (this.state === 'menu') return this.menuCam();
     if (this.state === 'champion') return this.championCam(dt);
+    if (this.ghostsI?.me) return this.ghostCam(dt, this.ghostsI.me);
     const f = this.focus();
     if (!f) return;
     if (c.kart && this.kartP) {
@@ -2458,6 +2863,15 @@ export class MarbleGame {
       if (ox > 0) pos.x = ctr.x + Math.sign(pos.x - ctr.x) * lx;
       if (oz > 0) pos.z = ctr.z + Math.sign(pos.z - ctr.z) * lz;
       pos.y += Math.max(0, ox, oz) * 0.45;
+      // (the final's ring: inside the wall, and up over your shoulder when you're backed against it)
+      if (c.cup.gates) {
+        const rr = Math.hypot(pos.x - ctr.x, pos.z - ctr.z), lim = c.cup.gates.R - 0.9;
+        if (rr > lim) {
+          pos.x = ctr.x + ((pos.x - ctr.x) / rr) * lim;
+          pos.z = ctr.z + ((pos.z - ctr.z) / rr) * lim;
+          pos.y += (rr - lim) * 0.6;
+        }
+      }
       // (over the top of the bar, never level with it)
       if (C.goalHalf > 0 && Math.abs(pos.z - ctr.z) > C.HL - 3 && Math.abs(pos.x - ctr.x) < C.goalHalf + 3) pos.y = Math.max(pos.y, ctr.y + C.goalH + 3.2);
       c.cup.view(pos);
@@ -2683,6 +3097,7 @@ export class MarbleGame {
     const ranked = this.ranked();
     let status = '';
     if (c.keep && this.keepP) status = p && c.keep.holder === p.m.id ? `YOU HAVE IT! ${(KEEP.hold - (this.keepP.held.get(p.m.id) ?? 0)).toFixed(1)}s TO GO` : c.keep.holder < 0 ? 'THE CROWN IS LOOSE!' : `${this.racers.find((r) => r.m.id === c.keep!.holder)?.c.name.toUpperCase() ?? 'SOMEONE'} HAS THE CROWN!`;
+    else if (c.cup?.gates) status = `LAST BEAN STANDING · ${alive} LEFT`;
     else if (c.kind === 'final') status = this.finCount ? 'WINNER!' : 'FIRST WINS';
     else if (this.cupP) {
       const mineT = this.cupP.mine();
@@ -2694,15 +3109,26 @@ export class MarbleGame {
     const pos = f && race ? ranked.indexOf(f) + 1 : undefined;
     let timer: string | undefined;
     if (c.team && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, TEAM_T - this.playT));
+    else if (c.cup?.gates && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, c.cup.cfg.T - this.playT));
     else if (this.cupP && (this.state === 'play' || this.state === 'over')) timer = this.playT > this.cupP.cfg.T ? this.cupP.cfg.extra : clock(Math.max(0, this.cupP.cfg.T - this.playT));
     else if (c.keep && (this.state === 'play' || this.state === 'over')) timer = this.playT > KEEP.T ? 'OVERTIME' : clock(Math.max(0, KEEP.T - this.playT));
     else if (c.plate && (this.state === 'play' || this.state === 'over')) {
       timer = clock(SURVIVE_T - this.playT);
     } else if (race && this.state === 'play' && this.playT > RACE_T - 30) timer = clock(RACE_T - this.playT);
-    const noPeople = !this.guest && this.racers.every((r) => !r.c.human);
-    const spectating = !p || p.out ? `Watching ${f?.c.name ?? ''} · ←/→ to switch${noPeople ? ' · ENTER to skip' : ''}` : undefined;
-    if (spectating && (this.pressed.has('ArrowLeft') || this.pressed.has('KeyA'))) this.spectate--;
-    if (spectating && (this.pressed.has('ArrowRight') || this.pressed.has('KeyD'))) this.spectate++;
+    const noPeople = !this.guest && this.racers.every((r) => !r.c.human || (r.out && !!c.cup?.gates));
+    const gh = this.ghostsI?.me;
+    const mineR = this.roster.find((x) => x.player);
+    const cost = this.reviveCost();
+    const canRevive = c.kind !== 'final' && !!SHOW[this.roundIdx + 1];
+    const spectating = gh ? `GHOST · fly to the stars · JUMP: boo! · DIVE: next bean${this.reviveAsked ? ' · you are back next round' : canRevive ? ` · ${Math.max(0, cost - this.starCount)} more to revive` : ''}${noPeople ? ' · ENTER to skip' : ''}` : !p || p.out ? `Watching ${f?.c.name ?? ''} · ←/→ to switch${noPeople ? ' · ENTER to skip' : ''}` : undefined;
+    if (spectating && !gh && (this.pressed.has('ArrowLeft') || this.pressed.has('KeyA'))) this.spectate--;
+    if (spectating && !gh && (this.pressed.has('ArrowRight') || this.pressed.has('KeyD'))) this.spectate++;
+    // (the ghosts' names over them)
+    if (this.ghostsI)
+      for (const s of [...this.ghostsI.others.values(), ...(gh ? [gh] : [])]) {
+        v.copy(s.pos).add(new THREE.Vector3(0, 1.5, 0)).project(cam);
+        this.ui.tag(1000 + s.id, s === gh ? 'YOU' : `${s.name} (ghost)`, ((v.x + 1) / 2) * W, ((1 - v.y) / 2) * H, v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1, s === gh, s !== gh);
+      }
     this.ui.hudData({
       title: SHOW[this.roundIdx].name.toUpperCase(),
       status,
@@ -2719,7 +3145,9 @@ export class MarbleGame {
     this.keepP?.sync(c.b.world.time);
     this.crownArrow();
     this.starsP?.sync(c.b.world.time);
-    if (this.starsP) this.ui.stars(this.starCount);
+    this.ui.starsTop = c.kart ? 376 : 0;
+    if (this.state === 'results' || this.state === 'champion') this.ui.stars(null);
+    else if (this.starsP && mineR) this.ui.stars(this.starCount, this.reviveAsked ? 'BACK NEXT ROUND' : !canRevive ? '' : this.starCount >= cost ? 'REVIVE READY' : `${cost} = REVIVE`, canRevive && (this.reviveAsked || this.starCount >= cost));
     this.roundCalls();
     const fast = p && !p.out && this.state === 'play' ? Math.hypot(p.m.vel.x, p.m.vel.z) : 0;
     this.ui.speed(c.kart ? Math.max(THREE.MathUtils.clamp((fast - 27) / 12, 0, 0.32), p ? (this.kartP?.rush(p.m.id) ?? 0) : 0) : THREE.MathUtils.clamp((fast - 12.5) / 9, 0, 0.75));
@@ -2838,15 +3266,39 @@ export function friendsTogether(field: { human: boolean }[], order: number[], te
   const people = field.map((_, k) => k).filter((k) => field[k].human);
   if (people.length < 2) return;
   const free = Array.from({ length: teams }, (_, t) => order.filter((s) => s % teams === t));
+  // how many of them go on each team: the first one's team if they all fit on it (or the team they
+  // do all fit on, or failing that the biggest), then the next one along
+  let first = order[people[0]] % teams;
+  if (free[first].length < people.length) {
+    let best = first;
+    for (let t = 0; t < teams; t++) if (free[t].length > free[best].length) best = t;
+    first = best;
+  }
+  const seq: number[] = [], share = new Array<number>(teams).fill(0);
+  let left = people.length;
+  for (let k = 0; k < teams && left > 0; k++) {
+    const t = (first + k) % teams, n = Math.min(left, free[t].length);
+    if (!n) continue;
+    share[t] = n;
+    left -= n;
+    seq.push(t);
+  }
+  // (nobody's left on a team on their own if it can be helped: one of the bigger group goes with them)
+  for (let k = seq.length - 1; k > 0; k--) {
+    if (share[seq[k]] === 1 && share[seq[k - 1]] >= 3 && free[seq[k]].length >= 2) {
+      share[seq[k]]++;
+      share[seq[k - 1]]--;
+    }
+  }
   const next = new Array<number>(order.length);
   const taken = new Set<number>();
-  let t = order[people[0]] % teams;
-  for (const k of people) {
-    while (!free[t].length) t = (t + 1) % teams;
-    const s = free[t].shift()!;
-    next[k] = s;
-    taken.add(s);
-  }
+  let i = 0;
+  for (const t of seq)
+    for (let n = 0; n < share[t]; n++) {
+      const s = free[t].shift()!;
+      next[people[i++]] = s;
+      taken.add(s);
+    }
   const rest = order.filter((s) => !taken.has(s));
   field.forEach((x, k) => {
     if (!x.human) next[k] = rest.shift()!;

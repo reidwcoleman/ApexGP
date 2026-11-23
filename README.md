@@ -754,7 +754,7 @@ and bots; the contestants are original bean characters, not marbles.
   below (marbled paint, ocean, lava, ice, swamp, a neon grid, sand, cloud; `paintLakeFor`), the
   light, the fog, the scenery round the course, the course's tiles, rails and arches, the obstacles'
   colours and the toys on the islands. `ROUND_BIOME` says which round is in which.
-- **The show**: six rounds dealt fresh every show from 37 (`POOL` / `dealShow` in `courses.ts`):
+- **The show**: six rounds dealt fresh every show from 36 (`POOL` / `dealShow` in `courses.ts`):
   every show has a team game, a ball game and a kart race in it, plus two of the other kinds
   (obstacle race, outrun it, vanishing floor, dodge it), then the final. The team and ball games
   come in the first three rounds, while there's a field to split, and a small field is never cut
@@ -861,13 +861,40 @@ and bots; the contestants are original bean characters, not marbles.
     another kart turns you half as hard as it used to, and a held drift is untouched.
     `tools/wobblekart.mjs` races a flat-out, full-lock keyboard driver against the bots and
     counts the spins (24 in six races before the catch, none after).
-  - **Final**: Crown Peak, the longest platform course; first across the line takes the crown.
+  - **Final**: Gate Crashers (`course-gates.ts`, rule `gates` in `soccer.ts`), every show's last
+    round. A round arena, and in its wall a gate for every bean left, in that bean's colour with
+    its name over it (yours says YOUR GATE and its floor beats like a heart). Balls drop in: run
+    into one to dribble it, DIVE into it to shoot, stand in front of your gate to keep it out. A
+    ball through your gate costs a life (three each with six or fewer beans, two up to ten, sudden
+    death above that; the board down the left shows the hearts); the last life gone, the gate slams
+    shut and its bean is fired out of the arena. A second and third ball come in at 20 s and 44 s,
+    every gate widens from 14 s on (and again each time someone goes), a bumper in the middle keeps
+    the balls moving, and the last bean standing takes the crown. The balls are the host's like
+    every ball game's; a gate is an angle round the ring, so the ball's side of it is a few lines
+    in `CupPlay.hold`. Bots (`CupBrain.gates`) get between a ball and their gate first, and
+    otherwise get behind the nearest ball and knock it at someone else's. The old finals (Crown
+    Peak, Crown Keeper) are out of the rotation but still built for the test links.
+  - **Stars, ghosts and revives** (`stars.ts`, `ghost.ts`): stars are kept all through a show
+    (never past it). In a race they lie along the risky lines; in every other round one pops up
+    every 1.5 s where a bean was standing a moment ago. Knocked out, a person flies on as a ghost
+    (`Ghosts`): it goes through everything and gets in nobody's way, the stick flies it, JUMP is a
+    BOO, DIVE takes it to the next bean, and it picks up stars (for a ghost every round has the
+    pop-up kind, so it can't hoover a race course). 50 stars is a revive (75 for the next one,
+    then 100): with them in hand when you're knocked out you're SAVED BY YOUR STARS on the spot;
+    otherwise the ghost earns them, and either way you're back in as a bean from the next round.
+    Knocked out part way through a survival round or the final, you're a ghost in that round two
+    seconds later. No revive in the final. Online each browser flies its own ghost and says where
+    it is seven times a second (`ghost`), so friends see each other haunting the round; the host
+    keeps the list of who's coming back (`revive` / `revived`) and puts them in the next round's
+    field. `tools/wobbleghost.mjs` knocks you out of round one and follows the ghost, the stars
+    and the revive through a show; `tools/wobblehaunt.mjs` does it with a host and a guest.
   - The old downhill chutes (Timber Tumble, Paint Mill, Rickety Ridge, Crown Summit) are out of the
     rotation but still built for the test links: `?round=N` indexes `DEFAULT_SHOW` in `courses.ts`.
     `?round=beancup` takes a round's name too. `?lineup=colourcall,bigpush` plays those rounds,
     in that order, as the show. `tools/wobblewatch.mjs` plays a round (or, with `--show`, a whole
     show from the menu) in real time and prints everything the console said.
-  - Out of the show, start a new one or watch the rest (←/→ switches bean, ENTER skips the round).
+  - Out of the show you fly on as a ghost (above), or start a new one. ENTER skips a round with
+    no people left in it.
 - **The beans** (`bean.ts`): party-game proportions (from what the genre's own developers describe:
   round "baked bean" bodies, low hips, stubby feet, big arms) with our own art — a chunky,
   bottom-heavy jelly body sitting low on stubby boots, thick arms with round mitts, big googly eyes on springs,
@@ -903,7 +930,9 @@ and bots; the contestants are original bean characters, not marbles.
   30 times a second; the host runs the bots, the show's clock that every obstacle turns to (guests
   keep their world time on it), the places at the line, eliminations and the round changes. Remote
   beans are eased toward their latest state; a dive or grab on someone else's bean is sent to
-  its owner.
+  its owner. In the team and ball games everyone playing together is on the same team
+  (`friendsTogether` in `game.ts`): the team that holds them all if there is one, otherwise as
+  few teams as it takes, and nobody is left on a team on their own while there's a pair to make.
 - **Courses** (`courses.ts`, one `course-*.ts` per round, `course-kit.ts`): a turtle path
   (straights and arcs with slope, width, walls and banking, all eased) swept into a bent-plank
   chute on trestles down into a sea of marbled paint; the same triangles are the physics. Split

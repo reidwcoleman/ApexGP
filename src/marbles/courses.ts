@@ -19,6 +19,7 @@ import { rocketRumble, type RocketArena } from './course-rocket.ts';
 import { beanBayGP, type KartArena } from './course-kart.ts';
 import { SUNDAE_SPEEDWAY } from './kart-layout.ts';
 import { colourCall, type CallArena } from './course-modes.ts';
+import { gateCrashers } from './course-gates.ts';
 
 export { makeCrown } from './course-kit.ts';
 
@@ -76,7 +77,7 @@ export interface Course {
 }
 
 export type GenId = 'discodash' | 'bigtop' | 'treasuretrail' | 'blockparty' | 'petalpass' | 'ticktock' | 'moonrun' | 'sliprink' | 'lavarush' | 'hopscotch' | 'bonkbay' | 'knockknock' | 'whirligig' | 'bonkalley' | 'wobblewalk' | 'skystairs' | 'jellyjunction' | 'crownpeak' | 'punchline' | 'rumblehill';
-export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'meltdown' | 'stormdeck' | 'rocketrumble' | 'colourcall' | 'beanbaygp' | 'beancup' | 'bigpush' | 'overfence' | 'volleyfolly' | 'spothogs' | 'beanhoops' | 'sundaespeedway' | 'crownkeep' | GenId;
+export type RoundId = 'timber' | 'paintmill' | 'jumpclub' | 'ridge' | 'tiptop' | 'paintparty' | 'splatring' | 'summit' | 'meltdown' | 'stormdeck' | 'rocketrumble' | 'colourcall' | 'beanbaygp' | 'beancup' | 'bigpush' | 'overfence' | 'volleyfolly' | 'spothogs' | 'beanhoops' | 'sundaespeedway' | 'crownkeep' | 'gatecrashers' | GenId;
 export interface RoundInfo {
   id: RoundId;
   name: string;
@@ -129,6 +130,7 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
   treasuretrail: { id: 'treasuretrail', name: 'Treasure Trail', kind: 'race', blurb: 'Island to island past the cannons, along the planks and over the rapids.', keep: 0.75 },
   blockparty: { id: 'blockparty', name: 'Block Party', kind: 'race', blurb: 'Through the toy box: stampers, rolling balls, sliders and a jelly bounce.', keep: 0.75 },
   crownpeak: { id: 'crownpeak', name: 'Crown Peak', kind: 'final', blurb: 'The longest course in the show, all the way up. First across takes the crown', keep: 0 },
+  gatecrashers: { id: 'gatecrashers', name: 'Gate Crashers', kind: 'final', blurb: 'The final! Every bean has a gate in the wall. A ball through YOUR gate and you are out. Stand in front of it, DIVE into a ball to shoot it at someone else\'s. More balls drop in, the gates grow. Last bean standing takes the crown.', keep: 0 },
   crownkeep: { id: 'crownkeep', name: 'Crown Keeper', kind: 'final', blurb: 'A castle in the sky and one crown. Hold it for 30 seconds to win. When the throne goes hot your clock runs double, until it blows.', keep: 0 },
 };
 /**
@@ -136,7 +138,7 @@ export const ROUNDS: Record<RoundId, RoundInfo> = {
  * host's). The default is every round once, for the test links (?round=N).
  */
 // (the old running order keeps its indexes for the test tools; the team round is 6)
-export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'rocketrumble', 'colourcall', 'discodash', 'bigtop', 'treasuretrail', 'blockparty', 'crownkeep', 'beanbaygp', 'beancup', 'bigpush', 'overfence', 'volleyfolly', 'spothogs', 'beanhoops', 'sundaespeedway'];
+export const DEFAULT_SHOW: RoundId[] = ['timber', 'paintmill', 'jumpclub', 'ridge', 'tiptop', 'summit', 'paintparty', 'hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'crownpeak', 'splatring', 'punchline', 'rumblehill', 'lavarush', 'meltdown', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'stormdeck', 'rocketrumble', 'colourcall', 'discodash', 'bigtop', 'treasuretrail', 'blockparty', 'crownkeep', 'beanbaygp', 'beancup', 'bigpush', 'overfence', 'volleyfolly', 'spothogs', 'beanhoops', 'sundaespeedway', 'gatecrashers'];
 export const SHOW: RoundInfo[] = DEFAULT_SHOW.map((id) => ROUNDS[id]);
 /** the rounds a show is dealt from (the old chute races are kept for the test links only) */
 export const RACE_POOL: RoundId[] = ['hopscotch', 'bonkbay', 'knockknock', 'whirligig', 'bonkalley', 'wobblewalk', 'skystairs', 'jellyjunction', 'punchline', 'rumblehill', 'lavarush', 'petalpass', 'ticktock', 'moonrun', 'sliprink', 'discodash', 'bigtop', 'treasuretrail', 'blockparty'];
@@ -145,13 +147,14 @@ export const SURVIVAL_POOL: RoundId[] = ['jumpclub', 'tiptop', 'meltdown', 'stor
 export const PARTY_POOL: RoundId[] = ['paintparty', 'splatring', 'spothogs', 'beancup', 'bigpush', 'overfence', 'volleyfolly', 'beanhoops', 'beanbaygp', 'sundaespeedway'];
 /** the team games played with a ball on a pitch (half the field goes home) */
 export const BALL_ROUNDS: RoundId[] = ['beancup', 'bigpush', 'overfence', 'volleyfolly', 'beanhoops'];
-export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, ...PARTY_POOL, 'crownpeak', 'crownkeep'];
+/** the final: every show ends in it (the old ones, Crown Peak and Crown Keeper, are kept for the test links) */
+export const FINAL: RoundId = 'gatecrashers';
+export const POOL: RoundId[] = [...RACE_POOL, ...SURVIVAL_POOL, ...PARTY_POOL, FINAL];
 
 /**
  * The kinds of game a show is dealt from. A show never plays the same one twice: each of its six
- * rounds comes from a different family here, and the final differs from them all (a show with an
- * obstacle race ends in Crown Keeper; one without it ends in the race up Crown Peak). Every show
- * has a team game, a ball game and a kart race in it.
+ * rounds comes from a different family here, and the final (Gate Crashers) differs from them all.
+ * Every show has a team game, a ball game and a kart race in it.
  */
 export const MODES = {
   race: RACE_POOL.filter((id) => id !== 'lavarush'),
@@ -170,6 +173,7 @@ export function modeOf(id: RoundId): ModeId | 'final' {
   return 'final';
 }
 export function modeName(id: RoundId) {
+  if (id === 'gatecrashers') return 'THE FINAL · LAST BEAN STANDING';
   if (id === 'crownkeep') return 'FINAL · CROWN KEEPER';
   if (ROUNDS[id].kind === 'final') return 'FINAL · CROWN RACE';
   if (id === 'beancup') return 'TEAM SOCCER';
@@ -192,7 +196,6 @@ export function dealShow(rnd = Math.random) {
   };
   // (every show has a team game, a ball game and the karts; the other two rounds are any two of the rest)
   const two = shuffle<ModeId>(['race', 'chase', 'floor', 'dodge']).slice(0, 2);
-  const withRace = two.includes('race');
   // (five families and a final that's none of them)
   const fams: ModeId[] = shuffle<ModeId>(['team', 'ball', 'kart', ...two]);
   // (a team game needs a field to split: they're in the first three rounds, never the two before the final)
@@ -201,7 +204,7 @@ export function dealShow(rnd = Math.random) {
     const solo = fams.findIndex((f, k) => k < 3 && !teamy(f));
     if (teamy(fams[late]) && solo >= 0) [fams[late], fams[solo]] = [fams[solo], fams[late]];
   }
-  const ids: RoundId[] = [...fams.map(pick), withRace ? 'crownkeep' : 'crownpeak'];
+  const ids: RoundId[] = [...fams.map(pick), FINAL];
   setShow(ids);
   lastShow = ids;
   return ids;
@@ -262,6 +265,8 @@ export function buildRound(id: RoundId): Course {
       return beanBayGP(info, SUNDAE_SPEEDWAY);
     case 'crownkeep':
       return crownKeep(info);
+    case 'gatecrashers':
+      return gateCrashers(info);
     default:
       return genCourse(GEN[id], info);
   }

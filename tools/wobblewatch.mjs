@@ -1,6 +1,6 @@
 // Wobble Mania: plays one round in real time, drawing every frame, and reports everything the
 // console said (warnings as well as errors) with a picture every few seconds.
-//   node tools/wobblewatch.mjs --round beancup [--secs 40] [--every 8] [--out /tmp/shots] [--port 5197] [--me 1]
+//   node tools/wobblewatch.mjs --round beancup [--secs 40] [--every 8] [--out /tmp/shots] [--port 5197] [--me 1] [--cut 19: that many of the 24 already out]
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 import { CHROME, ANGLE } from './chrome.mjs';
@@ -64,7 +64,7 @@ if (show) {
   await browser.close().catch(() => undefined);
   process.exit(said.size || log.some((l) => /CRASHED|WENT AWAY|LOST IT/.test(l)) ? 1 : 0);
 }
-await page.goto(`http://localhost:${port}/marbles.html?round=${lineup}&auto=${opt('me', '1')}&go=1&settle=100`);
+await page.goto(`http://localhost:${port}/marbles.html?round=${lineup}&auto=${opt('me', '1')}&go=1&cut=${opt('cut', '0')}&settle=100`);
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 120000 });
 const t0 = Date.now();
 let n = 0;

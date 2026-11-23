@@ -112,7 +112,7 @@ export class RocketBrain {
   }
 }
 
-const G = new THREE.Vector3(), W = new THREE.Vector3();
+const G = new THREE.Vector3(), W = new THREE.Vector3(), T2 = new THREE.Vector3();
 
 /**
  * Bean Cup: a team that plays like one. The two or three nearest the ball go for it, coming round
@@ -133,6 +133,7 @@ export class CupBrain {
   ) {}
   update(dt: number, t: number, c: Course, all: Marble[], ease: number) {
     const m = this.m, A = c.cup!, CUP = A.cfg;
+    if (A.gates) return this.gates(dt, t, c, all, ease);
     if (CUP.rule === 'fence') return this.fence(dt, t, c, all, ease);
     if (CUP.rule === 'volley') return this.volley(dt, t, c, all, ease);
     const push = CUP.rule === 'push';
@@ -217,6 +218,98 @@ export class CupBrain {
     if (lined && range && this.rnd() < 0.3 + 0.5 * this.skill - ease * 0.2) {
       this.shotT = t + (push || CUP.rule === 'hoops' ? 0.9 : 1.6) + this.rnd() * 1.4;
       m.input.set(bx / (bdist || 1), 0, bz / (bdist || 1));
+      m.dash = true;
+    }
+  }
+
+  /**
+   * Gate Crashers: every bean for itself. A ball coming at its own gate (or lying near it) comes
+   * first: it gets between the two and dives the ball away. Otherwise, if it's one of the nearest
+   * to a ball, it gets behind it and knocks it at someone else's gate; if not, it stands guard in
+   * front of its own, leaning toward wherever the nearest ball is.
+   */
+  private aim = -1;
+  private threat = false;
+  private gates(_dt: number, t: number, c: Course, all: Marble[], ease: number) {
+    const m = this.m, A = c.cup!, G = A.gates!, C = A.cfg, y0 = A.center.y;
+    const mine = G.list.find((g) => g.owner === m.id);
+    if (!mine || !mine.open) return void m.input.set(0, 0, 0);
+    const gx = A.center.x + Math.cos(mine.a) * G.R, gz = A.center.z + Math.sin(mine.a) * G.R;
+    // the ball that's the worst news for its gate, and the one nearest to it
+    let bad = null, eta = Infinity, near = null, nd = Infinity;
+    for (const b of A.balls) {
+      if (!b.live) continue;
+      const d = Math.hypot(b.pos.x - gx, b.pos.z - gz);
+      const closing = ((gx - b.pos.x) * b.vel.x + (gz - b.pos.z) * b.vel.z) / Math.max(d, 0.1);
+      const e = d / Math.max(5, closing + 5);
+      if (e < eta) (eta = e), (bad = b);
+      const dm = Math.hypot(b.pos.x - m.pos.x, b.pos.z - m.pos.z);
+      if (dm < nd) (nd = dm), (near = b);
+    }
+    if (t > this.think) {
+      this.think = t + 0.16 + (1 - this.skill) * 0.3 + ease * 0.22 + this.rnd() * 0.1;
+      this.threat = !!bad && eta < 1.1 + 0.7 * this.skill - ease * 0.4;
+      this.chase = false;
+      this.aim = -1;
+      if (near) {
+        let closer = 0;
+        for (const o of all) if (o !== m && o.active && G.list.some((g) => g.open && g.owner === o.id) && Math.hypot(near.pos.x - o.pos.x, near.pos.z - o.pos.z) < nd) closer++;
+        this.chase = closer < 2 || nd < 5;
+        // whose gate to go for: the nearest to the ball that isn't its own (a touch of whim in it)
+        let best = Infinity;
+        G.list.forEach((g, k) => {
+          if (!g.open || g === mine) return;
+          const d = Math.hypot(A.center.x + Math.cos(g.a) * G.R - near.pos.x, A.center.z + Math.sin(g.a) * G.R - near.pos.z) + this.rnd() * 7 * (1.3 - this.skill);
+          if (d < best) (best = d), (this.aim = k);
+        });
+      }
+    }
+    const ball = this.threat && bad ? bad : near;
+    let dive = false;
+    if (!ball) W.set(gx - Math.cos(mine.a) * 3.4, y0, gz - Math.sin(mine.a) * 3.4);
+    else if (this.threat) {
+      // between the ball and the gate, a few steps out, then through the ball away from the gate
+      const dx = ball.pos.x - gx, dz = ball.pos.z - gz, d = Math.hypot(dx, dz) || 1;
+      const out = Math.max(1.2, Math.min(4, d - C.R - 0.9));
+      W.set(gx + (dx / d) * out, y0, gz + (dz / d) * out);
+      const mx = ball.pos.x - m.pos.x, mz = ball.pos.z - m.pos.z, md = Math.hypot(mx, mz) || 1;
+      // (on the gate's side of it: straight at it)
+      if ((mx * dx + mz * dz) / (md * d) > 0.2) {
+        W.set(ball.pos.x, y0, ball.pos.z);
+        dive = md < C.R + 1.9 && ball.pos.y - y0 - C.R < 1.5;
+      }
+    } else if (this.chase && this.aim >= 0) {
+      const g = G.list[this.aim];
+      G.at(this.aim, T2);
+      // behind the ball, on the line from their gate through it
+      const dx = ball.pos.x - T2.x, dz = ball.pos.z - T2.z, d = Math.hypot(dx, dz) || 1;
+      W.set(ball.pos.x + (dx / d) * (C.R + 1.1), y0, ball.pos.z + (dz / d) * (C.R + 1.1));
+      const mx = ball.pos.x - m.pos.x, mz = ball.pos.z - m.pos.z, md = Math.hypot(mx, mz) || 1;
+      const lined = -(mx * dx + mz * dz) / (md * d);
+      if (lined < -0.2) {
+        // (the wrong side of it: round, not through)
+        const side = mx * dz - mz * dx > 0 ? 1 : -1;
+        W.x += (-dz / d) * side * (C.R + 2);
+        W.z += (dx / d) * side * (C.R + 2);
+      } else if (Math.hypot(W.x - m.pos.x, W.z - m.pos.z) < 1.5) W.copy(T2);
+      dive = g.open && lined > 0.78 - 0.1 * this.skill && md < C.R + 1.8 && d < 13 + 9 * this.skill && ball.pos.y - y0 - C.R < 1.4;
+    } else {
+      // on guard: in front of its gate, leaning toward the ball
+      const ba = Math.atan2(ball.pos.z - A.center.z, ball.pos.x - A.center.x);
+      let off = ba - mine.a;
+      while (off > Math.PI) off -= Math.PI * 2;
+      while (off < -Math.PI) off += Math.PI * 2;
+      const a = mine.a + THREE.MathUtils.clamp(off, -G.cur * 0.7, G.cur * 0.7);
+      W.set(A.center.x + Math.cos(a) * (G.R - 3.2), y0, A.center.z + Math.sin(a) * (G.R - 3.2));
+    }
+    const dx = W.x - m.pos.x, dz = W.z - m.pos.z, d = Math.hypot(dx, dz);
+    if (d > 0.45) m.input.set(dx / d, 0, dz / d).multiplyScalar(this.threat || this.chase ? 1 : Math.min(1, d / 2.5));
+    else m.input.set(0, 0, 0);
+    if (!dive || !ball || m.mode !== Mode.Run || t < this.shotT) return;
+    if (this.rnd() < 0.3 + 0.5 * this.skill - ease * 0.2) {
+      this.shotT = t + 0.8 + this.rnd() * 1.1;
+      const mx = ball.pos.x - m.pos.x, mz = ball.pos.z - m.pos.z, md = Math.hypot(mx, mz) || 1;
+      m.input.set(mx / md, 0, mz / md);
       m.dash = true;
     }
   }
