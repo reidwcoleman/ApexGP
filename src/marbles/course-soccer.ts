@@ -35,6 +35,48 @@ export const CUP = {
   over: 45,
 };
 export type CupRule = 'cup' | 'push' | 'fence' | 'volley' | 'hoops' | 'gates' | 'bowl';
+/**
+ * Bean Bowl, football by the downs. The side with the ball has four downs to make ten yards
+ * (a yard is half a metre here: the field's fifty metres are its hundred yards); make them and
+ * it's first down again, don't and the other side takes over where the ball lies.
+ */
+export interface BowlDrive {
+  /** the side with the ball (0 pink, which attacks +z; 1 blue) */
+  off: number;
+  down: number;
+  /** the line of scrimmage and the line to gain: z, from the middle of the field */
+  los: number;
+  first: number;
+  /** 'set': lined up, waiting for the snap; 'live': the play's on; 'dead': the whistle's gone */
+  phase: 'set' | 'live' | 'dead';
+  /** when the ball's snapped (world time), when the play went live, when the next one's set up */
+  snapAt: number;
+  liveAt: number;
+  deadAt: number;
+  /** the quarterback (a bean's id), the play called (PLAYS' index) and whether it's a run */
+  qb: number;
+  play: number;
+  run: boolean;
+  /** the play's number in the game (every browser lines up afresh when it changes) */
+  seq: number;
+  /** this play: a forward pass has been thrown; the other side has taken the ball (an interception) */
+  passed: boolean;
+  turned: boolean;
+}
+export type BowlRole = 'QB' | 'OL' | 'RB' | 'WR' | 'DL' | 'LB' | 'CB' | 'S';
+export interface BowlSpot {
+  x: number;
+  z: number;
+  yaw: number;
+  role: BowlRole;
+  /** the route: points on the field to run to, in order (none: it blocks, or plays its position) */
+  route: [number, number][];
+  /** what the route's called (for a person who's running it) */
+  call: string;
+  /** a cornerback's man (a bean's id; -1: none) */
+  man: number;
+}
+
 /** one pitch's numbers: Bean Cup's, or a variant's */
 export interface CupCfg {
   rule: CupRule;
@@ -89,7 +131,7 @@ export const CUP_CFG: Record<CupRule, CupCfg> = {
   // basketball: a hoop high at each end; a dive into the ball is a shot at it
   hoops: { rule: 'hoops', ...CUP, HW: 17, HL: 25, cut: 5, goalHalf: 0, goalH: 0, goalD: 0, R: 1.15, ceil: 15, T: 100, restart: 2.6, second: 0, over: 45, balls: 1, kick: 1, loft: 6.5, push: 0.55, fenceH: 0, top: 24, credit: 7, hoopY: 5.4, hoopR: 2.3, hoopIn: 3.3, three: 15, endZone: 0, call: 'DRIBBLE IT UP THE COURT · DIVE INTO IT TO SHOOT', goalLine: 'Most points stays in the show. A shot from outside the arc is worth three', goalWord: 'BASKET!', extra: 'NEXT BASKET WINS' },
   // football: a ball you carry. Run it into their end zone for a touchdown; a tackle knocks it loose; throw it to a team-mate
-  bowl: { rule: 'bowl', ...CUP, ...NOHOOP, HW: 16, HL: 31, cut: 3, goalHalf: 0, goalH: 0, goalD: 0, R: 0.72, ceil: 16, T: 110, restart: 3, second: 0, over: 45, balls: 1, kick: 1, loft: 6, push: 1, fenceH: 0, top: 30, credit: 8, endZone: 6, call: 'RUN INTO THE BALL TO PICK IT UP · RUN IT TO THEIR END ZONE', goalLine: 'Carry the ball into their end zone: a touchdown is 7. Most points stays in the show', goalWord: 'TOUCHDOWN!', extra: 'NEXT SCORE WINS' },
+  bowl: { rule: 'bowl', ...CUP, ...NOHOOP, HW: 16, HL: 31, cut: 3, goalHalf: 0, goalH: 0, goalD: 0, R: 0.72, ceil: 16, T: 170, restart: 3, second: 0, over: 45, balls: 1, kick: 1, loft: 6, push: 1, fenceH: 0, top: 30, credit: 8, endZone: 6, call: 'FOUR DOWNS TO MAKE TEN YARDS · GET IT TO THEIR END ZONE', goalLine: 'Real football: four downs to make ten yards. A touchdown is 7. Most points stays in the show', goalWord: 'TOUCHDOWN!', extra: 'NEXT SCORE WINS' },
   // the final: a ring, a gate each, and every bean for itself (course-gates.ts)
   gates: { rule: 'gates', ...CUP, ...NOHOOP, HW: 17, HL: 17, cut: 0, goalHalf: 0, goalH: 0, goalD: 0, R: 1.3, ceil: 12, T: 150, restart: 1.5, second: 0, over: 0, balls: 3, kick: 0.82, loft: 4.2, push: 0.9, fenceH: 0, top: 30, credit: 6, call: 'GUARD YOUR GATE · KNOCK IT THROUGH THEIRS', goalLine: 'A ball through your gate and you are out. Last bean standing takes the crown', goalWord: '', extra: '' },
 };
@@ -145,8 +187,11 @@ export interface CupArena {
   goal(team: number, o: THREE.Vector3): THREE.Vector3;
   /** Bean Hoops: the middle of the rim each team shoots at */
   hoops: THREE.Vector3[];
-  /** Bean Bowl: the bean with the ball throws it toward a spot (set by the game's ball rules: a bot calls it) */
+  /** Bean Bowl: the bean with the ball throws it toward a spot, or hands it to a team-mate beside it (set by the game's ball rules: a bot calls them) */
   pass?: (id: number, tx: number, tz: number) => void;
+  handoff?: (from: number, to: number) => void;
+  /** Bean Bowl: the drive as it stands, and where each bean lines up and what its job is this play */
+  bowl?: { D: BowlDrive; spot(id: number): BowlSpot | undefined; meet(id: number, fx: number, fz: number): [number, number] };
   /** Gate Crashers (the final): the ring and its gates, and a colour for every bean's own "team" */
   gates?: GateRing;
   colors?: number[];

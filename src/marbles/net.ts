@@ -68,6 +68,8 @@ export type CtlMsg =
   /** Bean Cup: where the balls are, and the goals; a goal going in */
   | { t: 'cup'; s: number[]; a: number; b: number }
   | { t: 'goal'; team: number; by: number; own: boolean; ball: number; a: number; b: number; pts?: number }
+  /** Bean Bowl: the announcer (the down and distance, how a play came out) */
+  | { t: 'say'; a: string; b: string; big: boolean }
   /** Bean Bowl: my bean (it has the ball) throws it at a spot (guest → host) */
   | { t: 'pass'; id: number; x: number; z: number }
   /** Gate Crashers: a ball's gone through gate `g`, bean `id`'s, knocked in by `by`; it has `left` lives now (0: out) */

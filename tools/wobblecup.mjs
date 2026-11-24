@@ -40,7 +40,7 @@ async function one(id) {
     const was = A.balls.map(() => 0);
     let lastScore = 0, lastGoalT = 0, dropT = 0, wasLive = A.balls.map(() => false);
     const heldWas = A.balls.map(() => -1);
-    let lastPass = -9;
+    let phaseWas = 'set';
     // (the game's own goal calls, as it makes them)
     const calls = [];
     const shout = g.ui.shout.bind(g.ui);
@@ -55,7 +55,7 @@ async function one(id) {
         if (b.kickT !== k0) { const H = A.hoops[P.teamOf(r.c.id)]; out.shots.push(+Math.hypot(H.x - b.pos.x, H.z - b.pos.z).toFixed(0) * (b.vel.y > 8.5 ? 1 : -1)); }
       };
     }
-    for (let t = 0; t < 200 && (g.state === 'play' || g.state === 'countdown' || g.state === 'intro'); t += 1 / 60) {
+    for (let t = 0; t < 270 && (g.state === 'play' || g.state === 'countdown' || g.state === 'intro'); t += 1 / 60) {
       g.ff(1 / 60);
       if (g.state !== 'play') continue;
       out.ticks++;
@@ -66,8 +66,9 @@ async function one(id) {
         const fair = Math.max(b.vel.length(), was[i]) / 60 * 1.6 + 0.35;
         was[i] = b.vel.length();
         // (Bean Bowl: picked up, a ball goes to its bean's hands, and out of them when it's thrown or dropped)
-        const hand = C.rule === 'bowl' && (b.held >= 0 || heldWas[i] >= 0);
-        if (C.rule === 'bowl') { if (b.held !== heldWas[i]) { out.hands = (out.hands ?? 0) + 1; if (b.held < 0 && b.inAir) out.passes = (out.passes ?? 0) + 1; if (b.held < 0 && !b.inAir) out.fumbles = (out.fumbles ?? 0) + 1; if (b.held >= 0 && heldWas[i] < 0 && b.thrower >= 0 && g.playT - lastPass < 2.5) out.caught = (out.caught ?? 0) + 1; if (b.held < 0 && b.inAir) lastPass = g.playT; } heldWas[i] = b.held; }
+        // (Bean Bowl: the ball's carried, and put down on the line of scrimmage between plays)
+        const hand = C.rule === 'bowl' && (b.held >= 0 || heldWas[i] >= 0 || P.drive.phase !== 'live' || phaseWas !== 'live');
+        if (C.rule === 'bowl') { heldWas[i] = b.held; phaseWas = P.drive.phase; }
         if (step > fair && !hand) { out.jumps++; out.jumpMax = Math.max(out.jumpMax, +step.toFixed(2)); }
         prev[i].copy(b.pos);
         out.maxSpeed = Math.max(out.maxSpeed, +b.vel.length().toFixed(1));
@@ -100,6 +101,7 @@ async function one(id) {
     out.state = g.state;
     out.playT = +g.playT.toFixed(1);
     out.score = P.score.join('-');
+    if (C.rule === 'bowl') out.bowl = { ...P.stats, yards: P.stats.yards.join('/') };
     out.calls = calls.filter((x) => /GOAL|SCORED|LINE/.test(x[1])).map((x) => `${x[0]} ${x[1]}`);
     out.beans = g.racers.length;
     return out;
@@ -117,7 +119,7 @@ for (const r of res) {
   const n = r.ticks * r.beans || 1;
   const wrong = r.errs.length || r.state === 'play' || r.jumps > 0 || r.dead > 0 || r.ballOut > 0 || r.beanOut > 0 || r.quick > 0;
   if (wrong) bad++;
-  if (r.hands) console.log(`        football: the ball changed hands ${r.hands} times · passes thrown ${r.passes ?? 0} · fumbles ${r.fumbles ?? 0}`);
+  if (r.bowl) console.log(`        football: ${JSON.stringify(r.bowl)}`);
   console.log(`${wrong ? 'BAD ' : 'ok  '}${r.id.padEnd(10)} ${String(r.playT).padStart(6)}s ${r.score.padEnd(5)} jumps ${r.jumps} (max ${r.jumpMax} m) dead ${r.dead} ${JSON.stringify(r.deadAt)} ballOut ${r.ballOut} beanOut ${r.beanOut} inBall ${r.inBall} quickGoals ${r.quick} top ${r.maxSpeed} m/s down ${(100 * r.tumble / n).toFixed(1)}% idle ${(100 * r.idle / n).toFixed(1)}% ballAlone ${(100 * r.far / Math.max(1, r.ticks)).toFixed(0)}%`);
   if (r.shots.length) console.log(`      shots (m from the hoop; minus: a clearance) ${r.shots.join(' ')} · ball's mean distance from halfway ${(r.zSum / Math.max(1, r.ticks)).toFixed(1)} m, in the air ${(100 * r.high / Math.max(1, r.ticks)).toFixed(0)}%`);
   if (r.goals.length) console.log(`      goals ${r.goals.map((g) => `${g[0]}s ${g[1]} (+${g[2]}s)`).join(', ')}`);

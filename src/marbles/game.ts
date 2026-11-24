@@ -92,6 +92,7 @@ const NAMES = ['Wobbles', 'Jellyroll', 'Bonk', 'Squish', 'Mr. Beans', 'Gumdrop',
 const FIELD = 24;
 const UP = new THREE.Vector3(0, 1, 0);
 const PT = new THREE.Vector3();
+const BOWL_V = new THREE.Vector3();
 
 export class MarbleGame {
   readonly renderer: THREE.WebGLRenderer;
@@ -742,6 +743,7 @@ export class MarbleGame {
     this.gateGone.clear();
     this.gateKos.clear();
     this.bowlWas = '';
+    this.bowlPlaced.clear();
     this.gateCall = 0;
     this.padsGone = 0;
     this.keepP?.dispose();
@@ -819,13 +821,15 @@ export class MarbleGame {
     });
     if (c.team && !menu) this.teamPlay = new TeamPlay(c, this.scene, () => this.racers, this.sound);
     if (c.cup && !menu) this.cupP = new CupPlay(c, this.scene, () => this.racers);
+    if (this.cupP && this.guest) this.cupP.relay = (id, x, z) => this.guest?.send({ t: 'pass', id, x, z });
     // (out of the show: my ghost goes into the round, by one of the beans)
     this.ghostsI?.clear();
     if (!menu) this.backSoon.clear();
     const mine = menu ? null : this.roster.find((x) => x.player);
     if (!menu) this.starsP = new Stars(c, this.scene, !!mine?.out);
     // (mystery boxes in every round on foot)
-    if (!menu && !c.kart && !c.rocket) this.boxes = new Boxes(c, this.scene, !!this.guest);
+    // (no mystery boxes in Bean Bowl: it's football by the rules)
+    if (!menu && !c.kart && !c.rocket && c.cup?.cfg.rule !== 'bowl') this.boxes = new Boxes(c, this.scene, !!this.guest);
     if (mine?.out && this.racers.length) {
       const by = this.racers[Math.floor(Math.random() * this.racers.length)];
       this.ghosts.haunt(mine.id, mine.name, mine.outfit.a, by.m.pos.clone().add(new THREE.Vector3(1.5, 2, 1.5)));
@@ -1445,9 +1449,12 @@ export class MarbleGame {
     const on = this.state === 'play';
     if (A.gates) return this.gateRules(dt);
     if (on) {
-      if (x < 5) this.ui.call(x > 0.4 ? A.cfg.call : null, 0x37c25a);
+      const bowl = A.cfg.rule === 'bowl';
+      if (bowl) void 0;
+      else if (x < 5) this.ui.call(x > 0.4 ? A.cfg.call : null, 0x37c25a);
       else if (x < 5.3) this.ui.call(null);
       if (!this.guest) {
+        if (bowl && !A.balls[0].live) G.now = w.time;
         if (!A.balls[0].live && !A.balls[0].backAt && !G.second) G.start();
         for (const e of G.tick(dt, w.time, x)) this.cupEvent(e);
         if (this.host && w.time > this.cupSent) {
@@ -1458,7 +1465,10 @@ export class MarbleGame {
         G.follow(dt);
         for (const e of G.drain()) this.cupEvent(e);
       }
-      this.bowlHud();
+      if (bowl) {
+        this.bowlLineUp();
+        this.bowlHud();
+      }
       if (A.cfg.second > 0 && !this.cupTwo && x > A.cfg.T - A.cfg.second) {
         this.cupTwo = true;
         this.ui.shout('SECOND BALL!', 'Two to play for', 1800);
@@ -1683,31 +1693,82 @@ export class MarbleGame {
       const b = G.arena.balls[e.ball];
       this.sound.hop(b.pos.x, b.pos.y, b.pos.z, Mat.Bumper);
     } else if (e.k === 'bowl') this.bowlEvent(e.id, e.was, e.how);
+    else if (e.k === 'say') {
+      this.host?.broadcast({ t: 'say', a: e.a, b: e.b, big: e.big });
+      this.bowlSay(e.a, e.b, e.big);
+    }
+  }
+  /** Bean Bowl: the announcer. Big: across the screen (a first down, a sack, a turnover); else a line (the down and distance) */
+  private bowlSay(a: string, b: string, big: boolean) {
+    if (big) {
+      this.ui.shout(a, b, 1400);
+      const good = /FIRST DOWN/.test(a);
+      this.sound.notes(good ? [72, 76, 79] : [64, 60], 0.07, 0.4, true);
+      if (good) this.sound.cheer(0.8);
+      else this.sound.ooh();
+    } else this.ui.note(b ? `${a} · ${b}` : a, 2100);
+  }
+  /**
+   * Bean Bowl: before the snap everyone's on their mark in the formation (each browser puts its
+   * own beans there the moment a new play's set up) and stays on it until the ball's snapped.
+   */
+  private bowlPlaced = new Map<number, number>();
+  private bowlLineUp() {
+    const G = this.cupP!, D = G.drive, A = G.arena;
+    if (D.phase !== 'set' || !D.seq) return;
+    const S = G.lineup();
+    for (const r of this.racers) {
+      if (!r.local || r.out || !r.m.active) continue;
+      const s = S.get(r.m.id);
+      if (!s) continue;
+      const m = r.m;
+      if (this.bowlPlaced.get(m.id) !== D.seq) {
+        this.bowlPlaced.set(m.id, D.seq);
+        m.pos.set(s.x, A.center.y + 0.52, s.z);
+        m.vel.set(0, 0, 0);
+        m.ang.set(0, 0, 0);
+        m.mode = Mode.Run;
+        m.tumbleT = m.upT = m.heldT = 0;
+        m.release();
+        m.yaw = s.yaw;
+      }
+      m.pos.x = s.x;
+      m.pos.z = s.z;
+      m.vel.x = m.vel.z = 0;
+      m.input.set(0, 0, 0);
+    }
   }
   /** Bean Bowl: the ball's changed hands, as you see and hear it */
-  private bowlEvent(id: number, was: number, how: 'pick' | 'catch' | 'steal' | 'fumble' | 'pass') {
+  private bowlEvent(id: number, was: number, how: 'pick' | 'catch' | 'steal' | 'fumble' | 'pass' | 'snap' | 'hand') {
     const G = this.cupP!, b = G.arena.balls[0], me = this.player();
     const who = this.racers.find((r) => r.m.id === id), old = this.racers.find((r) => r.m.id === was);
     const mine = me ? G.teamOf(me.c.id) : -1;
+    if (how === 'snap') {
+      this.sound.notes([79], 0.05, 0.3, true);
+      if (who?.c.player) this.ui.pop('HIKE!', true);
+      return;
+    }
     if (how === 'pass') {
       this.sound.dash(b.pos.x, b.pos.y, b.pos.z);
       if (old?.c.player) this.ui.pop('THROWN!', true);
       return;
     }
     if (how === 'fumble') {
+      // (a pass knocked down)
       this.bursts.burst(b.pos.clone(), 5, 0xfff2b0, 0.3);
-      this.puffs.stars(b.pos);
       this.sound.hop(b.pos.x, b.pos.y, b.pos.z, Mat.Bumper);
-      this.sound.ooh();
-      this.ui.note(old?.c.player ? 'FUMBLE! You dropped it' : `FUMBLE! ${old ? old.c.name : ''} drops it`, 1300);
-      if (old?.c.player) this.shake = Math.max(this.shake, 0.3);
+      this.ui.pop(old?.c.player ? 'YOU BROKE IT UP!' : 'BROKEN UP!', !!old?.c.player);
       return;
     }
     if (!who) return;
     const ours = G.teamOf(who.c.id) === mine;
+    if (how === 'hand') {
+      this.sound.notes([72], 0.04, 0.25, true);
+      this.ui.note(who.c.player ? 'HAND-OFF: you have it, RUN!' : `Hand-off to ${who.c.name}`, 1200);
+      return;
+    }
     this.rings.ring(who.m.pos.clone().setY(who.m.pos.y - 0.4), 3.2, CUP_COLORS[G.teamOf(who.c.id)], 0.4);
     if (how === 'steal') {
-      this.ui.shout(who.c.player ? 'INTERCEPTED! IT IS YOURS' : 'INTERCEPTED!', `${who.c.player ? 'You' : who.c.name} picked off the pass`, 1500);
       this.sound.cheer(1.2);
       this.sound.notes(ours ? [72, 79, 84] : [60, 55, 50], 0.07, 0.45, true);
     } else if (how === 'catch') {
@@ -1715,51 +1776,77 @@ export class MarbleGame {
       else if (old?.c.player) this.ui.pop('COMPLETE!', true);
       this.sound.notes([76, 84], 0.05, 0.35, true);
       this.sound.cheer(0.5);
-    } else if (who.c.player) this.sound.notes([72, 79], 0.05, 0.35, true);
-    if (who.c.player) {
-      this.ui.note('YOU HAVE THE BALL! Run it to their end zone', 1700);
-      this.fovKick = Math.max(this.fovKick, 3);
     }
+    if (who.c.player) this.fovKick = Math.max(this.fovKick, 3);
   }
-  /** Bean Bowl: what to do, said all the while it matters: you with the ball, a team-mate with it, them with it */
+  /**
+   * Bean Bowl: what your job is, said while it matters. Before the snap: the play and your part
+   * in it. With the ball: who you'd throw to (the receiver you're looking at), or just run.
+   */
   private bowlWas = '';
   private bowlHud() {
-    const G = this.cupP!, me = this.player();
-    if (G.cfg.rule !== 'bowl' || !me) return;
-    const x = this.course!.b.world.time - this.course!.state.go;
-    if (x < 5.4) return;
-    const h = G.holder();
-    const who = h >= 0 ? this.racers.find((r) => r.m.id === h) : undefined;
-    const ours = !!who && G.teamOf(who.c.id) === G.teamOf(me.c.id);
-    const say = !who ? '' : who === me ? 'YOU HAVE THE BALL · RUN IT IN · GRAB: THROW' : ours ? `${who.c.name} has it: get open up the field, or block for them` : `${who.c.name} has it: DIVE into them!`;
+    const G = this.cupP!, me = this.player(), D = G.drive;
+    G.aimAt = -1;
+    if (!me || me.out || !D.seq) return;
+    const sp = G.lineup().get(me.m.id);
+    const off = G.teamOf(me.c.id) === D.off;
+    let say = '', col = 0x37c25a;
+    if (D.phase === 'set' && sp) {
+      const man = sp.man >= 0 ? this.racers.find((r) => r.m.id === sp.man) : undefined;
+      say =
+        sp.role === 'QB' ? `QUARTERBACK · ${G.playName()} · GRAB: THROW TO WHO YOU LOOK AT`
+        : sp.role === 'WR' ? `RECEIVER · ${sp.call}`
+        : sp.role === 'RB' ? `RUNNING BACK · ${sp.call}`
+        : sp.role === 'OL' ? 'BLOCKER · KEEP THEM OFF THE QUARTERBACK'
+        : sp.role === 'DL' ? 'DEFENCE · RUSH THE QUARTERBACK'
+        : sp.role === 'CB' ? `DEFENCE · COVER ${man ? man.c.name : 'YOUR RECEIVER'}`
+        : sp.role === 'LB' ? 'DEFENCE · STOP THE RUN, WATCH THE SHORT PASS'
+        : 'DEFENCE · SAFETY: STAY DEEP, LET NOBODY BEHIND YOU';
+      col = off ? 0xffc21f : 0xff4a5a;
+    } else if (D.phase === 'live' && G.holder() === me.m.id) {
+      col = 0xffc21f;
+      if (G.canPass(me.m.id)) {
+        const to = this.bowlTarget(me);
+        G.aimAt = to.r ? to.r.m.id : -1;
+        say = to.r ? `GRAB: THROW TO ${to.r.c.name} · OR RUN IT` : 'LOOK AT A RECEIVER · GRAB: THROW · OR RUN IT';
+      } else say = 'RUN! GET TO THEIR END ZONE';
+    }
+    say = say.toUpperCase();
     if (say === this.bowlWas) return;
     this.bowlWas = say;
-    // (the banner only while it's you; otherwise a line that comes and goes)
-    this.ui.call(who === me ? say : null, 0xffc21f);
-    if (who && who !== me) this.ui.note(say, 1900);
+    this.ui.call(say || null, col);
   }
-  /** Bean Bowl: my bean throws the ball: at a team-mate up the field if one's about where I'm facing (led, so it meets them), or straight ahead */
-  private bowlPass(p: Racer) {
-    const G = this.cupP!, m = p.m, w = this.course!.b.world;
-    const hs = Math.hypot(m.vel.x, m.vel.z);
-    const fx = hs > 1.5 ? m.vel.x / hs : Math.sin(m.yaw), fz = hs > 1.5 ? m.vel.z / hs : Math.cos(m.yaw);
-    let tx = m.pos.x + fx * 15, tz = m.pos.z + fz * 15, best = 0.8;
+  /**
+   * Bean Bowl: who my bean would throw to: the receiver nearest the middle of the screen (where
+   * the camera's looking), and where the ball has to come down to meet them on the run.
+   */
+  private bowlTarget(p: Racer) {
+    const G = this.cupP!, m = p.m, S = G.lineup();
+    this.camera.getWorldDirection(BOWL_V);
+    const fl = Math.hypot(BOWL_V.x, BOWL_V.z) || 1, fx = BOWL_V.x / fl, fz = BOWL_V.z / fl;
+    const out = { r: null as Racer | null, x: m.pos.x + fx * 14, z: m.pos.z + fz * 14 };
     const team = G.teamOf(p.c.id);
+    let best = 0.5;
     for (const r of this.racers) {
-      if (r === p || r.out || !r.m.active || G.teamOf(r.c.id) !== team) continue;
+      if (r === p || r.out || !r.m.active || G.teamOf(r.c.id) !== team || S.get(r.m.id)?.role === 'OL') continue;
       const dx = r.m.pos.x - m.pos.x, dz = r.m.pos.z - m.pos.z, d = Math.hypot(dx, dz);
-      if (d < 4 || d > 27) continue;
-      // (the one most nearly where I'm facing, a far one a little preferred)
-      const sc = (dx * fx + dz * fz) / d + d * 0.004;
+      if (d < 3 || d > 28) continue;
+      const sc = (dx * fx + dz * fz) / d;
       if (sc > best) {
         best = sc;
-        const T = 0.5 + d * 0.034;
-        tx = r.m.pos.x + r.m.vel.x * T * 0.85;
-        tz = r.m.pos.z + r.m.vel.z * T * 0.85;
+        out.r = r;
+        [out.x, out.z] = G.meet(r.m.id, m.pos.x, m.pos.z);
       }
     }
-    if (this.guest) this.guest.send({ t: 'pass', id: p.c.id, x: tx, z: tz });
-    else G.pass(m.id, tx, tz, w.time);
+    return out;
+  }
+  /** Bean Bowl: my bean throws the ball (one forward pass a play, from behind the line) */
+  private bowlPass(p: Racer) {
+    const G = this.cupP!, w = this.course!.b.world;
+    if (!G.canPass(p.m.id)) return void this.ui.note('You are past the line of scrimmage: RUN IT!', 1300);
+    const to = this.bowlTarget(p);
+    if (this.guest) this.guest.send({ t: 'pass', id: p.c.id, x: to.x, z: to.z });
+    else G.pass(p.m.id, to.x, to.z, w.time);
   }
   private grabWas = false;
 
@@ -1775,8 +1862,8 @@ export class MarbleGame {
     const you = !!who?.c.player;
     const mine = this.player() && G.teamOf(this.player()!.c.id) === team;
     const name = CUP_NAMES[team];
-    const word = pts === 3 ? 'THREE POINTER!' : G.cfg.goalWord || 'GOAL!';
-    if (G.cfg.rule === 'cup' || G.cfg.rule === 'push' || G.cfg.rule === 'hoops' || G.cfg.rule === 'bowl') this.kickAt = w.time + 1.5;
+    const word = pts === 3 ? 'THREE POINTER!' : G.cfg.rule === 'bowl' && pts === 2 ? 'SAFETY!' : G.cfg.goalWord || 'GOAL!';
+    if (G.cfg.rule === 'cup' || G.cfg.rule === 'push' || G.cfg.rule === 'hoops') this.kickAt = w.time + 1.5;
     this.ui.shout(own ? 'OWN GOAL!' : you ? (G.cfg.rule === 'volley' ? 'YOUR POINT!' : pts === 3 ? 'YOUR THREE!' : 'YOU SCORED!') : G.cfg.rule === 'cup' ? word : `${word} ${name}`, `${who ? `${who.c.name} · ` : ''}${CUP_NAMES[0]} ${G.score[0]} - ${G.score[1]} ${CUP_NAMES[1]}`, G.cfg.rule === 'volley' ? 1500 : 2400);
     this.confetti.burst(b.pos, 160, 11);
     if (G.cfg.rule !== 'volley') this.fireworks.show(b.pos, 5, 14, 14, 0.14);
@@ -2561,6 +2648,9 @@ export class MarbleGame {
         break;
       case 'cup':
         this.cupP?.heard(m.s, m.a, m.b);
+        break;
+      case 'say':
+        if (this.cupP) this.bowlSay(m.a, m.b, m.big);
         break;
       case 'goal':
         if (this.cupP) {

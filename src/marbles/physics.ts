@@ -184,6 +184,8 @@ export class Marble {
   iron = false;
   /** Bean Bowl: it's carrying the ball (a touch slower, so it can be caught) */
   carry = false;
+  /** Bean Bowl: a defender with a blocker on it runs at this much of its speed (1: free) */
+  blockK = 1;
   /** a spring pad just threw it */
   sprung = false;
   /** a boost strip just sent it off */
@@ -520,6 +522,7 @@ export class World {
     }
     if (this.time < m.zoomT) m.runK *= ZOOM_K;
     if (m.carry) m.runK *= CARRY_K;
+    m.runK *= m.blockK;
     const pw = this.time < m.pwT ? m.pw : 0;
     if (pw === 1) m.runK *= POWER_RUN;
     else if (pw === 2) m.jumpK *= POWER_JUMP;

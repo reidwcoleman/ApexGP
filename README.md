@@ -843,19 +843,35 @@ and bots; the contestants are original bean characters, not marbles.
     home, level is sudden death) and Volley Folly (volleyball: one big floaty ball and a net;
     run under it and it comes up off your head, lower each time; JUMP or DIVE into it and it goes
     over, on a flight worked out to clear the net and land where you were heading; down in your
-    yard is a point to them). Bean Bowl (football, rule `bowl`): a gridiron with a line every five
-    yards, an end zone each and the uprights behind it, and a ball that's carried. Run into it
-    loose (or get under a throw) and it's yours, held over your head, and you're a tenth slower.
-    Carry it into THEIR end zone: a touchdown, seven points, and a kick-off. A dive that knocks
-    the carrier over is a fumble; held by someone for a second, it's stripped. GRAB throws it: a
-    lob that comes down on the team-mate most nearly where you're facing (led, so it meets them
-    on the run), or straight ahead; the other side under it is an interception. The host runs
-    all of it (`CupPlay.bowl`) and says who has the ball in the `cup` packet; a guest's throw is
-    a `pass` message. Bots (`CupBrain.bowl`) have a job that changes with who has the ball: the
-    carrier cuts away from tacklers and throws to someone open when it's about to be hit, half
-    its side runs routes ahead and half blocks, the other side's nearest hunt the carrier (to
-    where it's going) and the rest drop back between the ball and their end zone. Bot games come
-    out about 28-21. And Bean Hoops (basketball, rule `hoops`): a wooden court with a
+    yard is a point to them). Bean Bowl (football, rule `bowl`): real football by the downs, on a
+    gridiron with a line every five yards (a yard is half a metre: the field is a hundred of
+    them), an end zone each and the uprights behind it. The side with the ball has four downs
+    to make ten yards (`BowlDrive` in course-soccer.ts); make them and it's first down again,
+    don't and the other side takes over where the ball lies. Every play both sides line up on
+    the line of scrimmage in a formation (`CupPlay.lineup`: a quarterback, linemen, a running
+    back, receivers split wide; across from them rushers, a cornerback on every receiver,
+    linebackers and a safety), a play is called from the playbook (`PLAYS`: slants, four
+    verticals, outs, curls, crossers, post and out; a dive and a sweep) and the ball's snapped.
+    It's live until the bean with the ball is tackled (knocked over, wrapped up, or with a free
+    defender on it for a third of a second), a pass hits the ground (incomplete), or it's a
+    touchdown (7; tackled in your own end zone is a safety, 2). One forward pass a play, from
+    behind the line; linemen can't catch it; a defender who gets to it misses it, knocks it
+    down or now and then intercepts. Blocking is a rule too (`engage`): a defender with a
+    blocker on it runs at a third of its speed until it sheds the block, which is what gives a
+    quarterback time. Television's lines are drawn on the grass (blue: the line of scrimmage;
+    yellow: the line to gain) with your route, or every receiver's if you're the quarterback.
+    A person is the quarterback on pass plays (GRAB throws to the receiver in the middle of
+    the screen, ringed in yellow, led along its route) and the running back on runs; otherwise
+    a receiver, and the safety on defence. Bots (`CupBrain.bowl`) play their positions: the
+    quarterback drops back, slides away from the rush, reads the receivers and throws to the
+    most open one or tucks it and runs; linemen take the rusher across from them; receivers
+    run their routes cut for cut; corners play man a beat behind every cut; linebackers play a
+    zone and sometimes blitz; the safety stays deeper than the deepest receiver; once the ball
+    is past the line the defence pursues and the offence blocks. The host runs it all and
+    sends the drive in the `cup` packet; each browser puts its own beans on their marks; a
+    guest's throw is a `pass` message and the announcer a `say`. No mystery boxes here. Bot
+    games: about 25 plays, 60% of passes complete, two to four touchdowns.
+    And Bean Hoops (basketball, rule `hoops`): a wooden court with a
     hoop high at each end. Run into the ball to dribble it, DIVE into it to shoot: it's thrown at
     the hoop on an arc that drops into it, truer the closer you are and the more squarely you
     were heading at the hoop, and from outside the arc it's worth three. A jump up into it close
