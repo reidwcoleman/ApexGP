@@ -5,7 +5,7 @@ A Formula 1 racing game in the browser. Three.js + WebGL2, TypeScript, Vite.
 **▶ Play: https://reidwcoleman.github.io/ApexGP/** (desktop Chrome/Safari/Edge; keyboard or gamepad)
 
 The site opens like a console: logo, the lit stage, press any button, who's playing, then a home screen with one row of tiles, the selected game's art filling the screen and activity cards under it. It's measured off real PS5 footage at 1280x720 (`--u` in `index.html`). The games are **Apex GP** (this racing game), **Boostball** (car soccer),
-**Last Frame** (a bodycam shooter, online with friends or against bots), **Miami** (the open world), **Wobble Mania** (a jelly-bean knockout party, online with friends), **Mogul** and **Tracksmith**, and only the game you pick is loaded: the racing game's loader, pictures and bundle
+**Last Frame** (a bodycam shooter, online with friends or against bots), **Ocean Drive** (one block of Miami Beach), **Wobble Mania** (a jelly-bean knockout party, online with friends), **Mogul** and **Tracksmith**, and only the game you pick is loaded: the racing game's loader, pictures and bundle
 wait behind the picker (`src/boot.ts`); the others are pages of their own. Links with parameters, the test tools and the desktop build skip it. Coming back in the same tab goes straight home, `?pick` does too, and `?pick&boot` forces the startup. Settings can turn the startup off. `tools/pickertest.mjs <dir>` walks it with real keys.
 
 Every push to `main` is built and deployed to GitHub Pages by `.github/workflows/pages.yml`.
@@ -650,93 +650,39 @@ npm run check    # tsc --noEmit
   learn, and a slow development over the races they drive, is kept in localStorage (`apexgp.ailearn`), capped by
   the difficulty so the AI stays beatable.
 
-## Open world: Miami
+## Ocean Drive
 
-**▶ https://reidwcoleman.github.io/ApexGP/miami.html** (or Home → Open world · Miami in the garage)
+**▶ https://reidwcoleman.github.io/ApexGP/oceandrive.html** (or the Ocean Drive tile in the picker)
 
-Its own page (`miami.html`, `src/openworld/`): nothing of the race world loads with it — only the
-engine (the race game's renderer, sky, weather, grade, reflections) and the city.
+One block of Miami Beach made as real as a browser allows: Ocean Drive from 7th to 8th Street, the
+Art Deco hotels on it (Avalon, Beacon, Colony, Boulevard, Starlite, News Cafe; Park Central to the
+south, the Pelican to the north), Lummus Park, the dunes, the beach and the Atlantic. Walk it, sit
+the camera on a café porch, or get in one of the parked cars and drive the strip.
 
-- **Miami at real scale**, from latitude / longitude: Downtown, Brickell (its grid at 33.7°),
-  Little Havana, Edgewater, the river and its bridges, I-95, I-395 and the MacArthur Causeway,
-  Watson, Dodge, Star, Palm and Hibiscus islands, Brickell Key, South Beach and Ocean Drive.
-  37 named towers at their real addresses and heights (Panorama, Four Seasons, Southeast Financial,
-  Brickell City Centre…), interior-mapped facades, podium amenity decks and garage tops full of
-  cars, AC plant, masts and helipads; street lighting from a baked light map (the night street is
-  lit by its lamps), shops with lettered signs, Ocean Drive's neon.
-- **Landmarks**: Miami Tower's three lit tiers, the Freedom Tower, the Kaseya Center, PAMM's canopy
-  and hanging gardens, Frost Science's sphere, the SkyViews wheel at Bayside, cruise ships at the
-  PortMiami terminals, gantry cranes and container stacks, South Beach's lifeguard towers.
-- **The story** (`src/openworld/story/`): an original crime story in eight missions. Rafa Vega, a
-  getaway driver back in Miami, owes Dante Cruz forty grand; Lola Marín puts him to work from her
-  garage on Calle Ocho. Steal and deliver a car, lose the police, a timed run to Ocean Drive, chase
-  down and wreck a runner, fly a helicopter to a tower roof and land, burn three cars on Ocean
-  Drive, a four-star escape by boat. Each is offered at a letter on the map and starts when you stop
-  in its marker; subtitled dialogue, objectives, a GPS route on the minimap, light-column markers
-  and chevrons in the world, timers, mission passed / failed cards, cash. Progress and cash are
-  saved (localStorage); the menu's Story tab lists them and starts over.
-- **Sports cars**: you start in a mid-engine supercar (Vespera GT-R); the garage in the menu
-  delivers it, a V8 muscle car (Bravado Stallion) or a twin-turbo coupe (Kestrel S) in Miami
-  colours, and they're common in the traffic.
-- **Miami in colour**: most low and mid-rise walls in pastels and brights, parking podiums behind
-  perforated screens painted in waves of colour (glowing after dark), Wynwood-style murals on 22 m
-  stretches of wall (synthwave sunsets, waves, Memphis dots, rainbow stripes, giant flowers),
-  painted shop fascias with neon letters at night, candy-striped awnings, rooftop billboards for
-  made-up brands, flag bunting across Calle Ocho, Ocean Drive and Washington Ave.
-- **Other vehicles**: every traffic car can be taken (carjacking ejects the driver), a superbike,
-  a helicopter (Watson Island), a seaplane, a go-fast boat with a wake; the menu delivers more.
-- **The city lives**: lane-following traffic with signals and junction paths that slows for,
-  queues behind and changes lanes round wrecks, abandoned cars and roadblocks; parked cars;
-  pedestrians (Rocketbox avatars) who cross, dodge and flee, or drop and cover close to gunfire;
-  drivers who bail out of a car that's shot at; boats in the bay, airliners on the MIA approach,
-  a news helicopter. Shoot out a tyre and the car limps to a stop.
-- **Weapons**: pistol, SMG, carbine, pump shotgun, marksman rifle (scope) and a rocket launcher;
-  generic designs modelled at real size. An over-the-shoulder camera with mouse capture, the
-  character posed by IK onto the gun; hitscan rounds with tracers, muzzle flashes that light the
-  street, brass, bullet holes, sparks and dust; drive-bys with the pistol and SMG. Cars shot up
-  smoke, burn and explode (throwing the cars round them, setting off the next); people go down.
-- **Miami PD**: crimes the police see raise the wanted level at once; the rest wait on a witness,
-  who gets clear and phones 911 (kill the witness and nobody calls). Cruisers route to you (A*),
-  chase and ram, and from two stars one unit lines up beside your rear quarter for a PIT; roadblocks
-  lay a spike strip ahead (the tyres go, you're on the rims in sparks). Officers shout, take cover
-  behind their cruisers and pop up over the hood to fire; their crews get out and either cuff a suspect who stands still or, from two stars
-  (or at anyone pointing a gun at them), shoot; from three stars passengers fire out of the windows
-  and the helicopter comes over (a rifle in its door from four); roadblocks from four stars; the
-  tactical team in black with carbines at five. Dispatch on the radio, the search area on the map;
-  stop with a cruiser beside you and you're BUSTED; lose them and the stars clear.
-- **Physics** (`sim/car.ts`): tuned to drive like a street-racing game: planted, quick to answer,
-  happy to slide when asked and easy to catch. An axle-pair tyre model with a peak and a sliding
-  plateau, load transfer under braking and power, a friction circle per axle with ABS and traction
-  control keeping grip for the steering, stability control that trims the yaw unless the handbrake
-  is up, speed-sensitive steering lock, automatic gearboxes with torque curves. Each wheel reads
-  the ground but only climbs curb-height steps, so ramps launch you and decks overhead don't; the
-  car flies off crests and lands on its suspension. Blasts and heavy rams turn it into a tumbling
-  rigid body (the player's car rights itself). Supercar 0–100 km/h 2.4 s and 1.5 g; a city sedan
-  6 s and 1.15 g. A sprung display body (dive, squat, roll), tyre marks, per-wheel smoke, dents.
-  `tools/owhandling.mjs [model]` benches launch, braking, skidpad and stability. Assisted flight
-  for the helicopter, lift / drag / stall for the seaplane, planing for the boat.
-- **The street**: hydrants (a car shears one off and it gushes for half a minute), bins, newspaper
-  boxes and pay stations that go flying, benches, bus shelters with lit adverts; awnings over the
-  shop fronts, open and lit shops; herringbone pavers; St. Augustine lawns with mowing stripes.
-  The traffic has cabins behind tinted glass, LED headlight clusters, panel gaps and road grime.
+How it's made (`blender/oceandrive/`, `./make.sh build` reruns all of it):
 
-| | Keyboard | Gamepad |
-|---|---|---|
-| Drive / steer | W A S D | RT / LT, left stick |
-| Handbrake (helicopter: up) | Space | A / ✕ |
-| Sprint on foot | Shift | RB |
-| Helicopter down / bank | X · Q / E | B / ○ |
-| Get in / out, steal a car | F | Y / △ |
-| Camera · recover · map · menu | C · R · M · Esc | View · D-pad · Menu |
-| Capture the mouse · fire · aim | click · left · right mouse | RT · LT (on foot) |
-| Weapons · holster · reload | 1–6 / wheel · 0 · R (on foot) | D-pad right |
+- **Map data**: every footprint, street, sidewalk, path, volleyball court, palm and lifeguard tower
+  from OpenStreetMap (`data/osm.json`), in a local frame along Ocean Drive (`geo.py`).
+- **Blender** (`build.py`): the frontage becomes Tropical Deco hotels (`hotels.py`: porches and
+  loggias, recessed windows with frames and sills, eyebrow ledges, racing stripes, stepped crowns,
+  pylons carrying neon tube lettering), the streets get curbs, crosswalks and the bike lane, the
+  park its coral rock wall and serpentine beachwalk (`ground.py`), 150 procedural coconut palms
+  (`palms.py`), café tables, parasols, lamps and dune planting (`props.py`, Poly Haven scans).
+- **Cycles bake** (`bake.py`): sky light and the sun's bounce light into lightmaps (4096² for the
+  block and the street, 2048² beyond); the browser adds the sun itself with cascaded shadows.
+- **Export** (`export.py`): meshopt GLB with GPU instancing, a 25 cm walk heightmap ray-cast from
+  the scene, the lightmaps as WebP.
+- **In the browser** (`src/oceandrive/`): scanned PBR surfaces with anti-tiling, weathering and
+  specular occlusion from the bake; interior-mapped windows (rooms, curtains, blinds); a sky-lit
+  sea with swell, glints, surf and swash; contact AO, TAA, bloom, AgX and a grade.
 
-Dev flags (`miami.html?`): `time=night`, `weather=rain`, `car=super|muscle|coupe|…`, `foot=1`,
-`mission=N` (start the story at mission N), `story=0`,
-`traffic=N`, `people=0`, `hud=0`, `carcam=az,el,dist,fov`, `cam=x,y,z&look=x,y,z`, `q=high`.
+Keys: W A S D move, Shift sprint, C stroll, Space jump, mouse look (click to capture), F get in /
+out of a car (W/S throttle and brake, A/D steer, Space handbrake), H hides the HUD.
+Flags: `?ev=` exposure, `?dpr=` render scale.
 
-Research: [List of tallest buildings in Miami](https://en.wikipedia.org/wiki/List_of_tallest_buildings_in_Miami),
-[CTBUH Skyscraper Center: Miami](https://www.skyscrapercenter.com/city/miami).
+Credits: map data © OpenStreetMap contributors (ODbL); textures, sky and props from Poly Haven
+(CC0); people from Microsoft Rocketbox (MIT); Ferrari 458 Italia model by vicent091036 (CC BY 4.0)
+via the three.js examples.
 
 ## Wobble Mania
 

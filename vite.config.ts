@@ -39,7 +39,7 @@ export default defineConfig(({ command }) => ({
       // (a page that isn't there, one being taken out or not yet put in, is left out of the build
       // rather than failing every other game's deploy)
       input: Object.fromEntries(
-        Object.entries({ main: 'index.html', miami: 'miami.html', marbles: 'marbles.html', boost: 'boost.html', mogul: 'mogul.html', tracksmith: 'tracksmith.html', lastframe: 'lastframe.html', bluebird: 'bluebird.html' })
+        Object.entries({ main: 'index.html', oceandrive: 'oceandrive.html', marbles: 'marbles.html', boost: 'boost.html', mogul: 'mogul.html', tracksmith: 'tracksmith.html', lastframe: 'lastframe.html', bluebird: 'bluebird.html' })
           .map(([k, f]) => [k, resolve(__dirname, f)] as const)
           .filter(([, f]) => fs.existsSync(f)),
       ),

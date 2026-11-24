@@ -1,0 +1,40 @@
+{
+ "lightmaps": {
+  "lm_block": {
+   "size": 4096,
+   "scale": 1.6,
+   "gamma": 2.2
+  },
+  "lm_gnear": {
+   "size": 4096,
+   "scale": 1.6,
+   "gamma": 2.2
+  },
+  "lm_front2": {
+   "size": 2048,
+   "scale": 1.6,
+   "gamma": 2.2
+  },
+  "lm_city": {
+   "size": 2048,
+   "scale": 1.6,
+   "gamma": 2.2
+  },
+  "lm_gfar": {
+   "size": 2048,
+   "scale": 1.6,
+   "gamma": 2.2
+  }
+ },
+ "sea": -1.5,
+ "water_x": 262.0,
+ "sw": 0.15,
+ "palms": 149,
+ "height": {
+  "x0": -62.0,
+  "y0": -104.0,
+  "res": 0.25,
+  "nx": 1376,
+  "ny": 832
+ }
+}

@@ -13,3 +13,7 @@ steam/art/raw
 steam/output
 __pycache__/
 blender/tracksmith/kit.raw.glb
+
+# Ocean Drive: downloaded Poly Haven sources (re-fetch with blender/oceandrive/fetch_assets.py) and bake scratch
+blender/oceandrive/assets/
+blender/oceandrive/work/

@@ -623,12 +623,12 @@ export class Menu {
     }
     // the open world: its own page, so none of the race world loads with it
     const ow = el('div', 'home-ow', p);
-    el('div', 'eyebrow', ow, 'Open world');
-    el('div', 'ow-title', ow, 'Miami');
-    el('div', 'meta', ow, 'A crime story from Brickell to South Beach: sports cars, helicopters, boats and the police on your tail.');
-    const drive = el('div', 'home-quick', ow, 'Drive Miami ›');
+    el('div', 'eyebrow', ow, 'Miami Beach');
+    el('div', 'ow-title', ow, 'Ocean Drive');
+    el('div', 'meta', ow, 'One block of South Beach, built from the map: the Art Deco hotels, Lummus Park and the sea.');
+    const drive = el('div', 'home-quick', ow, 'Walk Ocean Drive ›');
     this.action(drive, () => {
-      location.href = './miami.html';
+      location.href = './oceandrive.html';
     });
     this.sel = 0;
   }
