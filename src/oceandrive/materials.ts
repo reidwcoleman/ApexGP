@@ -263,8 +263,17 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
         float v = odFbm( vOdWorld.xz * 0.05 );
         // Miami Beach sand is pale (quartz and shell): lift the scan toward a bright warm beige
         float sl = dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
-        diffuseColor.rgb = ( mix( vec3( sl ), diffuseColor.rgb, 0.35 ) * 0.55 + vec3( 0.36, 0.32, 0.26 ) ) * vec3( 1.32, 1.24, 1.08 );
+        diffuseColor.rgb = ( mix( vec3( sl ), diffuseColor.rgb, 0.35 ) * 0.55 + vec3( 0.36, 0.32, 0.26 ) ) * vec3( 1.2, 1.13, 0.99 );
         diffuseColor.rgb *= mix( 0.9, 1.08, v );
+        // churned: trodden, darker, grainier where people walk (patches, thicker toward the water's edge)
+        float trod = smoothstep( 0.45, 0.8, odFbm( vOdWorld.xz * 0.07 + 11.0 ) );
+        // footprints: little dimples in loose sand, scattered in walking lines
+        vec2 fc = vOdWorld.xz * vec2( 1.7, 3.1 );
+        vec2 fi = floor( fc );
+        float fh = odHash12( fi + floor( vOdWorld.xz * 0.05 ) * 13.0 );
+        vec2 ff = fract( fc ) - 0.5 + ( vec2( odHash12( fi + 1.3 ), odHash12( fi + 7.1 ) ) - 0.5 ) * 0.4;
+        float foot = step( 0.55, fh ) * ( 1.0 - smoothstep( 0.12, 0.22, length( ff * vec2( 1.0, 0.55 ) ) ) ) * trod;
+        diffuseColor.rgb *= 1.0 - 0.1 * trod - 0.12 * foot;
         // wet sand: below the swash line, darker and glossy
         float wl = uSea + 0.06 + uSwash + 0.05 * odNoise( vOdWorld.xz * 0.3 );
         float wet = 1.0 - smoothstep( wl - 0.1, wl + 0.55 + 0.25 * odNoise( vOdWorld.xz * 0.11 ), vOdWorld.y );

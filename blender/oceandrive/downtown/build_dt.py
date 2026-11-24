@@ -62,9 +62,11 @@ except Exception:
 
 def tri_layer(mb, tri, z, mat, col=WHITE):
     V, T = tri['v'], tri['t']
+    Z = tri.get('z')
     for i in range(0, len(T), 3):
         a, b, c = V[T[i]], V[T[i + 1]], V[T[i + 2]]
-        mb.face([(a[0], a[1], z), (b[0], b[1], z), (c[0], c[1], z)], mat, col, n=(0, 0, 1))
+        za, zb, zc = (Z[T[i]], Z[T[i + 1]], Z[T[i + 2]]) if Z else (z, z, z)
+        mb.face([(a[0], a[1], za), (b[0], b[1], zb), (c[0], c[1], zc)], mat, col, n=(0, 0, 1))
 
 
 # ------------------------------------------------------------------ ground (lightmapped)
@@ -73,6 +75,8 @@ T = D['tri']
 tri_layer(mb_g, T['road'], 0.0, 'od_asphalt')
 tri_layer(mb_g, T['pave'], SW, 'od_sidewalk')
 tri_layer(mb_g, T['lawn'], SW, 'od_grass')
+if T.get('sand', {}).get('t'):
+    tri_layer(mb_g, T['sand'], 0.5, 'od_sand')
 tri_layer(mb_g, T['paths'], SW, 'od_terrazzo')
 tri_layer(mb_g, T['med_grass'], SW, 'od_grass')
 tri_layer(mb_g, T['med_pave'], SW, 'od_sidewalk')

@@ -32,9 +32,14 @@ rng = random.Random(1896)
 CORE = Polygon(CFG['core'])
 BRIDGE_ON = bool(CFG.get('bridge'))
 SKYLINE_ON = bool(CFG.get('skyline'))
-SKY = box(-3400, -2900, -480, 1500)          # the skyline around it (nothing east of the bay's west shore)
+SKY = box(-3400, -2900, -480, 1500) if CFG.get('frame', 'main') == 'main' else box(-262, -8000, 800, 8000)
 lands = land_and_water()
-LAND = max(lands, key=lambda a: a[0].area)[0]
+BEACH = CFG.get('frame') == 'beach'
+if BEACH:
+    # Miami Beach: the island (the face with the most buildings), cut at the narrowed bay's shore x = -262
+    LAND = max(lands, key=lambda a: a[1])[0].intersection(box(-262, -1e5, 1e5, 1e5)).buffer(0)
+else:
+    LAND = max(lands, key=lambda a: a[0].area)[0]
 water_polys = []
 for w in WAYS:
     t = w.get('tags', {})
@@ -892,6 +897,40 @@ def tris(g, simplify=0.05):
         V += [[round(x, 3), round(y, 3)] for x, y in flat]
         T += [int(i) + base for i in idx]
     return dict(v=V, t=T)
+# the beach (Miami Beach tiles): the OSM sand, and everything east of the dunes (the block's profile)
+SAND = Polygon()
+if BEACH:
+    sands = []
+    for w in WAYS:
+        t = w.get('tags', {})
+        if t.get('natural') in ('beach', 'sand') and len(pts(w)) > 3:
+            try:
+                sands.append(Polygon(pts(w)).buffer(0))
+            except Exception:
+                pass
+    for g, t in rel_polys(lambda t: t.get('natural') in ('beach', 'sand')):
+        sands.append(g.buffer(0))
+    SAND = unary_union(sands + [box(118, -1e5, 1e5, 1e5)]).intersection(CORE_LAND).difference(ROAD_CORE.buffer(1)).difference(FOOT).buffer(0)
+    PAVE = PAVE.difference(SAND).buffer(0)
+    LAWN = LAWN.difference(SAND).buffer(0)
+SEA_L = -1.5
+def lawn_h(x, y):
+    t = min(1.0, max(0.0, (x - 11.5) / 6.0))
+    return 0.15 + 0.08 + t * (0.12 * math.sin(x * 0.11 + y * 0.05) * math.cos(y * 0.07) + 0.10)
+def beach_h(x, y):
+    if x < 100:
+        return lawn_h(x, y)
+    if x < 132:
+        u = (x - 100) / 32.0
+        dune = 1.1 * math.sin(math.pi * u) ** 1.5 * (0.75 + 0.25 * math.sin(y * 0.09) * math.sin(y * 0.031 + 1))
+        return lawn_h(100, y) * (1 - u) + 0.55 * u + dune
+    if x < 262:
+        u = (x - 132) / 130.0
+        return 0.55 + (SEA_L - 0.55) * (u ** 1.25) + 0.05 * math.sin(y * 0.05 + x * 0.02)
+    return SEA_L - (x - 262) * 0.035
+def with_z(tr, fn):
+    tr['z'] = [round(fn(x, y), 3) for x, y in tr['v']]
+    return tr
 BLK = unary_union([SIDE, MEDIAN]).buffer(0)
 CURB = BLK.difference(BLK.buffer(-0.32, join_style='mitre')).buffer(0)
 inner = lambda g: g.difference(CURB).buffer(0)
@@ -904,7 +943,7 @@ for p in polys(BLK):
         curb_rings.append([[round(x, 3), round(y, 3)] for x, y in q])
 # the seawall: where the core's land meets the bay
 sea_lines = []
-coast = LAND.boundary.intersection(CORE.buffer(-0.5))
+coast = LAND.boundary.intersection(CORE.buffer(-0.5)) if not BEACH else Polygon().boundary
 for g in getattr(coast, 'geoms', [coast]):
     if g.geom_type == 'LineString' and g.length > 2:
         sea_lines.append([[round(x, 3), round(y, 3)] for x, y in g.simplify(0.2).coords])
@@ -968,7 +1007,8 @@ dt = dict(
     paint_w=mp(PAINT_W), paint_y=mp(PAINT_Y), xwalk=mp(XWALK), foot=mp(FOOT),
     buildings=core_b, skyline=sky_b, sky_roads=sky_roads, palms=palms_l, lamps=lamps_l, mover=mover,
     bridge=BRIDGE, bridge_w=BRIDGE_W, signals=ctrl_out,
-    tri=dict(road=tris(ROAD_CORE), pave=tris(inner(PAVE)), lawn=tris(inner(LAWN)), paths=tris(inner(PATHS.intersection(CORE).intersection(BLK))),
+    tri=dict(road=tris(ROAD_CORE), pave=tris(inner(PAVE)), lawn=with_z(tris(inner(LAWN)), lambda x, y: lawn_h(x, y) if BEACH and x > 11.5 else 0.15),
+             sand=with_z(tris(SAND, 0.2), beach_h) if BEACH else dict(v=[], t=[]), paths=tris(inner(PATHS.intersection(CORE).intersection(BLK))),
              med_grass=tris(inner(MED_GRASS)), med_pave=tris(inner(MED_PAVE)), curb=tris(CURB, 0), paint_w=tris(PAINT_W, 0.02), paint_y=tris(PAINT_Y, 0.02),
              xwalk=tris(XWALK, 0.02), skyland=tris(LAND.intersection(SKY).difference(CORE).buffer(0), 0.5) if SKYLINE_ON else dict(v=[], t=[])),
     curb_rings=curb_rings, sea_lines=sea_lines, bridge_rails=bridge_rails, mover_cols=mover_cols, beach_sky=beach_sky if SKYLINE_ON else [],
@@ -999,6 +1039,7 @@ if '--viz' in sys.argv:
     v.poly(LAWN, (80, 140, 70))
     v.poly(MED_GRASS, (60, 160, 60))
     v.poly(MED_PAVE, (180, 170, 150))
+    v.poly(SAND, (220, 200, 150))
     v.poly(FOOT, (90, 120, 170))
     v.poly(PAINT_W, (255, 255, 255))
     v.poly(PAINT_Y, (240, 200, 0))

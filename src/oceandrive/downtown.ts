@@ -145,7 +145,7 @@ export interface Skyline {
   setProbe: (t: THREE.Texture | null) => void;
   setNight: (n: number) => void;
 }
-export async function loadSkyline(env: Env): Promise<Skyline | null> {
+export async function loadSkyline(env: Env, tileNames: string[] = []): Promise<Skyline | null> {
   const r = await fetch(BASE + 'skyline.glb', { method: 'HEAD' }).catch(() => null);
   if (!r || !r.ok) return null;
   const loader = new GLTFLoader();
@@ -158,9 +158,12 @@ export async function loadSkyline(env: Env): Promise<Skyline | null> {
   skin(root, new Map(), env, shared(), k.special);
   const groups = new Map<string, THREE.Object3D[]>();
   root.traverse((o) => {
-    const m = /^sky(?:land)?_(.+?)(?:_\d+)?$/.exec(o.name);
+    const m = /^sky(?:land)?_(.+)$/.exec(o.name);
     if (!m || !(o as THREE.Mesh).isMesh && !o.children.length) return;
-    const g = m[1];
+    // which group: the longest tile name the rest starts with (else 'far', or the object's own)
+    const rest = m[1];
+    const names = [...tileNames, 'far'].filter((n) => rest === n || rest.startsWith(n + '_')).sort((a, b) => b.length - a.length);
+    const g = names[0] ?? rest.replace(/_\d+$/, '');
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g)!.push(o);
     const mesh = o as THREE.Mesh;
@@ -169,7 +172,7 @@ export async function loadSkyline(env: Env): Promise<Skyline | null> {
   return { root, bay, groups, setProbe: k.setProbe, setNight: k.setNight };
 }
 
-/** the beach block's horizon plane ran west to the edge of the world: the bay is there now */
+/** the beach block's horizon plane (west to the edge of the world, north and south along the island): the skyline has its own now */
 export function trimHorizon(block: THREE.Object3D) {
   block.traverse((o) => {
     const m = o as THREE.Mesh;
@@ -185,7 +188,7 @@ export function trimHorizon(block: THREE.Object3D) {
       let west = true;
       for (let k = 0; k < 3; k++) {
         v.fromBufferAttribute(pos, idx.getX(i + k)).applyMatrix4(m.matrixWorld);
-        if (v.x > -262.5) west = false;
+        if (v.x > 202.5) west = false;
       }
       if (!west) keep.push(idx.getX(i), idx.getX(i + 1), idx.getX(i + 2));
     }

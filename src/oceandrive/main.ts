@@ -74,7 +74,7 @@ async function boot() {
     loadWorld(env, renderer, (f, label) => step(label, 0.15 + f * 0.55)),
     Ground.load(BASE + 'height.bin', tiles.flatMap((t) => t.layers.map((f) => BASE + f))),
   ]);
-  const skyline = tiles.length ? await loadSkyline(env) : null;
+  const skyline = tiles.length ? await loadSkyline(env, tiles.map((t) => t.name)) : null;
   // the bay mirrors the sky, the skyline, the towers and the beach's hotels
   const mirror = skyline ? new PlanarReflection(-1.45) : null;
   if (skyline && mirror) {

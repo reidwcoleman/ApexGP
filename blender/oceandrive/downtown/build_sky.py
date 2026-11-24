@@ -66,10 +66,21 @@ mw = MB('sky_seawall')
 for y0 in range(-3200, 3600, 40):
     mw.face([(-262.0, y0, 0.0), (-262.0, y0 + 40, 0.0), (-262.0, y0 + 40, -2.6), (-262.0, y0, -2.6)], 'od_curb', hexcol('#cfc8bb'), n=(-1, 0, 0))
 obs.append(mw.build())
-mbe = MB('sky_beach')
-for (y0, y1) in ((-6000.0, -330.0), (420.0, 6000.0)):
-    mbe.face([(-262.0, y0, -0.03), (140.0, y0, -0.03), (140.0, y1, -0.03), (-262.0, y1, -0.03)], 'od_farground', WHITE, n=(0, 0, 1))
-obs.append(mbe.build())
+# Miami Beach north and south of the modelled blocks: ground to the dunes, sand down into the sea (the
+# stretch a beach tile covers belongs to that tile's group: it hides when the tile is in)
+BT = {k: v for k, v in json.load(open(os.path.join(HERE, 'tiles.json'))).items() if v.get('frame') == 'beach'}
+cuts = [(-6000.0, -330.0), (420.0, 6000.0)]
+spans = []
+for (y0, y1) in cuts:
+    edges = sorted({y0, y1} | {c for v in BT.values() for c in (min(p[1] for p in v['core']), max(p[1] for p in v['core'])) if y0 < c < y1})
+    for a, b in zip(edges, edges[1:]):
+        g = next((k for k, v in BT.items() if min(p[1] for p in v['core']) <= a + 1 and max(p[1] for p in v['core']) >= b - 1), 'far')
+        spans.append((a, b, g))
+for (a, b, g) in spans:
+    m = MB(f'skyland_{g}_beach{int(a)}')
+    m.face([(-262.0, a, -0.03), (118.0, a, -0.03), (118.0, b, -0.03), (-262.0, b, -0.03)], 'od_farground', WHITE, n=(0, 0, 1))
+    m.face([(118.0, a, 0.35), (262.0, a, -1.6), (262.0, b, -1.6), (118.0, b, 0.35)], 'od_sand', WHITE, n=(0, 0, 1))
+    obs.append(m.build())
 K = 9000.0
 mbb = MB('sky_bay')
 mbb.face([(-K, -K, SEA), (-262.0, -K, SEA), (-262.0, K, SEA), (-K, K, SEA)], 'od_bay', WHITE, n=(0, 0, 1))

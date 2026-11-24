@@ -204,14 +204,14 @@ export class Peds {
     // a few on the sand near the water
     for (let i = 0; i < 4; i++) this.add(150 + r() * 90, -60 + r() * 120, 0, r() < 0.5 ? 1 : -1, -90, 90);
     // along the water's edge: strollers on the wet sand and a few joggers
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 26; i++) {
       const jog = r() < 0.3;
       this.add(247 + r() * 9, -140 + r() * 280, 247 + r() * 9, r() < 0.5 ? 1 : -1, -160, 160, false, 0, jog ? 'jog' : 'walk');
     }
     // people standing about: by the parked cars on the east sidewalk, on the sand by the loungers
     for (let i = 0; i < 6; i++) this.group(9.6 + r() * 0.6, -80 + r() * 160);
-    for (let i = 0; i < 5; i++) this.group(185 + r() * 40, -70 + r() * 140);
-    for (let i = 0; i < 4; i++) this.group(232 + r() * 10, -90 + r() * 180);
+    for (let i = 0; i < 10; i++) this.group(185 + r() * 40, -110 + r() * 220);
+    for (let i = 0; i < 8; i++) this.group(232 + r() * 12, -160 + r() * 320);
   }
 
   /** people on downtown's sidewalks and park paths: n of them, spread by the lines' length */

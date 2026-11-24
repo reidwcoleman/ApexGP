@@ -575,8 +575,9 @@ export class Dressing {
     const towelCols = [['#e8457a', '#ffffff'], ['#1f6fb2', '#ffd23f'], ['#2f8f5b', '#ffffff'], ['#f08a24', '#2a2a2a'], ['#7a3fa0', '#7fe0d0'], ['#c62f3b', '#ffffff']];
     // the sports bodies are the nearest thing to beachwear in the loaded set
     const bodies = ['Sports_Female_02', 'Sports_Male_01'];
-    for (let i = 0; i < 10; i++) {
-      const x = 165 + r() * 45, z = -80 + r() * 160;
+    for (let i = 0; i < 34; i++) {
+      // in clusters by the umbrellas, thinning out toward the ends of the beach
+      const x = 160 + r() * 62, z = (r() - 0.5) * (i < 20 ? 170 : 560);
       const y = this.gh(x, z, 0.5);
       const yaw = r() * Math.PI * 2;
       const [a, b] = towelCols[i % towelCols.length];
@@ -591,6 +592,29 @@ export class Dressing {
       towel.position.set(x, y + 0.02, z);
       towel.receiveShadow = true;
       this.root.add(towel);
+      // their own umbrella, stuck in the sand at a tilt, and a bag or a cooler
+      if (r() < 0.55) {
+        const cols = [0xf25c78, 0xffd23f, 0x2fa8d6, 0x5ec26a, 0xff8a3d, 0xffffff, 0x8a5cd6];
+        const u = new THREE.Group();
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 2.1, 6), new THREE.MeshStandardMaterial({ color: 0xdedbd4, metalness: 0.5, roughness: 0.4 }));
+        pole.position.y = 1.0;
+        const canopy = new THREE.Mesh(new THREE.ConeGeometry(1.05, 0.38, 10, 1, true), new THREE.MeshStandardMaterial({ color: cols[Math.floor(r() * cols.length)], roughness: 0.85, side: THREE.DoubleSide }));
+        canopy.position.y = 2.0;
+        u.add(pole, canopy);
+        u.position.set(x + Math.cos(yaw) * 0.9, y - 0.15, z - Math.sin(yaw) * 0.9);
+        u.rotation.set((r() - 0.5) * 0.5, r() * 6.28, (r() - 0.5) * 0.5);
+        u.traverse((o) => ((o as THREE.Mesh).isMesh ? ((o as THREE.Mesh).castShadow = true) : 0));
+        this.root.add(u);
+        this.env.prepObject(u, true, true);
+      }
+      if (r() < 0.5) {
+        const bag = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.32, 0.3), new THREE.MeshStandardMaterial({ color: r() < 0.5 ? 0x2a6fd6 : 0xe94b3c, roughness: 0.6 }));
+        bag.position.set(x + Math.sin(yaw + 1.3) * 0.9, y + 0.12, z + Math.cos(yaw + 1.3) * 0.9);
+        bag.rotation.y = r() * 3;
+        bag.castShadow = true;
+        this.root.add(bag);
+        this.env.prepObject(bag, true, true);
+      }
       const body = bodies[Math.floor(r() * bodies.length)];
       const look: Look = {
         female: body.includes('Female'), tone: r(), body, hair: 'none', hairColor: 0x2a1d14,
@@ -602,7 +626,8 @@ export class Dressing {
       // lying on the back, head toward the towel's end
       p.root.position.set(x - Math.sin(yaw) * 0.85, y + 0.12, z - Math.cos(yaw) * 0.85);
       p.root.rotation.set(-Math.PI / 2, yaw + Math.PI, 0, 'YXZ');
-      this.env.prepObject(p.root, true, true);
+      // lying still: posed once, no shadow pass past the near ones (they're flat on the sand anyway)
+      this.env.prepObject(p.root, Math.abs(z) < 90, true);
       this.scene.add(p.root);
       this.sunbathers.push(p);
     }
@@ -616,7 +641,7 @@ export class Dressing {
     }
     for (const m of this.signMats) m.emissiveIntensity = 0.02 + night * 1.6;
     if (this.bulbs) this.bulbs.emissiveIntensity = 0.3 + lamps * 14;
-    for (const p of this.sunbathers) p.update(dt * 0.3);
+    void dt;
   }
 
   /** how far ahead a car (at x, z heading yaw) must stop for a red, or Infinity */
