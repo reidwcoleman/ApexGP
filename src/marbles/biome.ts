@@ -414,7 +414,7 @@ export const ROUND_BIOME: Record<string, BiomeId> = {
   beanbaygp: 'beach',
   overfence: 'candy',
   volleyfolly: 'reef',
-  spothogs: 'disco',
+  beanbowl: 'sunset',
   sundaespeedway: 'sunset',
   beanhoops: 'space',
   discodash: 'disco',

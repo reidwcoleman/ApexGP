@@ -300,7 +300,7 @@ export function gateCrashers(info: { name: string; blurb: string }): Course {
     });
   });
 
-  const balls: CupBall[] = Array.from({ length: C.balls }, () => ({ pos: new THREE.Vector3(center.x, y0 + C.R, center.z), vel: new THREE.Vector3(), quat: new THREE.Quaternion(), live: false, backAt: 0, last: -1, prev: -1, kickT: -9, by: [-1, -1] as [number, number], byT: [-99, -99] as [number, number], worth: 2, py: 0 }));
+  const balls: CupBall[] = Array.from({ length: C.balls }, () => ({ pos: new THREE.Vector3(center.x, y0 + C.R, center.z), vel: new THREE.Vector3(), quat: new THREE.Quaternion(), live: false, backAt: 0, last: -1, prev: -1, kickT: -9, by: [-1, -1] as [number, number], byT: [-99, -99] as [number, number], worth: 2, py: 0, held: -1, thrower: -1, passT: -9, inAir: false, fumbler: -1, dropT: -9, gripT: 0 }));
   const arena: CupArena = {
     center,
     cfg: C,

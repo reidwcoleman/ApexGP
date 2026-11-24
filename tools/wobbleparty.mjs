@@ -7,7 +7,7 @@ import { CHROME, ANGLE } from './chrome.mjs';
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
 const port = opt('port', '5197');
-const rounds = opt('rounds', 'bigpush,overfence,beanbaygp,rocketrumble,beancup,volleyfolly,spothogs,beanhoops,sundaespeedway').split(',');
+const rounds = opt('rounds', 'bigpush,overfence,beanbaygp,rocketrumble,beancup,volleyfolly,beanbowl,beanhoops,sundaespeedway').split(',');
 const secs = Number(opt('secs', 40));
 const base = `http://localhost:${port}/marbles.html`;
 const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [ANGLE, '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });

@@ -8,7 +8,7 @@ import { CHROME, ANGLE } from './chrome.mjs';
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
 const port = opt('port', '5197');
-const rounds = opt('rounds', 'beancup,bigpush,overfence,volleyfolly,beanhoops').split(',');
+const rounds = opt('rounds', 'beancup,bigpush,overfence,volleyfolly,beanhoops,beanbowl').split(',');
 const runs = Number(opt('runs', 2));
 let browser;
 for (let tries = 0; tries < 6 && !browser; tries++) {
@@ -39,6 +39,8 @@ async function one(id) {
     const still = A.balls.map(() => 0);
     const was = A.balls.map(() => 0);
     let lastScore = 0, lastGoalT = 0, dropT = 0, wasLive = A.balls.map(() => false);
+    const heldWas = A.balls.map(() => -1);
+    let lastPass = -9;
     // (the game's own goal calls, as it makes them)
     const calls = [];
     const shout = g.ui.shout.bind(g.ui);
@@ -63,7 +65,10 @@ async function one(id) {
         const step = b.pos.distanceTo(prev[i]);
         const fair = Math.max(b.vel.length(), was[i]) / 60 * 1.6 + 0.35;
         was[i] = b.vel.length();
-        if (step > fair) { out.jumps++; out.jumpMax = Math.max(out.jumpMax, +step.toFixed(2)); }
+        // (Bean Bowl: picked up, a ball goes to its bean's hands, and out of them when it's thrown or dropped)
+        const hand = C.rule === 'bowl' && (b.held >= 0 || heldWas[i] >= 0);
+        if (C.rule === 'bowl') { if (b.held !== heldWas[i]) { out.hands = (out.hands ?? 0) + 1; if (b.held < 0 && b.inAir) out.passes = (out.passes ?? 0) + 1; if (b.held < 0 && !b.inAir) out.fumbles = (out.fumbles ?? 0) + 1; if (b.held >= 0 && heldWas[i] < 0 && b.thrower >= 0 && g.playT - lastPass < 2.5) out.caught = (out.caught ?? 0) + 1; if (b.held < 0 && b.inAir) lastPass = g.playT; } heldWas[i] = b.held; }
+        if (step > fair && !hand) { out.jumps++; out.jumpMax = Math.max(out.jumpMax, +step.toFixed(2)); }
         prev[i].copy(b.pos);
         out.maxSpeed = Math.max(out.maxSpeed, +b.vel.length().toFixed(1));
         out.zSum += Math.abs(b.pos.z - A.center.z); if (b.pos.y > y0 + C.R + 2) out.high++;
@@ -75,7 +80,7 @@ async function one(id) {
         if (b.vel.length() < 0.4 && near > C.R + 3) still[i] += 1 / 60; else still[i] = 0;
         if (still[i] > 6 && still[i] < 6 + 1 / 59) { out.dead++; out.deadAt.push([+(b.pos.x - A.center.x).toFixed(1), +(b.pos.z - A.center.z).toFixed(1), +g.playT.toFixed(0)]); }
         if (near > 14) out.far++;
-        for (const r of g.racers) if (Math.hypot(r.m.pos.x - b.pos.x, r.m.pos.y + 0.55 - b.pos.y, r.m.pos.z - b.pos.z) < C.R + 0.3) out.inBall++;
+        if (!hand) for (const r of g.racers) if (Math.hypot(r.m.pos.x - b.pos.x, r.m.pos.y + 0.55 - b.pos.y, r.m.pos.z - b.pos.z) < C.R + 0.3) out.inBall++;
       });
       for (const r of g.racers) {
         const dx = Math.abs(r.m.pos.x - A.center.x), dz = Math.abs(r.m.pos.z - A.center.z);
@@ -112,6 +117,7 @@ for (const r of res) {
   const n = r.ticks * r.beans || 1;
   const wrong = r.errs.length || r.state === 'play' || r.jumps > 0 || r.dead > 0 || r.ballOut > 0 || r.beanOut > 0 || r.quick > 0;
   if (wrong) bad++;
+  if (r.hands) console.log(`        football: the ball changed hands ${r.hands} times · passes thrown ${r.passes ?? 0} · fumbles ${r.fumbles ?? 0}`);
   console.log(`${wrong ? 'BAD ' : 'ok  '}${r.id.padEnd(10)} ${String(r.playT).padStart(6)}s ${r.score.padEnd(5)} jumps ${r.jumps} (max ${r.jumpMax} m) dead ${r.dead} ${JSON.stringify(r.deadAt)} ballOut ${r.ballOut} beanOut ${r.beanOut} inBall ${r.inBall} quickGoals ${r.quick} top ${r.maxSpeed} m/s down ${(100 * r.tumble / n).toFixed(1)}% idle ${(100 * r.idle / n).toFixed(1)}% ballAlone ${(100 * r.far / Math.max(1, r.ticks)).toFixed(0)}%`);
   if (r.shots.length) console.log(`      shots (m from the hoop; minus: a clearance) ${r.shots.join(' ')} · ball's mean distance from halfway ${(r.zSum / Math.max(1, r.ticks)).toFixed(1)} m, in the air ${(100 * r.high / Math.max(1, r.ticks)).toFixed(0)}%`);
   if (r.goals.length) console.log(`      goals ${r.goals.map((g) => `${g[0]}s ${g[1]} (+${g[2]}s)`).join(', ')}`);

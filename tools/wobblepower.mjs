@@ -2,13 +2,13 @@
 // beans pick them up, and do the three powers do what they say? ZOOM: a bean running flat out
 // with it against one without. SUPER JUMP: the height of a hop with and without. IRON BEAN: a
 // bean dived into with it on stays on its feet.
-//   node tools/wobblepower.mjs [--round spothogs] [--port 5197]   (an arena: a flat floor to measure on)
+//   node tools/wobblepower.mjs [--round paintparty] [--port 5197]   (an arena: a flat floor to measure on)
 import { chromium } from 'playwright-core';
 import { CHROME, ANGLE } from './chrome.mjs';
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
 const port = opt('port', '5197');
-const round = opt('round', 'spothogs');
+const round = opt('round', 'paintparty');
 let browser;
 for (let tries = 0; tries < 6 && !browser; tries++) {
   try {

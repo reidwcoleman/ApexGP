@@ -34,7 +34,7 @@ export const CUP = {
   second: 32,
   over: 45,
 };
-export type CupRule = 'cup' | 'push' | 'fence' | 'volley' | 'hoops' | 'gates';
+export type CupRule = 'cup' | 'push' | 'fence' | 'volley' | 'hoops' | 'gates' | 'bowl';
 /** one pitch's numbers: Bean Cup's, or a variant's */
 export interface CupCfg {
   rule: CupRule;
@@ -69,13 +69,15 @@ export interface CupCfg {
   hoopR: number;
   hoopIn: number;
   three: number;
+  /** Bean Bowl: how deep an end zone is (m in from the end wall) */
+  endZone: number;
   /** the words */
   call: string;
   goalLine: string;
   goalWord: string;
   extra: string;
 }
-const NOHOOP = { hoopY: 0, hoopR: 0, hoopIn: 0, three: 0 };
+const NOHOOP = { hoopY: 0, hoopR: 0, hoopIn: 0, three: 0, endZone: 0 };
 export const CUP_CFG: Record<CupRule, CupCfg> = {
   cup: { rule: 'cup', ...CUP, ...NOHOOP, balls: 2, kick: 1, loft: 6.5, push: 1, fenceH: 0, top: 34, credit: 5, call: 'RUN INTO THE BALL · DIVE TO SHOOT', goalLine: 'The team with the most goals stays in the show', goalWord: 'GOAL!', extra: 'GOLDEN GOAL' },
   // one ball as tall as three of you: nobody kicks it, everybody shoves it
@@ -85,7 +87,9 @@ export const CUP_CFG: Record<CupRule, CupCfg> = {
   // one big floaty beach ball and a net: it mustn't land in your yard
   volley: { rule: 'volley', ...CUP, ...NOHOOP, HW: 17, HL: 21, cut: 5, goalHalf: 0, goalH: 0, goalD: 0, R: 1.7, g: 12, ceil: 15, T: 90, restart: 2, second: 0, over: 40, balls: 1, kick: 1, loft: 0, push: 1, fenceH: 2.3, top: 30, credit: 8, call: 'KEEP IT UP · JUMP OR DIVE INTO IT TO SEND IT OVER', goalLine: 'The ball lands in your yard: a point to them. Most points stays in', goalWord: 'POINT!', extra: 'NEXT POINT WINS' },
   // basketball: a hoop high at each end; a dive into the ball is a shot at it
-  hoops: { rule: 'hoops', ...CUP, HW: 17, HL: 25, cut: 5, goalHalf: 0, goalH: 0, goalD: 0, R: 1.15, ceil: 15, T: 100, restart: 2.6, second: 0, over: 45, balls: 1, kick: 1, loft: 6.5, push: 0.55, fenceH: 0, top: 24, credit: 7, hoopY: 5.4, hoopR: 2.3, hoopIn: 3.3, three: 15, call: 'DRIBBLE IT UP THE COURT · DIVE INTO IT TO SHOOT', goalLine: 'Most points stays in the show. A shot from outside the arc is worth three', goalWord: 'BASKET!', extra: 'NEXT BASKET WINS' },
+  hoops: { rule: 'hoops', ...CUP, HW: 17, HL: 25, cut: 5, goalHalf: 0, goalH: 0, goalD: 0, R: 1.15, ceil: 15, T: 100, restart: 2.6, second: 0, over: 45, balls: 1, kick: 1, loft: 6.5, push: 0.55, fenceH: 0, top: 24, credit: 7, hoopY: 5.4, hoopR: 2.3, hoopIn: 3.3, three: 15, endZone: 0, call: 'DRIBBLE IT UP THE COURT · DIVE INTO IT TO SHOOT', goalLine: 'Most points stays in the show. A shot from outside the arc is worth three', goalWord: 'BASKET!', extra: 'NEXT BASKET WINS' },
+  // football: a ball you carry. Run it into their end zone for a touchdown; a tackle knocks it loose; throw it to a team-mate
+  bowl: { rule: 'bowl', ...CUP, ...NOHOOP, HW: 16, HL: 31, cut: 3, goalHalf: 0, goalH: 0, goalD: 0, R: 0.72, ceil: 16, T: 110, restart: 3, second: 0, over: 45, balls: 1, kick: 1, loft: 6, push: 1, fenceH: 0, top: 30, credit: 8, endZone: 6, call: 'RUN INTO THE BALL TO PICK IT UP · RUN IT TO THEIR END ZONE', goalLine: 'Carry the ball into their end zone: a touchdown is 7. Most points stays in the show', goalWord: 'TOUCHDOWN!', extra: 'NEXT SCORE WINS' },
   // the final: a ring, a gate each, and every bean for itself (course-gates.ts)
   gates: { rule: 'gates', ...CUP, ...NOHOOP, HW: 17, HL: 17, cut: 0, goalHalf: 0, goalH: 0, goalD: 0, R: 1.3, ceil: 12, T: 150, restart: 1.5, second: 0, over: 0, balls: 3, kick: 0.82, loft: 4.2, push: 0.9, fenceH: 0, top: 30, credit: 6, call: 'GUARD YOUR GATE · KNOCK IT THROUGH THEIRS', goalLine: 'A ball through your gate and you are out. Last bean standing takes the crown', goalWord: '', extra: '' },
 };
@@ -108,6 +112,18 @@ export interface CupBall {
   /** each side's last bean to touch it, and when (world time) */
   by: [number, number];
   byT: [number, number];
+  /**
+   * Bean Bowl: who's carrying it (a bean's id; -1: it's loose), who threw it last and when, is it
+   * still in the air from that throw (a catch), who dropped it last and when (they can't snatch it
+   * straight back), and how long the carrier's been held by someone (long enough and it's stripped)
+   */
+  held: number;
+  thrower: number;
+  passT: number;
+  inAir: boolean;
+  fumbler: number;
+  dropT: number;
+  gripT: number;
   /** Bean Hoops: what it's worth if it goes in (two, or three from outside the arc), and how high it was a moment ago */
   worth: number;
   py: number;
@@ -129,12 +145,146 @@ export interface CupArena {
   goal(team: number, o: THREE.Vector3): THREE.Vector3;
   /** Bean Hoops: the middle of the rim each team shoots at */
   hoops: THREE.Vector3[];
+  /** Bean Bowl: the bean with the ball throws it toward a spot (set by the game's ball rules: a bot calls it) */
+  pass?: (id: number, tx: number, tz: number) => void;
   /** Gate Crashers (the final): the ring and its gates, and a colour for every bean's own "team" */
   gates?: GateRing;
   colors?: number[];
 }
 
+/** Bean Bowl's gridiron: mown stripes, a line every five yards with its number, hash marks, an end zone each */
+function gridironArt(C: CupCfg) {
+  const { HW, HL } = C;
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 2048;
+  const x = c.getContext('2d')!;
+  const sx = 1024 / (HW * 2), sz = 2048 / (HL * 2);
+  const X = (u: number) => (u + HW) * sx, Z = (v: number) => (v + HL) * sz;
+  const play = HL - C.endZone, step = play / 10;
+  for (let k = 0; k < 20; k++) {
+    x.fillStyle = k % 2 ? '#2f9e4b' : '#38b257';
+    x.fillRect(0, Z(-play + k * step), 1024, step * sz + 1);
+  }
+  // the end zones: pink's at -z (it defends it), blue's at +z, each with its name across it
+  const zone = (s: number, col: string, dark: string, name: string) => {
+    const z0 = s < 0 ? -HL : play;
+    x.fillStyle = col;
+    x.fillRect(0, Z(z0), 1024, C.endZone * sz);
+    x.fillStyle = dark;
+    for (let k = -12; k < 24; k += 2) {
+      x.beginPath();
+      x.moveTo(k * 60, Z(z0));
+      x.lineTo(k * 60 + 60, Z(z0));
+      x.lineTo(k * 60 + 60 - C.endZone * sz, Z(z0) + C.endZone * sz);
+      x.lineTo(k * 60 - C.endZone * sz, Z(z0) + C.endZone * sz);
+      x.closePath();
+      x.fill();
+    }
+    x.save();
+    x.translate(512, Z(z0 + C.endZone / 2));
+    if (s > 0) x.rotate(Math.PI);
+    x.fillStyle = '#ffffff';
+    x.textAlign = 'center';
+    x.textBaseline = 'middle';
+    x.font = `900 ${Math.round(C.endZone * sz * 0.62)}px "Lilita One", "Arial Black", sans-serif`;
+    x.lineWidth = 12;
+    x.strokeStyle = 'rgba(0,0,0,0.35)';
+    x.strokeText(name, 0, 6);
+    x.fillText(name, 0, 6);
+    x.restore();
+  };
+  zone(-1, '#ff4f9a', 'rgba(255,255,255,0.14)', 'P I N K');
+  zone(1, '#2f9bff', 'rgba(255,255,255,0.14)', 'B L U E');
+  // the lines
+  x.strokeStyle = '#fbfff6';
+  x.fillStyle = '#fbfff6';
+  x.lineWidth = 8;
+  x.strokeRect(X(-HW + 0.6), Z(-HL + 0.6), (HW * 2 - 1.2) * sx, (HL * 2 - 1.2) * sz);
+  for (let k = 0; k <= 10; k++) {
+    const z = -play + k * step;
+    x.lineWidth = k === 0 || k === 10 ? 14 : k === 5 ? 10 : 6;
+    x.beginPath();
+    x.moveTo(X(-HW + 0.6), Z(z));
+    x.lineTo(X(HW - 0.6), Z(z));
+    x.stroke();
+    // (the numbers count up to the middle from each goal line, and read from the sideline they're on)
+    const n = (k <= 5 ? k : 10 - k) * 10;
+    if (!n) continue;
+    for (const side of [-1, 1]) {
+      x.save();
+      x.translate(X(side * (HW - 3.6)), Z(z));
+      x.rotate(side * Math.PI * 0.5);
+      x.textAlign = 'center';
+      x.textBaseline = 'middle';
+      x.font = `900 ${Math.round(1.7 * sx)}px "Lilita One", "Arial Black", sans-serif`;
+      x.fillText(String(n), 0, 0);
+      x.restore();
+    }
+  }
+  // hash marks every yard, in two rows
+  x.lineWidth = 4;
+  for (let k = 1; k < 50; k++) {
+    if (k % 5 === 0) continue;
+    const z = -play + (k * play * 2) / 50;
+    for (const u of [-HW * 0.32, HW * 0.32, -HW + 1.1, HW - 1.9]) {
+      x.beginPath();
+      x.moveTo(X(u), Z(z));
+      x.lineTo(X(u + 0.8), Z(z));
+      x.stroke();
+    }
+  }
+  // the middle: a ball on a badge
+  x.beginPath();
+  x.fillStyle = 'rgba(255,255,255,0.9)';
+  x.arc(512, Z(0), 3.2 * sx, 0, 7);
+  x.fill();
+  x.fillStyle = '#8a4a1c';
+  x.beginPath();
+  x.ellipse(512, Z(0), 2.2 * sx, 1.3 * sx, 0, 0, 7);
+  x.fill();
+  x.strokeStyle = '#ffffff';
+  x.lineWidth = 6;
+  x.beginPath();
+  x.moveTo(512 - 1.1 * sx, Z(0));
+  x.lineTo(512 + 1.1 * sx, Z(0));
+  for (let k = -2; k <= 2; k++) {
+    x.moveTo(512 + k * 0.42 * sx, Z(0) - 0.35 * sx);
+    x.lineTo(512 + k * 0.42 * sx, Z(0) + 0.35 * sx);
+  }
+  x.stroke();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
+/** a football: brown leather, a white band at each end, the laces down one side */
+export function bowlBallArt() {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 256;
+  const x = c.getContext('2d')!;
+  x.fillStyle = '#9a5424';
+  x.fillRect(0, 0, 512, 256);
+  for (let k = 0; k < 900; k++) {
+    x.fillStyle = k % 2 ? 'rgba(60,24,6,0.12)' : 'rgba(255,200,150,0.07)';
+    x.fillRect(Math.random() * 512, Math.random() * 256, 3, 3);
+  }
+  // (u runs round the ball's long axis, v from tip to tip: the bands are near the tips)
+  x.fillStyle = '#ffffff';
+  x.fillRect(0, 34, 512, 16);
+  x.fillRect(0, 206, 512, 16);
+  x.fillRect(248, 84, 16, 88);
+  for (let k = 0; k < 6; k++) x.fillRect(232, 90 + k * 15, 48, 6);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
 function pitchArt(C: CupCfg) {
+  if (C.rule === 'bowl') return gridironArt(C);
   const { HW, HL, goalHalf } = C;
   const fence = C.rule === 'fence' || C.rule === 'volley';
   const hoops = C.rule === 'hoops';
@@ -557,7 +707,7 @@ export function beanCup(info: { name: string; blurb: string }, rule: CupRule = '
 
   // ---- the two big bumpers on the halfway line: a wall that throws it back
   const rounds: CupArena['rounds'] = [];
-  for (const s of fence || rule === 'hoops' ? [] : [-1, 1]) {
+  for (const s of fence || rule === 'hoops' || rule === 'bowl' ? [] : [-1, 1]) {
     const px = center.x + s * (HW + 0.2), pz = center.z, r = 2.6, H = 2.2;
     rounds.push({ x: px, z: pz, r, kick: 6 });
     const k = new Kin({ type: 'cyl', r, hh: H / 2 }, Mat.Bumper, (_t, p, q) => {
@@ -576,6 +726,25 @@ export function beanCup(info: { name: string; blurb: string }, rule: CupRule = '
     });
   }
 
+  // ---- Bean Bowl: the uprights behind each end zone, and an orange pylon on each of its corners
+  if (rule === 'bowl') {
+    const gold = new THREE.MeshPhysicalMaterial({ color: 0xffd21f, roughness: 0.25, clearcoat: 1, emissive: 0x6a4a00, emissiveIntensity: 0.35 });
+    const cone = new THREE.MeshPhysicalMaterial({ color: 0xff6a1f, roughness: 0.4, clearcoat: 0.6, emissive: 0x802a00, emissiveIntensity: 0.3 });
+    for (const s of [-1, 1]) {
+      const z = center.z + s * (HL + 1.6);
+      const g = new THREE.Group();
+      g.position.set(center.x, y0, z);
+      g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.42, 4.6, 14).translate(0, 2.3, 0), gold));
+      g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 9, 12).rotateZ(Math.PI / 2).translate(0, 4.6, 0), gold));
+      for (const px of [-4.5, 4.5]) g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 8.5, 12).translate(px, 8.85, 0), gold));
+      g.traverse((o) => ((o as THREE.Mesh).castShadow = true));
+      b.group.add(g);
+      for (const px of [-1, 1])
+        for (const pz of [HL - 0.8, HL - C.endZone])
+          b.group.add(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.34, 1.1, 10).translate(center.x + px * (HW - 0.9), y0 + 0.55, center.z + s * pz), cone));
+    }
+  }
+
   // ---- floodlights on the corners
   {
     const pole = new THREE.MeshPhysicalMaterial({ color: 0xeaf0ff, roughness: 0.35, clearcoat: 0.8 });
@@ -592,7 +761,7 @@ export function beanCup(info: { name: string; blurb: string }, rule: CupRule = '
       }
   }
 
-  const balls: CupBall[] = Array.from({ length: C.balls }, () => ({ pos: new THREE.Vector3(center.x, y0 + C.R, center.z), vel: new THREE.Vector3(), quat: new THREE.Quaternion(), live: false, backAt: 0, last: -1, prev: -1, kickT: -9, by: [-1, -1] as [number, number], byT: [-99, -99] as [number, number], worth: 2, py: 0 }));
+  const balls: CupBall[] = Array.from({ length: C.balls }, () => ({ pos: new THREE.Vector3(center.x, y0 + C.R, center.z), vel: new THREE.Vector3(), quat: new THREE.Quaternion(), live: false, backAt: 0, last: -1, prev: -1, kickT: -9, by: [-1, -1] as [number, number], byT: [-99, -99] as [number, number], worth: 2, py: 0, held: -1, thrower: -1, passT: -9, inAir: false, fumbler: -1, dropT: -9, gripT: 0 }));
   b.animators.push((t) => {
     nets.forEach((n, i) => {
       const f = Math.max(0, 1 - (t - hit[i]) * 1.4);
@@ -623,11 +792,11 @@ export function beanCup(info: { name: string; blurb: string }, rule: CupRule = '
     },
     hoops,
   };
-  title(b, info, rule === 'cup' ? 'Most goals stays in the show' : rule === 'push' ? 'Push it over their line' : rule === 'volley' ? 'Never let it land' : rule === 'hoops' ? 'Most points stays in the show' : 'Keep your yard clear', 0xff4f9a, new THREE.Vector3(center.x, y0 + 15, center.z - HL - goalD - 3));
+  title(b, info, rule === 'cup' ? 'Most goals stays in the show' : rule === 'push' ? 'Push it over their line' : rule === 'volley' ? 'Never let it land' : rule === 'hoops' ? 'Most points stays in the show' : rule === 'bowl' ? 'Touchdowns win it' : 'Keep your yard clear', 0xff4f9a, new THREE.Vector3(center.x, y0 + 15, center.z - HL - goalD - 3));
   dressArena(b, new THREE.Vector3(center.x, y0 - 3, center.z), HL + 10, 29);
   b.finish();
   return {
-    id: rule === 'cup' ? 'beancup' : rule === 'push' ? 'bigpush' : rule === 'volley' ? 'volleyfolly' : rule === 'hoops' ? 'beanhoops' : 'overfence',
+    id: rule === 'cup' ? 'beancup' : rule === 'push' ? 'bigpush' : rule === 'volley' ? 'volleyfolly' : rule === 'hoops' ? 'beanhoops' : rule === 'bowl' ? 'beanbowl' : 'overfence',
     name: info.name,
     kind: 'team',
     blurb: info.blurb,
@@ -644,8 +813,8 @@ export function beanCup(info: { name: string; blurb: string }, rule: CupRule = '
       const out: { pos: THREE.Vector3; yaw: number }[] = [];
       for (let k = 0; k < n; k++) {
         const s = k % 2 ? 1 : -1, i = Math.floor(k / 2), col = i % 6, row = Math.floor(i / 6);
-        const near = rule === 'push' ? 9 : fence ? 7 : rule === 'hoops' ? 8 : 11;
-        const pos = new THREE.Vector3(center.x + (col - 2.5) * (fence ? 5.6 : rule === 'hoops' ? 5 : 6.2) + row * 2.4, y0 + 0.6, center.z + s * (near + row * (fence ? 6 : 7)));
+        const near = rule === 'push' ? 9 : fence ? 7 : rule === 'hoops' ? 8 : rule === 'bowl' ? 7 : 11;
+        const pos = new THREE.Vector3(center.x + (col - 2.5) * (fence ? 5.6 : rule === 'hoops' ? 5 : rule === 'bowl' ? 4.7 : 6.2) + row * 2.4, y0 + 0.6, center.z + s * (near + row * (fence ? 6 : 7)));
         out.push({ pos, yaw: s > 0 ? Math.PI : 0 });
       }
       return out;

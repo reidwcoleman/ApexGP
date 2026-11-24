@@ -768,10 +768,12 @@ and bots; the contestants are original bean characters, not marbles.
   bot paths and its shaders go up behind the results, and the first round of the next show behind
   the menu, so nothing waits on a build. Disposing a course keeps its materials, so the shader
   programs stay compiled for the next one.
-- **Nobody waits on bots**: once every person in a round is through or out it wraps up 1.4 s later
-  (`noWaiting` / `wrapUp`): the leaders take the places left, or the best of the standing survive.
-  Online that means every person, not just you. Watching a round with no people left in it, ENTER
-  skips it. SPACE or ENTER also skips the flyover and the results.
+- **No round is cut short**: a round plays to its own end (the places taken, the clock run out,
+  the last ones standing), whether you're still in it or not. Once every person in it is through
+  or out (you've qualified, or you're a ghost) ENTER settles the rest as it stands (`noWaiting` /
+  `wrapUp`: the leaders take the places left, or the best of the standing survive); nothing does
+  it for you, and never SPACE, which is the jump. Online it's the host's ENTER, once every person
+  is done. SPACE or ENTER still skips the flyover and the results.
 - **Moving fast** (`physics.ts`): a dive beats running and a dive out of a jump beats that (on the
   flat: run 9.25 m/s, jump 9.17, dive 11.2, jump + dive 12.9). The slide ends at running speed, not
   at a stop, and steers a little; jump pops you out of it with the speed kept (chained, about 15).
@@ -831,11 +833,7 @@ and bots; the contestants are original bean characters, not marbles.
     your team's colour all round you. Online the host's floor (run-length coded) goes to everyone
     once a second, never over what a guest has just painted itself. Paint
     Party (a walled square, a turntable, bumpers) or Splat Ring (a round arena swept by one long
-    bar that speeds up: hop it). One more team game is played on the same floor (`TeamGame`):
-    **Spot Hogs** (three glowing spots; the team with the most beans on their feet in one owns it
-    and it pays a point a second, so a dive that knocks a rival over takes them out of the count;
-    the spots blink and move every 17 s to three of nine places, the same in every browser). The
-    fewest points goes home, and the host's points go to everyone once a second.
+    bar that speeds up: hop it).
   - **Ball games** (`course-soccer.ts` builds the pitch from a `CupCfg`, `soccer.ts` runs the balls
     on the host, `CupBrain` in `ai-play.ts` plays them): two teams, half the field goes home.
     Bean Cup (soccer: goals, a second ball late on, golden goal), Big Push (one giant beach ball,
@@ -845,7 +843,19 @@ and bots; the contestants are original bean characters, not marbles.
     home, level is sudden death) and Volley Folly (volleyball: one big floaty ball and a net;
     run under it and it comes up off your head, lower each time; JUMP or DIVE into it and it goes
     over, on a flight worked out to clear the net and land where you were heading; down in your
-    yard is a point to them). And Bean Hoops (basketball, rule `hoops`): a wooden court with a
+    yard is a point to them). Bean Bowl (football, rule `bowl`): a gridiron with a line every five
+    yards, an end zone each and the uprights behind it, and a ball that's carried. Run into it
+    loose (or get under a throw) and it's yours, held over your head, and you're a tenth slower.
+    Carry it into THEIR end zone: a touchdown, seven points, and a kick-off. A dive that knocks
+    the carrier over is a fumble; held by someone for a second, it's stripped. GRAB throws it: a
+    lob that comes down on the team-mate most nearly where you're facing (led, so it meets them
+    on the run), or straight ahead; the other side under it is an interception. The host runs
+    all of it (`CupPlay.bowl`) and says who has the ball in the `cup` packet; a guest's throw is
+    a `pass` message. Bots (`CupBrain.bowl`) have a job that changes with who has the ball: the
+    carrier cuts away from tacklers and throws to someone open when it's about to be hit, half
+    its side runs routes ahead and half blocks, the other side's nearest hunt the carrier (to
+    where it's going) and the rest drop back between the ball and their end zone. Bot games come
+    out about 28-21. And Bean Hoops (basketball, rule `hoops`): a wooden court with a
     hoop high at each end. Run into the ball to dribble it, DIVE into it to shoot: it's thrown at
     the hoop on an arc that drops into it, truer the closer you are and the more squarely you
     were heading at the hoop, and from outside the arc it's worth three. A jump up into it close
@@ -951,9 +961,10 @@ and bots; the contestants are original bean characters, not marbles.
   with a power-up (bright at the edge, clear in the middle, flickering as it runs out) and a
   comic-book burst wherever a bean is knocked over. The bloom starts lower and runs brighter,
   the grade is punchier (vibrance 0.45, contrast 0.29) and the beans' rim light is stronger.
-- **Bots that keep moving**: in Bar Hop a bot no longer keeps to one spot: every few seconds
-  it's off round the plate to somewhere new, and it stops in good time for each bar (the hop is
-  timed for a bean that's standing still). In Volley Folly the side slides across and up and back
+- **Bots that keep moving**: in Bar Hop (and, a little less, on the Tilt-a-Dish) a bot no longer
+  keeps to one spot: every few seconds it's off round the plate to somewhere new, and it stops
+  in good time for each bar (the hop is timed for a bean that's standing still). In Colour Call
+  it strolls from tile to tile between calls instead of waiting where it stands. In Volley Folly the side slides across and up and back
   with the ball, everyone shuffles about their own spot, and two back up whoever's going for it.
   In Over the Fence a bot with no ball to go for runs to be under one that's coming down in its
   yard, or patrols. `tools/wobblemove.mjs` measures it: the share of the time a bot stands still

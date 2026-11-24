@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Course } from './courses.ts';
-import { SPOTS, TEAM_COLORS, TEAM_NAMES, type TeamArena } from './course-paintparty.ts';
+import { TEAM_COLORS, TEAM_NAMES, type TeamArena } from './course-paintparty.ts';
 import { Mode, type Marble } from './physics.ts';
 import type { Sound } from './audio.ts';
 
@@ -10,8 +10,6 @@ import type { Sound } from './audio.ts';
  *
  *  Paint Party, Splat Ring: each bean on the ground paints the floor under it its team's colour,
  *    and paint bombs drop in to be set off. The least floor goes home.
- *  Spot Hogs: three glowing spots. The team with the most beans on their feet in one owns it, and
- *    it pays them a point a second. The spots move. The fewest points goes home.
  *
  * (Online every browser works it out from the beans it sees; the host's count decides.)
  */
@@ -42,18 +40,6 @@ interface Pickup {
 const BOMBS = { first: 3, every: 2.8, life: 12 };
 const SPLAT_R = 4.4;
 
-/** one of Spot Hogs' spots: the disc, its rim and the light standing on it */
-interface Spot {
-  site: number;
-  owner: number;
-  disc: THREE.Mesh;
-  rim: THREE.Mesh;
-  beam: THREE.Mesh;
-  mat: THREE.MeshBasicMaterial;
-  beamMat: THREE.MeshBasicMaterial;
-  col: THREE.Color;
-}
-
 export class TeamPlay {
   private rings = new Map<number, THREE.Mesh>();
   private bombs: Pickup[] = [];
@@ -66,8 +52,6 @@ export class TeamPlay {
   private ringGeo = new THREE.TorusGeometry(0.62, 0.07, 8, 32).rotateX(Math.PI / 2);
   private mats: THREE.MeshBasicMaterial[];
   private blipT = 0;
-  private spots: Spot[] = [];
-  private spotPeriod = -1;
   readonly arena: TeamArena;
   readonly game;
 
@@ -79,8 +63,6 @@ export class TeamPlay {
   ) {
     this.arena = course.team!;
     this.game = this.arena.game;
-    this.arena.points.fill(0);
-    this.arena.zones.length = 0;
     this.mats = TEAM_COLORS.map((c) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.9, toneMapped: false }));
     // the bomb: a glossy ball in swirls of every team's colour, a white cap and a fuse
     const g = new THREE.SphereGeometry(0.6, 32, 20).toNonIndexed();
@@ -97,7 +79,6 @@ export class TeamPlay {
     g.deleteAttribute('uv');
     this.bombGeo = g;
     this.bombMat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.1, emissive: 0xffffff, emissiveIntensity: 0.08 });
-    if (this.game === 'spots') this.makeSpots();
   }
 
   /** where the k-th bomb lands: a tile picked from the round and k (the same in every browser) */
@@ -197,109 +178,6 @@ export class TeamPlay {
     this.bombs.splice(q, 1);
   }
 
-  // ---------------------------------------------------------------------------------- Spot Hogs
-  private makeSpots() {
-    const A = this.arena, R = SPOTS.r;
-    const discG = new THREE.CircleGeometry(R, 56).rotateX(-Math.PI / 2);
-    const rimG = new THREE.TorusGeometry(R, 0.13, 10, 72).rotateX(Math.PI / 2);
-    const beamG = new THREE.CylinderGeometry(R * 0.96, R, 7, 48, 1, true).translate(0, 3.5, 0);
-    for (let k = 0; k < SPOTS.n; k++) {
-      const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.42, depthWrite: false, toneMapped: false });
-      const beamMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, toneMapped: false });
-      const disc = new THREE.Mesh(discG, mat), rim = new THREE.Mesh(rimG, mat), beam = new THREE.Mesh(beamG, beamMat);
-      disc.renderOrder = 1;
-      rim.renderOrder = 1;
-      beam.renderOrder = 3;
-      disc.visible = rim.visible = beam.visible = false;
-      this.scene.add(disc, rim, beam);
-      this.spots.push({ site: -1, owner: -1, disc, rim, beam, mat, beamMat, col: new THREE.Color(0xffffff) });
-      A.zones.push({ x: A.center.x, z: A.center.z, r: R, owner: -1, going: false });
-    }
-  }
-
-  /** which three of the nine places the spots are in, for a stretch of the round (the same in every browser) */
-  private spotSites(period: number, seed: number): number[] {
-    const n = this.arena.sites.length;
-    let h = (period * 2246822519 + seed * 3266489917 + 101) >>> 0;
-    const rnd = () => ((h = (Math.imul(h ^ (h >>> 15), 2246822507) + 0x9e3779b9) >>> 0) / 4294967296);
-    // (never where one has just been)
-    const last = period > 0 ? this.spotSites(period - 1, seed) : [];
-    const pool = Array.from({ length: n }, (_, i) => i).filter((i) => !last.includes(i));
-    const out: number[] = [];
-    while (out.length < SPOTS.n && pool.length) out.push(pool.splice(Math.floor(rnd() * pool.length), 1)[0]);
-    return out;
-  }
-
-  /**
-   * Spot Hogs, this frame: the spots where the clock says, whose each one is (the most beans on
-   * their feet in it; level is nobody's), and a point a second to the owner. Says when they move
-   * and when your team takes or loses one.
-   */
-  spotsUpdate(t: number, go: number, seed: number, dt: number, scoring: boolean) {
-    const ev = { moved: false, warn: false, took: 0, lost: 0 };
-    if (this.game !== 'spots' || !(go < 1e8)) return ev;
-    const A = this.arena, x = Math.max(0, t - go);
-    const period = Math.floor(x / SPOTS.every), into = x - period * SPOTS.every;
-    const going = into > SPOTS.every - SPOTS.warn;
-    if (period !== this.spotPeriod) {
-      ev.moved = this.spotPeriod >= 0;
-      this.spotPeriod = period;
-      const at = this.spotSites(period, seed);
-      this.spots.forEach((s, k) => {
-        s.site = at[k] ?? k;
-        s.owner = -1;
-        const p = A.sites[s.site];
-        for (const o of [s.disc, s.rim, s.beam]) o.position.set(p.x, A.center.y + 0.05, p.z);
-        s.rim.position.y = A.center.y + 0.1;
-      });
-      this.warned = false;
-    }
-    if (going && !this.warned) {
-      this.warned = true;
-      ev.warn = true;
-    }
-    const me = this.who().find((r) => r.c.player);
-    const mine = me ? this.teamOf(me.c.id) : -1;
-    const n = [0, 0, 0];
-    this.spots.forEach((s, k) => {
-      const p = A.sites[s.site];
-      n[0] = n[1] = n[2] = 0;
-      for (const r of this.who()) {
-        const m = r.m;
-        if (r.out || r.fell || !m.active || m.mode === Mode.Tumble) continue;
-        if (Math.hypot(m.pos.x - p.x, m.pos.z - p.z) < SPOTS.r && m.pos.y - A.center.y < 2.6) n[this.teamOf(r.c.id)]++;
-      }
-      let owner = -1, top = 0;
-      for (let q = 0; q < A.teams; q++) {
-        if (n[q] > top) (top = n[q]), (owner = q);
-        else if (n[q] === top) owner = -1;
-      }
-      if (owner !== s.owner) {
-        if (owner === mine && mine >= 0) ev.took++;
-        else if (s.owner === mine && mine >= 0) ev.lost++;
-        s.owner = owner;
-      }
-      if (owner >= 0 && scoring) A.points[owner] += dt;
-      // its colour: the owner's, white for nobody's; it blinks before it moves
-      const want = owner >= 0 ? TMP.set(TEAM_COLORS[owner]) : TMP.set(0xffffff);
-      s.col.lerp(want, Math.min(1, dt * 9));
-      s.mat.color.copy(s.col).multiplyScalar(owner >= 0 ? 1.25 : 1);
-      s.beamMat.color.copy(s.col);
-      const blink = going ? 0.45 + 0.55 * Math.abs(Math.sin(t * 9)) : 1;
-      s.mat.opacity = (owner >= 0 ? 0.55 : 0.34) * blink + 0.06 * Math.sin(t * 4 + k);
-      s.beamMat.opacity = (owner >= 0 ? 0.16 : 0.08) * blink;
-      s.rim.scale.setScalar(1 + 0.025 * Math.sin(t * 5 + k * 2));
-      s.disc.visible = s.rim.visible = s.beam.visible = true;
-      const z = A.zones[k];
-      z.x = p.x;
-      z.z = p.z;
-      z.owner = owner;
-      z.going = going;
-    });
-    return ev;
-  }
-  private warned = false;
-
   teamOf(id: number) {
     return this.arena.of.get(id) ?? 0;
   }
@@ -383,15 +261,11 @@ export class TeamPlay {
   scores(): TeamScore[] {
     const c = this.arena.counts();
     const mine = this.mine();
-    if (this.game !== 'paint') {
-      const top = Math.max(12, ...c);
-      return c.map((n, k) => ({ name: TEAM_NAMES[k], color: TEAM_COLORS[k], share: n / top, mine: mine?.name === TEAM_NAMES[k], label: String(Math.floor(n)) }));
-    }
     const total = this.arena.total;
     return c.map((n, k) => ({ name: TEAM_NAMES[k], color: TEAM_COLORS[k], share: n / total, mine: mine?.name === TEAM_NAMES[k] }));
   }
 
-  /** the team with the least (floor, or points; a tie: the first of them) */
+  /** the team with the least floor (a tie: the first of them) */
   loser() {
     const c = this.arena.counts();
     let lo = 0;
@@ -399,23 +273,18 @@ export class TeamPlay {
     return lo;
   }
 
-  /** what the host tells everyone, once a second: its floor, or its points */
+  /** what the host tells everyone, once a second: its floor */
   packet() {
-    return this.game === 'paint' ? this.arena.save() : `p:${this.arena.points.map((v) => v.toFixed(1)).join(',')}`;
+    return this.arena.save();
   }
   heard(c: string) {
-    if (!c.startsWith('p:')) return this.arena.load(c);
-    c.slice(2).split(',').forEach((v, k) => {
-      const n = Number(v);
-      if (k < 3 && n >= 0) this.arena.points[k] = n;
-    });
+    this.arena.load(c);
   }
 
   dispose() {
     for (const b of this.bombs) this.scene.remove(b.obj);
     this.bombs.length = 0;
     this.arena.pickups.length = 0;
-    this.arena.zones.length = 0;
     this.bombGeo.dispose();
     this.bombMat.dispose();
     this.haloMat.dispose();
@@ -424,13 +293,6 @@ export class TeamPlay {
     this.rings.clear();
     this.ringGeo.dispose();
     for (const m of this.mats) m.dispose();
-    this.spots.forEach((s, k) => {
-      this.scene.remove(s.disc, s.rim, s.beam);
-      s.mat.dispose();
-      s.beamMat.dispose();
-      if (!k) for (const o of [s.disc, s.rim, s.beam]) o.geometry.dispose();
-    });
-    this.spots.length = 0;
   }
 }
 

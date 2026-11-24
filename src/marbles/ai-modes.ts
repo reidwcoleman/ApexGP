@@ -12,6 +12,10 @@ export class CallBrain {
   private k = -1;
   private seen = -1;
   private react: number;
+  /** between calls it doesn't stand and wait: it's off across the floor to another tile, and another */
+  private strollT = 0;
+  private sx = 0;
+  private sz = 0;
   constructor(
     readonly m: Marble,
     readonly skill: number,
@@ -33,13 +37,21 @@ export class CallBrain {
       // (a bean in a panic runs for the wrong colour now and then: more as the calls come faster)
       if (this.rnd() < ease * (0.2 - 0.14 * this.skill) * Math.min(1, call.i / 24)) this.k = Math.floor(this.rnd() * CALL.n * CALL.n);
     }
-    if (this.k < 0) {
-      // (between calls: back toward the middle)
-      const d = Math.hypot(A.center.x - m.pos.x, A.center.z - m.pos.z);
-      if (d > 4) m.input.set((A.center.x - m.pos.x) / d, 0, (A.center.z - m.pos.z) / d).multiplyScalar(0.6);
+    if (this.k < 0 || this.seen >> 1 !== call.i) {
+      // (between calls, the whole floor there: a stroll from tile to tile, a new one every second or two)
+      if (x < 0.5) return;
+      if (t > this.strollT || Math.hypot(this.sx - m.pos.x, this.sz - m.pos.z) < 0.8) {
+        this.strollT = t + 1 + this.rnd() * 1.6;
+        [this.sx, this.sz] = A.xz(Math.floor(this.rnd() * CALL.n * CALL.n));
+        // (not right across the floor: a tile or two from where it is)
+        const dx = this.sx - m.pos.x, dz = this.sz - m.pos.z, d = Math.hypot(dx, dz);
+        if (d > CALL.tile * 2.4) (this.sx = m.pos.x + (dx / d) * CALL.tile * 2.2), (this.sz = m.pos.z + (dz / d) * CALL.tile * 2.2);
+      }
+      const dx = this.sx - m.pos.x, dz = this.sz - m.pos.z, d = Math.hypot(dx, dz);
+      if (d > 0.5) m.input.set(dx / d, 0, dz / d).multiplyScalar(0.62);
+      else m.input.set(0, 0, 0);
       return;
     }
-    if (this.seen >> 1 !== call.i) return;
     const [tx, tz] = A.xz(this.k);
     const dx = tx - m.pos.x, dz = tz - m.pos.z;
     const d = Math.hypot(dx, dz);

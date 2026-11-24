@@ -94,9 +94,11 @@ export class PlateBrain {
     // walking there between the bars and holding still for each one as it comes
     // (not in the opening seconds: a bunched-up field on the move goes over like skittles)
     if (!this.roamT) this.roamT = c.state.go + 4 + this.rnd() * 4;
-    const roam = c.id === 'jumpclub' && t > c.state.go + 4;
+    // (Tilt-a-Dish too, a little less: the floor's tipping under it)
+    const dish = c.id === 'tiptop';
+    const roam = (c.id === 'jumpclub' || dish) && t > c.state.go + 4;
     if (roam && t >= this.roamT) {
-      this.roamT = t + 2.2 + this.rnd() * 3;
+      this.roamT = t + (dish ? 3 : 2.2) + this.rnd() * 3;
       this.ang += (this.rnd() < 0.5 ? -1 : 1) * (0.4 + this.rnd() * 0.9);
       this.ringNow = THREE.MathUtils.clamp(this.ring + (this.rnd() - 0.5) * 4.5, 5.5, P.radius - 4.2);
     }
@@ -130,7 +132,7 @@ export class PlateBrain {
     const ex = this.tx - m.pos.x, ez = this.tz - m.pos.z;
     // (on the move it stops in good time for a bar: standing still is what the hop is timed for)
     const k = this.due < (roam ? 0.9 : 0.5) ? (roam ? 0.08 : 0.25) : 1;
-    const top = roam ? 3.7 : 2.4;
+    const top = roam ? (dish ? 3.1 : 3.7) : 2.4;
     const vx = THREE.MathUtils.clamp(ex * 1.1, -top, top) * k, vz = THREE.MathUtils.clamp(ez * 1.1, -top, top) * k;
     let ix = (vx - m.vel.x) * 0.5, iz = (vz - m.vel.z) * 0.5;
     if (!m.grounded) (ix *= 0.6), (iz *= 0.6);

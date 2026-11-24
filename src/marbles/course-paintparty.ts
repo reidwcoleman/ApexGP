@@ -20,22 +20,12 @@ import { dressArena } from './course-dress.ts';
 export const TEAM_COLORS = [0xff4f9a, 0x2f9bff, 0xffc21f];
 export const TEAM_NAMES = ['PINK', 'BLUE', 'GOLD'];
 export const TEAM_T = 100;
-/**
- * The games played on this floor. 'paint': the most floor painted. 'spots': Spot Hogs, three
- * glowing spots that pay a point a second to the team with the most beans stood in them, and move.
- */
-export type TeamGame = 'paint' | 'spots';
-/** Spot Hogs: how big a spot is, how long they stay put, and the warning before they move */
-export const SPOTS = { r: 3.5, every: 17, warn: 3, n: 3 };
+/** the game played on this floor: the most floor painted */
+export type TeamGame = 'paint';
 
 export interface TeamArena {
   center: THREE.Vector3;
   game: TeamGame;
-  /** the teams' points (the games that aren't about the floor) */
-  points: number[];
-  /** Spot Hogs: the places a spot can be, and the spots as they are now (for the bots) */
-  sites: THREE.Vector3[];
-  zones: { x: number; z: number; r: number; owner: number; going: boolean }[];
   half: number;
   n: number;
   cell: number;
@@ -72,11 +62,10 @@ export interface TeamArena {
 
 /**
  * 'square': the walled square with a turntable; 'ring': a round arena swept by a long bar (hop it);
- * 'spots': the square, clear, for Spot Hogs
  */
-export function paintparty(info: { id?: string; name: string; blurb: string }, variant: 'square' | 'ring' | 'spots' = 'square'): Course {
+export function paintparty(info: { id?: string; name: string; blurb: string }, variant: 'square' | 'ring' = 'square'): Course {
   const ROUND = variant === 'ring';
-  const GAME: TeamGame = variant === 'spots' ? 'spots' : 'paint';
+  const GAME: TeamGame = 'paint';
   /** the ring's bar: its angle at t (it turns faster as the round goes on) */
   const barAngle = (t: number) => {
     const x = Math.max(0, t - state.go);
@@ -291,7 +280,7 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
     p.add(b.railWood, plank(9.4, 2.0, 0.3, 0.08, 'x'), mat(0, 7.5, -0.18));
     for (const sx of [-4.2, 4.2]) post(p, b, mat(sx, -6, -0.3), 14.6, { w: 0.42 });
     p.toBatch(b, new THREE.Matrix4().makeTranslation(center.x, center.y, center.z - HALF - 4));
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshPhysicalMaterial({ map: signTexture(info.name.toUpperCase(), variant === 'spots' ? 'Team round · Hog the spots' : ROUND ? 'Team round · Hop the bar, paint the floor' : 'Team round · Paint the floor', PAINT.pink, 9 / 1.7), roughness: 0.4, clearcoat: 0.8 }));
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshPhysicalMaterial({ map: signTexture(info.name.toUpperCase(), ROUND ? 'Team round · Hop the bar, paint the floor' : 'Team round · Paint the floor', PAINT.pink, 9 / 1.7), roughness: 0.4, clearcoat: 0.8 }));
     sign.position.set(center.x, center.y + 7.5, center.z - HALF - 4);
     b.group.add(sign);
   }
@@ -305,16 +294,9 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
     if (i < 0 || j < 0 || i >= N || j >= N || !cvalid[j * N + i]) return -1;
     return j * N + i;
   };
-  // (Spot Hogs: nine places a spot can be, well apart, clear of the walls and the bases)
-  const sites: THREE.Vector3[] = [];
-  for (const [x, z] of [[0, 0], [-11.5, 0], [11.5, 0], [0, -11.5], [0, 11.5], [-9.5, -9.5], [9.5, -9.5], [-9.5, 9.5], [9.5, 9.5]]) sites.push(new THREE.Vector3(center.x + x, center.y, center.z + z));
-  const points = [0, 0, 0];
   const arena: TeamArena = {
     center,
     game: GAME,
-    points,
-    sites,
-    zones: [],
     half: HALF,
     n: N,
     cell: CELL,
@@ -383,7 +365,7 @@ export function paintparty(info: { id?: string; name: string; blurb: string }, v
       return ROUND ? Math.hypot(cx, cz) > HALF - m : Math.abs(cx) > HALF - m || Math.abs(cz) > HALF - m;
     },
     counts() {
-      return (GAME === 'paint' ? tcount : points).slice(0, teams);
+      return tcount.slice(0, teams);
     },
     base(team) {
       const a = (team / teams) * Math.PI * 2 + Math.PI / 2;

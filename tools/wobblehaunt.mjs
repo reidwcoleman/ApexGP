@@ -5,13 +5,13 @@
 //   - at the end of the round the guest spends its stars, and is back in the next round on both
 //   - in the team game the two people are on the same team
 //   - in the final (a gate each, lives) the two agree on who has how many lives
-//   node tools/wobblehaunt.mjs [--port 5197] [--show jumpclub,spothogs,gatecrashers]
+//   node tools/wobblehaunt.mjs [--port 5197] [--show jumpclub,paintparty,gatecrashers]
 import { chromium } from 'playwright-core';
 import { CHROME, ANGLE } from './chrome.mjs';
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
 const port = opt('port', '5197');
-const show = opt('show', 'jumpclub,spothogs,gatecrashers');
+const show = opt('show', 'jumpclub,paintparty,gatecrashers');
 const base = `http://localhost:${port}/marbles.html`;
 let browser;
 for (let tries = 0; tries < 6 && !browser; tries++) {

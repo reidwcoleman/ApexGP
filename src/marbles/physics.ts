@@ -24,6 +24,8 @@ const IR = 0.4 * RADIUS * RADIUS;
 export const RUN = 9.4;
 /** off a boost strip */
 const ZOOM_K = 1.28;
+/** carrying the football */
+const CARRY_K = 0.9;
 /** the mystery boxes' ZOOM and SUPER JUMP */
 export const POWER_RUN = 1.42, POWER_JUMP = 1.42;
 const RUN_K = 10.5;
@@ -180,6 +182,8 @@ export class Marble {
   pw = 0;
   pwT = 0;
   iron = false;
+  /** Bean Bowl: it's carrying the ball (a touch slower, so it can be caught) */
+  carry = false;
   /** a spring pad just threw it */
   sprung = false;
   /** a boost strip just sent it off */
@@ -515,6 +519,7 @@ export class World {
       f.act?.(m, this.time, dt);
     }
     if (this.time < m.zoomT) m.runK *= ZOOM_K;
+    if (m.carry) m.runK *= CARRY_K;
     const pw = this.time < m.pwT ? m.pw : 0;
     if (pw === 1) m.runK *= POWER_RUN;
     else if (pw === 2) m.jumpK *= POWER_JUMP;

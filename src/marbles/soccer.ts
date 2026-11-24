@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Mode, type Marble } from './physics.ts';
 import type { Course } from './courses.ts';
 import { GATES } from './course-gates.ts';
-import { CUP_COLORS, CUP_NAMES, cupBallArt, fenceBallArt, hoopBallArt, pushBallArt, volleyBallArt, type CupArena, type CupBall, type CupCfg } from './course-soccer.ts';
+import { CUP_COLORS, CUP_NAMES, bowlBallArt, cupBallArt, fenceBallArt, hoopBallArt, pushBallArt, volleyBallArt, type CupArena, type CupBall, type CupCfg } from './course-soccer.ts';
 
 /**
  * Bean Cup's rules. The balls are the host's: it moves them, works out the kicks from wherever the
@@ -22,12 +22,15 @@ export type CupEvent =
   | { k: 'kick'; ball: number; id: number; v: number; shot: boolean }
   | { k: 'hit'; id: number; vx: number; vy: number; vz: number }
   | { k: 'bang'; ball: number; v: number }
+  /** Bean Bowl: the ball's changed hands. `id` has it now (-1: it's loose), `was` had it (-1: nobody); `how` it happened */
+  | { k: 'bowl'; id: number; was: number; how: 'pick' | 'catch' | 'steal' | 'fumble' | 'pass' }
   /** Gate Crashers: a ball's gone through a gate (whose it was is the gate's to say) */
   | { k: 'gate'; ball: number; gate: number; by: number };
 
 const P = new THREE.Vector3(), N = new THREE.Vector3(), AX = new THREE.Vector3();
 /** Bean Hoops: how near the iron the middle of the ball can come (less than the ball: a rim that size and a ball that size would never go in) */
 const RIM = 0.82;
+const UPY = new THREE.Vector3(0, 1, 0), XAX = new THREE.Vector3(1, 0, 0);
 const Q = new THREE.Quaternion();
 
 export class CupPlay {
@@ -55,9 +58,11 @@ export class CupPlay {
   ) {
     this.arena = course.cup!;
     const C = (this.cfg = this.arena.cfg);
-    const tex = C.rule === 'push' ? pushBallArt() : C.rule === 'fence' ? fenceBallArt() : C.rule === 'volley' ? volleyBallArt() : C.rule === 'hoops' ? hoopBallArt() : cupBallArt();
+    this.arena.pass = (id, tx, tz) => void this.pass(id, tx, tz, this.now);
+    const tex = C.rule === 'push' ? pushBallArt() : C.rule === 'fence' ? fenceBallArt() : C.rule === 'volley' ? volleyBallArt() : C.rule === 'hoops' ? hoopBallArt() : C.rule === 'bowl' ? bowlBallArt() : cupBallArt();
     const mat = new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.2 });
-    const geo = new THREE.SphereGeometry(C.R, 40, 28);
+    // (a football's long: its tips along its own y, laid over on its side)
+    const geo = C.rule === 'bowl' ? new THREE.SphereGeometry(C.R, 40, 28).scale(0.74, 1.42, 0.74).rotateZ(Math.PI / 2) : new THREE.SphereGeometry(C.R, 40, 28);
     const ringGeo = new THREE.RingGeometry(C.R * 0.9, C.R * 1.15, 40).rotateX(-Math.PI / 2);
     for (let i = 0; i < this.arena.balls.length; i++) {
       const m = new THREE.Mesh(geo, mat);
@@ -145,6 +150,9 @@ export class CupPlay {
     b.byT[0] = b.byT[1] = -99;
     b.worth = 2;
     b.py = b.pos.y;
+    b.held = b.thrower = b.fumbler = -1;
+    b.inAir = false;
+    b.gripT = 0;
   }
   /** kick off: the first ball down */
   start() {
@@ -169,6 +177,111 @@ export class CupPlay {
   /** half the angle of an open gate, now (the game sets it), and the gate a ball's just gone through */
   gateHalf = 0.2;
   private through = -1;
+
+  // ------------------------------------------------------------------------------ Bean Bowl
+  /**
+   * Football. The ball is carried: run into it loose (or get under a throw) and it's yours, tucked
+   * over your head. Carried into the other side's end zone it's a touchdown, seven points. The
+   * carrier knocked over fumbles it; held by someone for a second, it's stripped. `pass` throws it.
+   * All of this is the host's: the guests are told who has it.
+   */
+  private bowl(b: CupBall, i: number, dt: number, t: number, ev: CupEvent[], all: Who[]) {
+    const A = this.arena, C = this.cfg;
+    if (!b.live) return;
+    const holder = b.held >= 0 ? all.find((r) => r.m.id === b.held) : undefined;
+    for (const r of all) r.m.carry = r === holder;
+    if (b.held >= 0) {
+      const m = holder?.m;
+      if (!holder || !m || holder.out || !m.active) return this.fumble(b, t, ev, 0, 0);
+      // (held by someone long enough, or knocked off its feet: the ball's out)
+      b.gripT = m.heldT > 0 ? b.gripT + dt : 0;
+      if (m.mode === Mode.Tumble || b.gripT > 1.05) return this.fumble(b, t, ev, m.vel.x, m.vel.z);
+      b.pos.set(m.pos.x, m.pos.y + 1.4, m.pos.z);
+      b.vel.copy(m.vel);
+      const team = this.teamOf(m.id), dir = team === 0 ? 1 : -1;
+      this.attack[team] += dt;
+      if ((m.pos.z - A.center.z) * dir > C.HL - C.endZone && m.pos.y < A.center.y + 2.5) {
+        this.score[team] += 7;
+        b.live = false;
+        b.held = -1;
+        m.carry = false;
+        b.backAt = t + C.restart;
+        ev.push({ k: 'goal', team, by: m.id, own: false, ball: i, a: this.score[0], b: this.score[1], pts: 7 });
+      }
+      return;
+    }
+    const n = 4, h = dt / n;
+    for (let k = 0; k < n && b.held < 0; k++) {
+      this.down = -1;
+      this.fly(b, h, ev, i);
+      // (it's bounced: no longer a catch, just a ball on the ground)
+      if (this.down === i || b.pos.y < A.center.y + C.R + 0.05) b.inAir = false;
+      for (const r of all) {
+        const m = r.m;
+        if (!m.active || r.out || m.frozen || m.mode === Mode.Tumble) continue;
+        // (not straight back to whoever just threw it or dropped it)
+        if ((m.id === b.thrower && t - b.passT < 0.45) || (m.id === b.fumbler && t - b.dropT < 0.9) || t - b.dropT < 0.25) continue;
+        P.set(m.pos.x, m.pos.y + 0.75, m.pos.z);
+        if (P.distanceToSquared(b.pos) > (C.R + (r.c.human ? 1.15 : 0.95)) ** 2) continue;
+        const from = b.inAir ? b.thrower : -1;
+        const how = !b.inAir ? 'pick' : from >= 0 && this.teamOf(from) !== this.teamOf(m.id) ? 'steal' : 'catch';
+        b.held = m.id;
+        b.inAir = false;
+        b.gripT = 0;
+        this.touched(b, m.id, t);
+        ev.push({ k: 'bowl', id: m.id, was: from, how });
+        break;
+      }
+      this.hold(b, 0, 0, null, i);
+    }
+    if (b.held < 0) this.attack[b.pos.z > A.center.z ? 0 : 1] += dt * 0.25;
+  }
+  private fumble(b: CupBall, t: number, ev: CupEvent[], vx: number, vz: number) {
+    const was = b.held;
+    b.held = -1;
+    b.fumbler = was;
+    b.dropT = t;
+    b.inAir = false;
+    b.gripT = 0;
+    b.vel.set(vx * 0.55 + (Math.random() - 0.5) * 6, 6.5, vz * 0.55 + (Math.random() - 0.5) * 6);
+    ev.push({ k: 'bowl', id: -1, was, how: 'fumble' });
+  }
+  /** the events that have happened since the game last asked (a pass is thrown between its ticks; a guest's are worked out from what it hears) */
+  private pend: CupEvent[] = [];
+  drain() {
+    const e = this.pend;
+    this.pend = [];
+    return e;
+  }
+  /**
+   * The bean with the ball throws it at a spot on the pitch (`tx`, `tz`): a lob that comes down
+   * there, however far it is (up to what an arm can do). Whoever gets under it has it.
+   */
+  pass(id: number, tx: number, tz: number, t: number) {
+    const A = this.arena, C = this.cfg, b = A.balls[0];
+    if (!b.live || b.held !== id) return false;
+    const m = this.who().find((r) => r.m.id === id)?.m;
+    if (!m) return false;
+    let dx = tx - m.pos.x, dz = tz - m.pos.z, d = Math.hypot(dx, dz);
+    if (d < 0.5) (dx = Math.sin(m.yaw)), (dz = Math.cos(m.yaw)), (d = 1);
+    const reach = Math.min(Math.max(d, 6), 27), T = 0.5 + reach * 0.034;
+    b.held = -1;
+    m.carry = false;
+    b.thrower = id;
+    b.passT = t;
+    b.inAir = true;
+    b.gripT = 0;
+    b.pos.set(m.pos.x + (dx / d) * 0.9, m.pos.y + 1.5, m.pos.z + (dz / d) * 0.9);
+    // (it leaves the hand 1.5 m up and comes down to chest height at the spot)
+    b.vel.set(((dx / d) * reach) / T, 0.5 * C.g * T - 0.7 / T, ((dz / d) * reach) / T);
+    this.pend.push({ k: 'bowl', id: -1, was: id, how: 'pass' });
+    return true;
+  }
+  /** who has the ball (Bean Bowl; -1: nobody) */
+  holder() {
+    const b = this.arena.balls[0];
+    return this.cfg.rule === 'bowl' && b.live ? b.held : -1;
+  }
 
   /** Volley Folly: the ball comes down from high over the middle of a team's yard (theirs to play) */
   private serve(team: number) {
@@ -562,8 +675,11 @@ export class CupPlay {
   }
 
   /** (the host) the ball's moves, this frame */
+  /** the world time of the last tick (a bot's throw happens between them) */
+  now = 0;
   tick(dt: number, t: number, x: number) {
-    const ev: CupEvent[] = [];
+    const ev: CupEvent[] = this.drain();
+    this.now = t;
     const A = this.arena, all = this.who(), C = this.cfg;
     if (C.second > 0 && !this.second && x > C.T - C.second) {
       this.second = true;
@@ -589,6 +705,7 @@ export class CupPlay {
         else this.drop(b, i ? 6 : this.second ? -6 : 0);
       }
       if (!b.live && !b.backAt) return;
+      if (C.rule === 'bowl') return this.bowl(b, i, dt, t, ev, all);
       for (let k = 0; k < n; k++) {
         this.down = -1;
         this.fly(b, h, ev, i);
@@ -667,6 +784,8 @@ export class CupPlay {
   packet() {
     const out: number[] = [];
     for (const b of this.arena.balls) out.push(b.pos.x, b.pos.y, b.pos.z, b.vel.x, b.vel.y, b.vel.z, b.live ? 1 : 0);
+    // (Bean Bowl: and who's carrying it)
+    if (this.cfg.rule === 'bowl') for (const b of this.arena.balls) out.push(b.held);
     return out.map((v) => Math.round(v * 100) / 100);
   }
   /** a guest hears where they are */
@@ -686,12 +805,37 @@ export class CupPlay {
       }
       q.backAt = q.live ? 0 : 1;
       q.vel.lerp(n.v, 0.6);
+      if (this.cfg.rule === 'bowl') {
+        const held = q.live ? (s[this.arena.balls.length * 7 + i] ?? -1) : -1;
+        if (held !== q.held) {
+          // (what happened, as near as a guest can tell: up in the air it was caught, going fast it was thrown)
+          const up = q.pos.y - this.arena.center.y > 1.6;
+          if (held >= 0) this.pend.push({ k: 'bowl', id: held, was: q.held >= 0 ? q.held : q.thrower, how: q.held >= 0 ? 'steal' : up && q.thrower >= 0 ? (this.teamOf(q.thrower) === this.teamOf(held) ? 'catch' : 'steal') : 'pick' });
+          else if (q.live) {
+            const thrown = n.v.length() > 13;
+            q.thrower = thrown ? q.held : -1;
+            this.pend.push({ k: 'bowl', id: -1, was: q.held, how: thrown ? 'pass' : 'fumble' });
+          }
+          q.held = held;
+        }
+      }
     });
   }
   /** (a guest) the flight between reports, leaning back onto the host's */
   follow(dt: number) {
     this.arena.balls.forEach((b, i) => {
       if (!b.live && !b.backAt) return;
+      // (Bean Bowl: carried, it's wherever the bean that has it is)
+      if (this.cfg.rule === 'bowl') {
+        const all = this.who();
+        const holder = b.held >= 0 ? all.find((r) => r.m.id === b.held) : undefined;
+        for (const r of all) r.m.carry = r === holder;
+        if (holder) {
+          b.pos.set(holder.m.pos.x, holder.m.pos.y + 1.4, holder.m.pos.z);
+          b.vel.copy(holder.m.vel);
+          return;
+        }
+      }
       this.fly(b, dt, null, i);
       const n = this.net[i];
       n.p.addScaledVector(n.v, dt);
@@ -720,6 +864,12 @@ export class CupPlay {
       if (!on) return;
       m.position.copy(b.pos);
       m.quaternion.copy(b.quat);
+      // (Bean Bowl: carried, it points the way its bean is facing; thrown, along its flight in a spiral)
+      if (this.cfg.rule === 'bowl') {
+        const hm = b.held >= 0 ? this.who().find((r) => r.m.id === b.held)?.m : undefined;
+        if (hm) m.quaternion.setFromAxisAngle(UPY, hm.yaw + Math.PI / 2);
+        else if (b.inAir) m.quaternion.setFromUnitVectors(XAX, P.copy(b.vel).normalize()).multiply(Q.setFromAxisAngle(XAX, performance.now() * 0.02));
+      }
       k.position.set(b.pos.x, y0 + 0.05, b.pos.z);
       const up = b.pos.y - y0 - this.cfg.R;
       k.scale.setScalar(1 + up * 0.08);

@@ -112,7 +112,7 @@ export class RocketBrain {
   }
 }
 
-const G = new THREE.Vector3(), W = new THREE.Vector3(), T2 = new THREE.Vector3();
+const G = new THREE.Vector3(), W = new THREE.Vector3(), T2 = new THREE.Vector3(), L = new THREE.Vector3();
 
 /**
  * Bean Cup: a team that plays like one. The two or three nearest the ball go for it, coming round
@@ -136,6 +136,7 @@ export class CupBrain {
     if (A.gates) return this.gates(dt, t, c, all, ease);
     if (CUP.rule === 'fence') return this.fence(dt, t, c, all, ease);
     if (CUP.rule === 'volley') return this.volley(dt, t, c, all, ease);
+    if (CUP.rule === 'bowl') return this.bowl(dt, t, c, all, ease);
     const push = CUP.rule === 'push';
     const team = A.of.get(m.id) ?? 0, dir = team === 0 ? 1 : -1;
     const y0 = A.center.y;
@@ -220,6 +221,148 @@ export class CupBrain {
       m.input.set(bx / (bdist || 1), 0, bz / (bdist || 1));
       m.dash = true;
     }
+  }
+
+  /**
+   * Bean Bowl: football, each bean with a job that changes with who has the ball.
+   *   I have it: run for their end zone, cutting away from whoever's closing on me; with someone
+   *     about to hit me and a team-mate open up the field, throw it to them.
+   *   A team-mate has it: half of us run routes ahead of the ball (a lane each, to be thrown to),
+   *     the rest block: get in front of the nearest chaser and bowl them over.
+   *   They have it: the nearest of us hunt the carrier (running to where it's going, not where
+   *     it is) and dive at it; the rest drop back between the ball and our end zone.
+   *   It's loose: the nearest go for it (to where a throw is coming down); the rest spread out.
+   */
+  private role: 'ball' | 'route' | 'block' | 'hunt' | 'cover' = 'cover';
+  private foe = -1;
+  private passT = 0;
+  private bowl(_dt: number, t: number, c: Course, all: Marble[], ease: number) {
+    const m = this.m, A = c.cup!, C = A.cfg, b = A.balls[0];
+    const team = A.of.get(m.id) ?? 0, dir = team === 0 ? 1 : -1;
+    const y0 = A.center.y, cx = A.center.x, cz = A.center.z;
+    const up = (z: number) => (z - cz) * dir;
+    const side = (o: Marble) => A.of.get(o.id) ?? 0;
+    const held = b.live ? b.held : -1;
+    const carrier = held >= 0 ? all.find((o) => o.id === held) : undefined;
+    const mineHas = !!carrier && side(carrier) === team;
+    if (t > this.think) {
+      this.think = t + 0.14 + (1 - this.skill) * 0.22 + ease * 0.2 + this.rnd() * 0.08;
+      const mates = all.filter((o) => o.active && side(o) === team).sort((p, q) => p.id - q.id);
+      this.n = mates.length;
+      this.slot = mates.indexOf(m);
+      // how many of my side are nearer the thing that matters than I am
+      const at = carrier ? carrier.pos : b.pos;
+      const mine = Math.hypot(at.x - m.pos.x, at.z - m.pos.z);
+      let closer = 0;
+      for (const o of mates) if (o !== m && o !== carrier && Math.hypot(at.x - o.pos.x, at.z - o.pos.z) < mine) closer++;
+      if (carrier === m) this.role = 'ball';
+      else if (mineHas) this.role = this.slot % 2 === 0 ? 'route' : 'block';
+      else if (carrier) this.role = closer < Math.max(3, Math.ceil(this.n * 0.5)) ? 'hunt' : 'cover';
+      else this.role = !b.live ? 'cover' : closer < 3 ? 'hunt' : this.slot % 2 ? 'cover' : 'route';
+      // (a blocker picks the chaser nearest the ball that nobody nearer is already on)
+      this.foe = -1;
+      if (this.role === 'block' && carrier) {
+        let best = Infinity;
+        for (const o of all) {
+          if (!o.active || side(o) === team || o.mode === Mode.Tumble) continue;
+          const d = Math.hypot(o.pos.x - carrier.pos.x, o.pos.z - carrier.pos.z) + Math.hypot(o.pos.x - m.pos.x, o.pos.z - m.pos.z) * 0.6;
+          if (d < best) (best = d), (this.foe = o.id);
+        }
+      }
+    }
+    let run = 1, dive: Marble | null = null;
+    if (this.role === 'ball' && carrier === m) {
+      // ---- the run: up the field, away from the tackler that's nearest and not behind me
+      let px = 0, near = Infinity, threat: Marble | null = null;
+      for (const o of all) {
+        if (!o.active || side(o) === team || o.mode === Mode.Tumble) continue;
+        const ox = o.pos.x - m.pos.x, oz = up(o.pos.z) - up(m.pos.z), d = Math.hypot(ox, oz);
+        if (oz < -2.5 || d > 9) continue;
+        px -= (Math.sign(ox) || (this.slot % 2 ? 1 : -1)) * (1 - d / 9) * (oz > 0 ? 1.3 : 0.7);
+        if (d < near) (near = d), (threat = o);
+      }
+      // (and off the sideline: a cut that way is a cut into the wall)
+      const edge = (m.pos.x - cx) / (C.HW - 2);
+      if (Math.abs(edge) > 0.7) px -= Math.sign(edge) * (Math.abs(edge) - 0.7) * 5;
+      px = THREE.MathUtils.clamp(px, -1.1, 1.1);
+      W.set(m.pos.x + px * 6, y0, m.pos.z + dir * 6);
+      // ---- the throw: someone's about to hit me, and a team-mate is open ahead of me
+      if (threat && near < 3.6 + 2 * this.skill && t > this.passT && A.pass) {
+        this.passT = t + 0.5 + this.rnd() * 0.5;
+        let to: Marble | null = null, best = 2.5;
+        for (const o of all) {
+          if (o === m || !o.active || side(o) !== team || o.mode !== Mode.Run) continue;
+          const gain = up(o.pos.z) - up(m.pos.z), d = Math.hypot(o.pos.x - m.pos.x, o.pos.z - m.pos.z);
+          if (gain < 2 || d < 5 || d > 24) continue;
+          let open = 9;
+          for (const q of all) if (q.active && side(q) !== team) open = Math.min(open, Math.hypot(q.pos.x - o.pos.x, q.pos.z - o.pos.z));
+          const sc = Math.min(open, 6) + gain * 0.15;
+          if (open > 3 && sc > best) (best = sc), (to = o);
+        }
+        if (to && this.rnd() < 0.35 + 0.5 * this.skill - ease * 0.2) {
+          const d = Math.hypot(to.pos.x - m.pos.x, to.pos.z - m.pos.z), T = 0.5 + d * 0.034, off = (1 - this.skill) * 3 + ease * 1.5;
+          A.pass(m.id, to.pos.x + to.vel.x * T * 0.85 + (this.rnd() - 0.5) * off, to.pos.z + to.vel.z * T * 0.85 + (this.rnd() - 0.5) * off);
+        }
+      }
+    } else if (this.role === 'route') {
+      // ---- a route: a lane of my own, a throw's length ahead of the ball (never deeper than the end zone)
+      const lanes = Math.max(1, Math.ceil(this.n / 2)), lane = ((Math.floor(this.slot / 2) + 0.5) / lanes - 0.5) * (C.HW * 1.6);
+      const from = carrier ? carrier.pos.z : b.pos.z;
+      const depth = Math.min(up(from) + 9 + (this.slot % 3) * 3.5, C.HL - 1.5);
+      W.set(cx + lane + Math.sin(t * 0.9 + this.slot) * 2.2, y0, cz + dir * depth);
+      // (a throw of ours in the air: whoever's nearest where it's coming down goes and gets it)
+      if (!carrier && b.live && b.inAir && this.near(b, C, y0, m) < 7) W.copy(L);
+      run = 0.92;
+    } else if (this.role === 'block') {
+      const foe = this.foe >= 0 ? all.find((o) => o.id === this.foe) : undefined;
+      if (foe && carrier) {
+        // between the chaser and the ball, then through them
+        const fx = carrier.pos.x - foe.pos.x, fz = carrier.pos.z - foe.pos.z, fd = Math.hypot(fx, fz) || 1;
+        W.set(foe.pos.x + (fx / fd) * 1.6, y0, foe.pos.z + (fz / fd) * 1.6);
+        if (Math.hypot(foe.pos.x - m.pos.x, foe.pos.z - m.pos.z) < 3.2) (W.set(foe.pos.x, y0, foe.pos.z), (dive = foe));
+      } else if (carrier) W.set(carrier.pos.x + (this.slot % 2 ? 2.5 : -2.5), y0, carrier.pos.z + dir * 3.5);
+      else W.set(cx, y0, cz);
+    } else if (this.role === 'hunt') {
+      if (carrier) {
+        // ---- the tackle: where it's going to be when I get there
+        const d = Math.hypot(carrier.pos.x - m.pos.x, carrier.pos.z - m.pos.z), lead = Math.min(0.9, d / 11) * (0.5 + 0.5 * this.skill);
+        W.set(carrier.pos.x + carrier.vel.x * lead, y0, carrier.pos.z + carrier.vel.z * lead);
+        if (d < 3 + this.skill * 0.6) (W.set(carrier.pos.x, y0, carrier.pos.z), (dive = carrier));
+      } else {
+        // ---- a loose ball: straight to it (or to where it's coming down)
+        if (this.near(b, C, y0, m) < 99) W.copy(L);
+        else W.set(b.pos.x, y0, b.pos.z);
+      }
+    } else {
+      // ---- cover: back between the ball and my own end zone, across the field by my slot
+      const lanes = Math.max(1, this.n), lane = ((this.slot + 0.5) / lanes - 0.5) * (C.HW * 1.5);
+      const from = carrier ? carrier.pos : b.pos;
+      const back = Math.max(up(from.z) - 7 - (this.slot % 3) * 2.5, -(C.HL - C.endZone - 1));
+      W.set(cx + lane * 0.6 + (from.x - cx) * 0.4 + Math.sin(t * 0.8 + this.slot * 1.3) * 1.6, y0, cz + dir * (b.live ? back : -6 - (this.slot % 3) * 5));
+      run = 0.85;
+    }
+    W.x = THREE.MathUtils.clamp(W.x, cx - C.HW + 1.2, cx + C.HW - 1.2);
+    W.z = THREE.MathUtils.clamp(W.z, cz - C.HL + 0.8, cz + C.HL - 0.8);
+    const dx = W.x - m.pos.x, dz = W.z - m.pos.z, d = Math.hypot(dx, dz);
+    if (d > 0.4) m.input.set(dx / d, 0, dz / d).multiplyScalar(run * Math.min(1, 0.35 + d / 2.5));
+    else m.input.set(0, 0, 0);
+    // the hit: a dive through whoever it's after, when it's close and on its feet
+    if (dive && m.mode === Mode.Run && t > this.shotT && dive.mode !== Mode.Tumble) {
+      const hx = dive.pos.x + dive.vel.x * 0.18 - m.pos.x, hz = dive.pos.z + dive.vel.z * 0.18 - m.pos.z, hd = Math.hypot(hx, hz) || 1;
+      if (hd < 3.1 && this.rnd() < (this.role === 'block' ? 0.1 : 0.16 + 0.3 * this.skill) - ease * 0.08) {
+        this.shotT = t + 1.3 + this.rnd() * 0.9;
+        m.input.set(hx / hd, 0, hz / hd);
+        m.dash = true;
+      }
+    }
+  }
+  /** where a ball in the air comes down (into L); how far that is from a bean (99: it's not in the air) */
+  private near(b: { pos: THREE.Vector3; vel: THREE.Vector3 }, C: { g: number; R: number }, y0: number, m: Marble) {
+    const h = b.pos.y - y0 - 1.2;
+    if (h < 0.8 && Math.abs(b.vel.y) < 3) return 99;
+    const e = (b.vel.y + Math.sqrt(Math.max(0, b.vel.y * b.vel.y + 2 * C.g * Math.max(0, h)))) / C.g;
+    L.set(b.pos.x + b.vel.x * e, y0, b.pos.z + b.vel.z * e);
+    return Math.hypot(L.x - m.pos.x, L.z - m.pos.z);
   }
 
   /**

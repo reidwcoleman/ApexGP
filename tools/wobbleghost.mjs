@@ -1,7 +1,7 @@
 // Wobble Mania: out of the show, the ghost, the stars and the revive. Plays a show of the rounds
 // given with you knocked out in the first one (a survival round), then reports every round: were
 // you a ghost, how many stars it picked up, was the revive taken, were you back in.
-//   node tools/wobbleghost.mjs [--show jumpclub,spothogs,beanbaygp,hopscotch,gatecrashers] [--stars 0] [--measure 1] [--out dir]
+//   node tools/wobbleghost.mjs [--show jumpclub,paintparty,beanbaygp,hopscotch,gatecrashers] [--stars 0] [--measure 1] [--out dir]
 //   --stars N: the stars you have when you're knocked out (50 or more: saved on the spot)
 //   --measure 1: the revive is priced out of reach, so every round is flown as a ghost (how many stars does each give?)
 import { chromium } from 'playwright-core';
@@ -10,7 +10,7 @@ import { CHROME, ANGLE } from './chrome.mjs';
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
 const port = opt('port', '5197');
-const show = opt('show', 'jumpclub,spothogs,beanbaygp,hopscotch,gatecrashers');
+const show = opt('show', 'jumpclub,paintparty,beanbaygp,hopscotch,gatecrashers');
 const stars = Number(opt('stars', 0));
 const measure = opt('measure', '') === '1';
 const out = opt('out', '');
