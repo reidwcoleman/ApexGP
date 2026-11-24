@@ -45,9 +45,10 @@ SPECS = {
 DEFAULT = dict(floors=3, body='#f2efe6', trim='#c8d8de', accent='#6a8fa0', porch='canopy', crown='flat')
 
 FONT = None   # set by build.py
+STREET = None  # (x, y) -> is there a road: set by build.py
 
 
-def window_wall(mb, o, U, N, w, h, openings, mat, col, depth=0.2, frame_col=WHITE, glass='od_glass', sills=True, ac=None):
+def window_wall(mb, o, U, N, w, h, openings, mat, col, depth=0.2, frame_col=WHITE, glass='od_glass', sills=True, ac=None, frames=True):
     """A wall in the plane o + U*u + Z*v (u in [0,w], v in [0,h]) facing N, with real recessed openings.
     openings: (u0, v0, u1, v1, kind) kind 'win' | 'shop' | 'door' | 'void' (open, no glass)"""
     Z = (0.0, 0.0, 1.0)
@@ -80,6 +81,11 @@ def window_wall(mb, o, U, N, w, h, openings, mat, col, depth=0.2, frame_col=WHIT
             continue
         g = glass if kind == 'win' else 'od_shopglass'
         mb.face([P(u0, v0, -d), P(u1, v0, -d), P(u1, v1, -d), P(u0, v1, -d)], g, WHITE, n=N)
+        if not frames:
+            if kind == 'win' and sills:
+                c = P((u0 + u1) / 2, v0 - 0.05, 0.04)
+                mb.obox(c, U, N, Z, (u1 - u0) / 2 + 0.07, 0.07, 0.05, 'od_trim', col)
+            continue
         # frame: border + mullions, slightly proud of the glass
         fw, fd = 0.055, 0.045
         def bar(ua, va, ub, vb):
@@ -295,6 +301,13 @@ def build_hotel(mb, foot, number, rng, signs, props):
         L = xu - xb
         o = (xb, yy, SW) if nrm[1] < 0 else (xu, yy, SW)
         sops = []
+        # a corner hotel's side wall on a cross street gets shopfronts and a side entrance
+        if STREET and STREET((xb + xu) / 2, yy + nrm[1] * 5):
+            for a, b in bays(L - 1.0, bw=3.4, margin=0.6):
+                if rng.random() < 0.8:
+                    sops.append((a + 0.15, 0.1, b - 0.15, FL0 - 0.7, 'shop'))
+                else:
+                    sops.append(((a + b) / 2 - 0.55, 0.1, (a + b) / 2 + 0.55, 2.5, 'door'))
         for f in range(1, N):
             zf = FL0 + FLH * (f - 1)
             for a, b in bays(L, bw=3.6, margin=1.6):
@@ -302,8 +315,12 @@ def build_hotel(mb, foot, number, rng, signs, props):
         window_wall(mb, o, UU, nrm, L, Htop - SW, sops, 'od_stucco', body, depth=0.18, ac=rng)
     mb.face([(xb, y0, SW), (xb, y1, SW), (xb, y1, Htop), (xb, y0, Htop)], 'od_stucco', body, n=(-1, 0, 0))
     mb.face([(xb, y0, Htop), (xu, y0, Htop), (xu, y1, Htop), (xb, y1, Htop)], 'od_roof', WHITE, n=(0, 0, 1))
+    hotel_roof(mb, xb, xu, y0, y1, Htop, body, rng, props)
+    # downspouts at the back corners
+    for yy in (y0 + 0.12, y1 - 0.12):
+        mb.cyl((xb - 0.1, yy, SW), 0.05, 0.05, Htop - SW, 8, 'od_metal', hexcol('#cfcac0'))
     # rooftop clutter
-    for k in range(rng.randint(1, 3)):
+    for k in range(rng.randint(2, 4)):
         props.append(('aircon', rng.uniform(xb + 3, xu - 4), rng.uniform(y0 + 2, y1 - 2), Htop, rng.choice((0, 1.57, 3.14))))
     # ---------------- signs
     sk, txt = sp.get('sk'), sp.get('sign')
@@ -321,3 +338,114 @@ def build_hotel(mb, foot, number, rng, signs, props):
             z = FL0 + SW + 0.35
             signs += neon_text(None, f'sign_{number}', txt, FONT, 0.62, (xu + 0.08, yc, z), UF, NF, sp['neon'])
     return Htop
+
+
+# ------------------------------------------------------------------ the city behind the frontage
+CITY_BODY = ['#f2efe6', '#f4e8d8', '#e8eef0', '#f3e1e4', '#e6efe6', '#efe9d2', '#e2e6ee', '#f6f1e9',
+             '#f7d9b8', '#d8ecf2', '#f2d5df', '#dcefe2', '#efe0f2', '#fbe7a8', '#cfe6f5', '#f0c9b0']
+CITY_TRIM = ['#ffffff', '#f4f2ea', '#8fc7d6', '#e8a6b8', '#9fd3b8', '#c9b6e6', '#f2c46a', '#5aa9c9', '#d9785a']
+
+
+def city_building(mb, pts, h, rng, props, street=None):
+    """A background building from its OSM footprint (ccw): every wall with real recessed windows in
+    floors and bays, shopfronts at street level on the longer walls, a trim band per floor on some,
+    a cornice, a parapet with coping, and roof clutter (bulkhead, AC units, a water tank)."""
+    col = hexcol(rng.choice(CITY_BODY))
+    trim = hexcol(rng.choice(CITY_TRIM))
+    z0 = SW
+    floors = max(1, int((h - 1.0) / 3.25))
+    gf = 4.0 if h > 7 else 3.4
+    shops = rng.random() < 0.75
+    banded = rng.random() < 0.5
+    winw = rng.choice((1.1, 1.3, 1.6, 1.9))
+    par = rng.choice((0.7, 0.9, 1.2))
+    with_ac = rng.random() < 0.35
+    n = len(pts)
+    for i in range(n):
+        a, b = pts[i], pts[(i + 1) % n]
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        L = math.hypot(dx, dy)
+        if L < 0.05:
+            continue
+        U = (dx / L, dy / L, 0.0)
+        N = (dy / L, -dx / L, 0.0)          # outward for a ccw footprint
+        o = (a[0], a[1], z0)
+        ops = []
+        mx, my = a[0] + dx / 2 + N[0] * 5, a[1] + dy / 2 + N[1] * 5
+        onst = bool(street and street(mx, my))
+        shop_here = (onst and rng.random() < 0.9) or (shops and not street)
+        if L > 3.2:
+            # street level
+            for u0, u1 in bays(L, bw=3.4, margin=0.6):
+                if shop_here and L > 6:
+                    ops.append((u0 + 0.15, 0.1, u1 - 0.15, gf - 0.7, 'shop'))
+                elif u1 - u0 > 1.4:
+                    ops.append(((u0 + u1) / 2 - 0.6, 0.95, (u0 + u1) / 2 + 0.6, 2.45, 'win'))
+            for f in range(1, floors):
+                zf = gf + 3.25 * (f - 1)
+                if zf + 2.4 > h:
+                    break
+                for u0, u1 in bays(L, bw=2.9, margin=0.8):
+                    ww = min(winw, u1 - u0 - 0.5)
+                    if ww < 0.6:
+                        continue
+                    uc = (u0 + u1) / 2
+                    ops.append((uc - ww / 2, zf + 0.9, uc + ww / 2, zf + 2.4, 'win'))
+        window_wall(mb, o, U, N, L, h + par, ops, 'od_stucco', col, depth=0.16, ac=rng if (L > 6 and with_ac) else None, frames=False)
+        def strip(z, hz, out, mat, c):
+            cc = (a[0] + dx / 2 + N[0] * out / 2, a[1] + dy / 2 + N[1] * out / 2, z)
+            mb.obox(cc, U, N, (0, 0, 1), L / 2 + out / 2, out / 2 + 0.01, hz, mat, c)
+        # cornice under the parapet, a base band, floor bands on some
+        strip(z0 + h - 0.12, 0.12, 0.22, 'od_trim', trim)
+        strip(z0 + 0.25, 0.25, 0.06, 'od_trim', hexcol('#b9b3a6'))
+        if banded:
+            for f in range(1, floors):
+                zf = z0 + gf + 3.25 * (f - 1) + 0.6
+                if zf + 1 < z0 + h:
+                    strip(zf, 0.05, 0.05, 'od_trim', trim)
+        if shop_here and L > 6:
+            # a signboard band over the shops
+            strip(z0 + gf - 0.35, 0.3, 0.08, 'od_trim', hexcol(rng.choice(CITY_TRIM)))
+        # parapet: inner face and coping
+        zt = z0 + h + par
+        ia = (a[0] - N[0] * 0.25, a[1] - N[1] * 0.25)
+        ib = (b[0] - N[0] * 0.25, b[1] - N[1] * 0.25)
+        mb.face([(ia[0], ia[1], z0 + h), (ib[0], ib[1], z0 + h), (ib[0], ib[1], zt), (ia[0], ia[1], zt)], 'od_stucco', col, n=(-N[0], -N[1], 0))
+        strip(zt + 0.04, 0.05, 0.36, 'od_trim', hexcol('#e9e5dc'))
+    # roof slab
+    mb.face([(p[0], p[1], z0 + h) for p in pts], 'od_roof', WHITE, n=(0, 0, 1))
+    # roof clutter, inside the footprint's bounding box (pulled toward the centroid)
+    cx = sum(p[0] for p in pts) / n
+    cy = sum(p[1] for p in pts) / n
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    sx, sy = (max(xs) - min(xs)) * 0.25, (max(ys) - min(ys)) * 0.25
+    if sx > 1.5 and sy > 1.5:
+        if rng.random() < 0.6:
+            bx, by = cx + rng.uniform(-sx, sx) * 0.5, cy + rng.uniform(-sy, sy) * 0.5
+            mb.box(bx - 1.5, by - 1.8, z0 + h, bx + 1.5, by + 1.8, z0 + h + 2.6, 'od_stucco', col, skip=('-z',))
+            mb.box(bx - 1.6, by - 1.9, z0 + h + 2.6, bx + 1.6, by + 1.9, z0 + h + 2.75, 'od_trim', hexcol('#d8d4ca'), skip=('-z',))
+        for k in range(rng.randint(1, 4)):
+            props.append(('aircon', cx + rng.uniform(-sx, sx), cy + rng.uniform(-sy, sy), z0 + h, rng.choice((0, 1.57, 3.14, 4.71))))
+        if rng.random() < 0.18:
+            tx, ty = cx + rng.uniform(-sx, sx) * 0.6, cy + rng.uniform(-sy, sy) * 0.6
+            for lx, ly in ((-0.8, -0.8), (0.8, -0.8), (0.8, 0.8), (-0.8, 0.8)):
+                mb.cyl((tx + lx, ty + ly, z0 + h), 0.07, 0.07, 2.2, 6, 'od_metal', hexcol('#6d6a64'))
+            mb.cyl((tx, ty, z0 + h + 2.2), 1.3, 1.3, 2.4, 16, 'od_wood', hexcol('#8a6f52'))
+            mb.cyl((tx, ty, z0 + h + 4.6), 1.35, 0.1, 0.7, 16, 'od_metal', hexcol('#5c5852'))
+
+
+def hotel_roof(mb, xb, xu, y0, y1, Htop, body, rng, props):
+    """the hotel roofs: a parapet round the sides and back, a stair bulkhead, a vent stack"""
+    par = 0.85
+    for (ya, yb) in ((y0, y0 + 0.22), (y1 - 0.22, y1)):
+        mb.box(xb, ya, Htop, xu - 0.3, yb, Htop + par, 'od_stucco', body, skip=('-z',))
+    mb.box(xb, y0, Htop, xb + 0.22, y1, Htop + par, 'od_stucco', body, skip=('-z',))
+    for (x0, x1, ya, yb) in ((xb - 0.05, xu - 0.3, y0 - 0.05, y0 + 0.27), (xb - 0.05, xu - 0.3, y1 - 0.27, y1 + 0.05), (xb - 0.05, xb + 0.27, y0, y1)):
+        mb.box(x0, ya, Htop + par, x1, yb, Htop + par + 0.07, 'od_trim', hexcol('#ece8de'))
+    bx = xb + (xu - xb) * rng.uniform(0.25, 0.45)
+    by = (y0 + y1) / 2 + rng.uniform(-2, 2)
+    mb.box(bx - 1.6, by - 1.9, Htop, bx + 1.6, by + 1.9, Htop + 2.7, 'od_stucco', body, skip=('-z',))
+    mb.box(bx - 1.7, by - 2.0, Htop + 2.7, bx + 1.7, by + 2.0, Htop + 2.85, 'od_trim', hexcol('#e2ddd2'), skip=('-z',))
+    for k in range(rng.randint(1, 3)):
+        mb.cyl((xb + rng.uniform(1.5, (xu - xb) * 0.7), rng.uniform(y0 + 1.2, y1 - 1.2), Htop), 0.09, 0.09, 1.6, 8, 'od_metal', hexcol('#8d8a84'))

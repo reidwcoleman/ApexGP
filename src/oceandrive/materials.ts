@@ -40,6 +40,8 @@ function tex(file: string, srgb: boolean, repeat = true): THREE.Texture {
   return t;
 }
 
+export const LAMPS = 24;
+
 /** shared uniforms (time, wetness of the sand, night) */
 export const U = {
   uTime: { value: 0 },
@@ -49,15 +51,33 @@ export const U = {
   /** the baked light's colour and level (1 by day; dimmed and blued at dusk) */
   uLmTint: { value: new THREE.Vector3(1.55, 1.52, 1.5) },
   uSunDir: { value: new THREE.Vector3(0.6, 0.33, 0.45).normalize() },
+  /** the sun's irradiance (0 when it's down or behind cloud) */
+  uSunCol: { value: new THREE.Vector3(9.18, 7.38, 5.23) },
+  /** daylight from the sky, 1 on a clear afternoon */
+  uSkyK: { value: 1 },
+  /** how wet everything is (0..1), and how hard it's raining */
+  uWet: { value: 0 },
+  uRain: { value: 0 },
+  /** wind strength (palms) */
+  uWind: { value: 0.3 },
+  /** the street lamps, shop windows and headlights nearest the camera: xyz, intensity */
+  uLamps: { value: Array.from({ length: LAMPS }, () => new THREE.Vector4(0, -100, 0, 0)) },
+  uLampK: { value: 0 },
 };
 
 // ------------------------------------------------------------------------------- shader pieces
 const COMMON = /* glsl */ `
+#define OD_LAMPS ${LAMPS}
 uniform float uTime;
 uniform float uSea;
 uniform float uSwash;
 uniform float uNight;
 uniform vec3 uLmTint;
+uniform float uWet;
+uniform float uRain;
+uniform float uSkyK;
+uniform vec4 uLamps[ ${LAMPS} ];
+uniform float uLampK;
 varying vec3 vOdWorld;
 varying vec3 vOdNormalW;
 float odHash12( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
@@ -74,6 +94,39 @@ vec4 odTex( sampler2D s, vec2 uv ) {
   vec2 oa = sin( vec2( 3.0, 7.0 ) * ia ); vec2 ob = sin( vec2( 3.0, 7.0 ) * ib );
   vec4 a = textureGrad( s, uv + oa, dx, dy ); vec4 b = textureGrad( s, uv + ob, dx, dy );
   return mix( a, b, smoothstep( 0.2, 0.8, f - 0.1 * dot( a.rgb - b.rgb, vec3( 1.0 ) ) ) );
+}
+// light from the lamps, shop windows and headlights (warm, falling off with distance)
+vec3 odLamps( vec3 p, vec3 n ) {
+  vec3 e = vec3( 0.0 );
+  if ( uLampK <= 0.0 ) return e;
+  for ( int i = 0; i < OD_LAMPS; i ++ ) {
+    vec4 l = uLamps[ i ];
+    vec3 d = l.xyz - p;
+    float r2 = dot( d, d );
+    if ( r2 > 900.0 || l.w <= 0.0 ) continue;
+    float nl = max( dot( n, d * inversesqrt( r2 ) ), 0.0 ) * 0.85 + 0.15;
+    e += l.w * nl / ( r2 + 1.5 ) * ( 1.0 - smoothstep( 300.0, 900.0, r2 ) );
+  }
+  return e * vec3( 1.0, 0.74, 0.46 ) * uLampK;
+}
+// their reflections on wet and glossy ground: a glossy lobe per light (the long glints on a wet street)
+vec3 odLampSpec( vec3 p, vec3 n, vec3 v, float rough ) {
+  vec3 e = vec3( 0.0 );
+  if ( uLampK <= 0.0 ) return e;
+  float a = max( rough * rough, 0.002 );
+  float sh = clamp( 2.0 / ( a * a ) - 2.0, 2.0, 4000.0 );
+  for ( int i = 0; i < OD_LAMPS; i ++ ) {
+    vec4 l = uLamps[ i ];
+    vec3 d = l.xyz - p;
+    float r2 = dot( d, d );
+    if ( l.w <= 0.0 || r2 > 3600.0 ) continue;
+    vec3 L = d * inversesqrt( r2 );
+    vec3 H = normalize( L + v );
+    float nl = max( dot( n, L ), 0.0 );
+    float F = 0.04 + 0.96 * pow( 1.0 - max( dot( v, H ), 0.0 ), 5.0 );
+    e += l.w * F * pow( max( dot( n, H ), 0.0 ), sh ) * ( sh + 8.0 ) * 0.0398 * nl / ( r2 + 1.0 );
+  }
+  return e * vec3( 1.0, 0.76, 0.5 ) * uLampK;
 }
 `;
 
@@ -163,7 +216,7 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
       );
     let f = sh.fragmentShader;
     // three expands #include chunks only after this hook: expand the ones patched below
-    for (const c of ['map_fragment', 'normal_fragment_maps', 'roughnessmap_fragment'] as const) f = f.replace(`#include <${c}>`, THREE.ShaderChunk[c]);
+    for (const c of ['map_fragment', 'normal_fragment_maps', 'roughnessmap_fragment'] as const) f = f.replace(`#include <${c}>`, THREE.ShaderChunk[c] + `\n//OD_END_${c}`);
     f = f.replace('#include <common>', '#include <common>\n' + COMMON + '\nuniform float uGrime;');
     f = f.replace('vec4 sampledDiffuseColor = texture2D( map, vMapUv );', 'vec4 sampledDiffuseColor = odTex( map, vMapUv );');
     f = f.replace('vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;', 'vec3 mapN = odTex( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;');
@@ -201,9 +254,9 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
         diffuseColor.rgb *= mix( 0.9, 1.08, v );
         // wet sand: below the swash line, darker and glossy
         float wl = uSea + 0.06 + uSwash + 0.05 * odNoise( vOdWorld.xz * 0.3 );
-        float wet = 1.0 - smoothstep( wl - 0.04, wl + 0.32, vOdWorld.y );
-        wet *= wet;
-        diffuseColor.rgb *= mix( 1.0, 0.58, wet );
+        float wet = 1.0 - smoothstep( wl - 0.1, wl + 0.55 + 0.25 * odNoise( vOdWorld.xz * 0.11 ), vOdWorld.y );
+        wet = wet * wet * ( 3.0 - 2.0 * wet );
+        diffuseColor.rgb *= mix( 1.0, 0.8, wet );
         vOdWet = wet;
       }`;
     }
@@ -213,7 +266,51 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
     }
     f = f.replace('#include <color_fragment>', '#include <color_fragment>\n' + (kind === 'sand' ? 'float vOdWet = 0.0;\n' : '') + albedo);
     if (kind === 'sand') {
-      f = f.replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.18, vOdWet );');
+      f = f.replace('//OD_END_roughnessmap_fragment', '//OD_END_roughnessmap_fragment\nroughnessFactor = mix( roughnessFactor, 0.18, vOdWet );\n//OD_WET');
+    }
+    // the rain: everything darkens and turns glossy; puddles collect in the low spots of the street
+    // and the sidewalk (flat, mirror-like, rippled by the drops); walls get wet only near the ground
+    // and in streaks
+    const roughEnd = kind === 'sand' ? '//OD_WET' : '//OD_END_roughnessmap_fragment';
+    if (kind === 'ground' || kind === 'sand' || kind === 'wall' || kind === 'far') {
+      const horiz = kind === 'ground' || kind === 'sand';
+      f = f.replace(
+        roughEnd,
+        roughEnd +
+          /* glsl */ `
+        float odPuddle = 0.0;
+        if ( uWet > 0.0 ) {
+          float up = smoothstep( 0.6, 0.9, vOdNormalW.y );
+          ${horiz
+            ? `float pn = odFbm( vOdWorld.xz * 0.16 ) + 0.25 * odNoise( vOdWorld.xz * 1.3 );
+          odPuddle = up * smoothstep( 0.64 - 0.2 * uWet, 0.72 - 0.2 * uWet, pn ) * uWet ${kind === 'sand' ? '* 0.0' : ''};
+          float wetA = uWet * ${kind === 'sand' ? '0.6' : '1.0'};`
+            : `float wetA = uWet * ( 0.35 + 0.65 * max( 1.0 - smoothstep( 0.2, 2.5, vOdWorld.y ), smoothstep( 0.5, 0.75, odFbm( vec2( ( vOdWorld.x + vOdWorld.z ) * 2.3, vOdWorld.y * 0.1 ) ) ) ) );`}
+          diffuseColor.rgb *= mix( 1.0, 0.6, wetA ) * mix( 1.0, 0.8, odPuddle );
+          roughnessFactor = mix( roughnessFactor, roughnessFactor * 0.22 + 0.05, wetA );
+          roughnessFactor = mix( roughnessFactor, 0.025, odPuddle );
+        }`,
+      );
+      if (horiz) {
+        // puddles are flat (the asphalt's bumps drown) and ring with the falling drops
+        f = f.replace(
+          '//OD_END_normal_fragment_maps',
+          `//OD_END_normal_fragment_maps
+          if ( odPuddle > 0.0 ) {
+            vec2 cell = floor( vOdWorld.xz * 1.6 );
+            vec2 rip = vec2( 0.0 );
+            for ( int k = 0; k < 2; k ++ ) {
+              vec2 c = cell + vec2( float( k ), 0.0 );
+              float ph = fract( uTime * 1.3 + odHash12( c ) );
+              vec2 dv = vOdWorld.xz * 1.6 - c - vec2( odHash12( c + 3.1 ), odHash12( c + 7.7 ) );
+              float rr = length( dv );
+              rip += dv / max( rr, 1e-3 ) * sin( ( rr - ph ) * 40.0 ) * ( 1.0 - ph ) * smoothstep( ph + 0.15, ph, rr );
+            }
+            vec3 flatN = normalize( ( viewMatrix * vec4( vec3( rip.x * 0.12 * uRain, 1.0, rip.y * 0.12 * uRain ), 0.0 ) ).xyz );
+            normal = normalize( mix( normal, flatN, odPuddle ) );
+          }`,
+        );
+      }
     }
     if (kind === 'far') {
       // background facades: windows drawn from the world position (the bays are 3 m, floors 3.3 m)
@@ -241,11 +338,16 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
       // decode the gamma-stored map; keep the sky's diffuse out (the map holds it); grime where light is scarce
       f = f.replace(
         'vec3 lightMapIrradiance = lightMapTexel.rgb * lightMapIntensity;',
-        `vec3 lightMapIrradiance = pow( lightMapTexel.rgb, vec3( ${lm.info.gamma.toFixed(2)} ) ) * lightMapIntensity * uLmTint;`,
+        `vec3 lightMapIrradiance = pow( lightMapTexel.rgb, vec3( ${lm.info.gamma.toFixed(2)} ) ) * lightMapIntensity * uLmTint + odLamps( vOdWorld + vOdNormalW * 0.05, normalize( vOdNormalW ) );`,
       );
       f = f.replace(
         /#if defined\( USE_ENVMAP \) && defined\( ENVMAP_TYPE_CUBE_UV \)\s*\n\s*#if defined\( STANDARD \) \|\| defined\( LAMBERT \) \|\| defined\( PHONG \)\s*\n\s*iblIrradiance \+= getIBLIrradiance\( geometryNormal \);\s*\n\s*#endif\s*\n\s*#endif/,
         '',
+      );
+      f = f.replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+        reflectedLight.directSpecular += odLampSpec( vOdWorld, normalize( ( vec4( normal, 0.0 ) * viewMatrix ).xyz ), normalize( cameraPosition - vOdWorld ), material.roughness );`,
       );
       // specular occlusion from the map: compare with an open-sky value
       f = f.replace('radiance += iblRadiance;', 'radiance += iblRadiance * odSpecOcc;');
@@ -360,7 +462,7 @@ export function glassMaterial(shop: boolean): THREE.MeshPhysicalMaterial {
         float depth = ( hp.z - p.z ) / RD;
         ${shop ? 'float shelf = step( 0.5, fract( hp.y * 1.6 ) ) * step( 0.6, depth ); col = mix( col, vec3( 0.5 + 0.4 * r2, 0.45, 0.4 + 0.3 * r1 ), shelf * 0.6 );' : 'float bed = step( 0.55, depth ) * step( hp.y - lo.y, 0.75 ) * step( 0.35, r2 ); col = mix( col, vec3( 0.85, 0.83, 0.8 ) * ( 0.7 + 0.3 * r3 ), bed );'}
         // daylight inside: bright near the glass, falling off with depth; the warm lights at night
-        float day = 1.0 - uNight;
+        float day = ( 1.0 - uNight ) * uSkyK;
         vec3 light = day * vec3( 0.55, 0.58, 0.62 ) * shade * ${shop ? '1.4' : '1.0'};
         float on = step( ${shop ? '0.0' : '0.35'}, r3 );
         light += uNight * on * vec3( 1.0, 0.78, 0.5 ) * ${shop ? '1.8' : '1.1'} * ( 0.5 + 0.5 * shade );
@@ -397,7 +499,7 @@ export const TABLE: Record<string, OdOpts> = {
   od_asphalt: { name: 'od_asphalt', diff: 'asphalt_02_diff.webp', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.6, vertexColors: false, color: 0xd2d2d2 },
   od_paint: { name: 'od_paint', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.4, vertexColors: true, color: 0xd8d6cf, roughness: 1 },
   od_paintyel: { name: 'od_paintyel', nor: 'asphalt_02_nor.webp', tile: 3.5, kind: 'ground', color: 0xd9a21b, roughness: 0.6 },
-  od_bikelane: { name: 'od_bikelane', diff: 'asphalt_02_diff.webp', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.9, color: 0x6fae7c, vertexColors: false },
+  od_bikelane: { name: 'od_bikelane', diff: 'asphalt_02_diff.webp', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.9, color: 0x648a6c, vertexColors: false },
   od_grass: { name: 'od_grass', diff: 'leafy_grass_diff.webp', nor: 'leafy_grass_nor.webp', rough: 'leafy_grass_rough.webp', tile: 2.2, kind: 'ground', vertexColors: false, color: 0xe6f0d6 },
   od_sand: { name: 'od_sand', diff: 'coast_sand_01_diff.webp', nor: 'coast_sand_01_nor.webp', rough: 'coast_sand_01_rough.webp', tile: 3.6, kind: 'sand', vertexColors: false, color: 0xfff4e4 },
   od_coral: { name: 'od_coral', diff: 'coral_stone_wall_diff.webp', nor: 'coral_stone_wall_nor.webp', rough: 'coral_stone_wall_rough.webp', tile: 1.6, kind: 'wall', grime: 0.5, vertexColors: false },

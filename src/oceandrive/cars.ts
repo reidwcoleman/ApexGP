@@ -91,6 +91,7 @@ export class Cars {
   private glass = new THREE.MeshPhysicalMaterial({ color: 0x080b0e, metalness: 0.3, roughness: 0.02, transparent: true, opacity: 0.88, clearcoat: 1, envMapIntensity: 1.5 });
   private wheelMat = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.6, roughness: 0.4 });
   private walkers: { x: number; z: number }[] = [];
+  private nightSet = false;
 
   constructor(readonly scene: THREE.Scene, readonly env: Env, readonly ground: Ground, readonly sw: number, readonly kit: PeopleKit) {
     let s = 4242;
@@ -395,15 +396,21 @@ export class Cars {
     }
   }
 
+  /** pools of light ahead of every moving car (and yours) with its lights on */
+  headlights(out: THREE.Vector4[]) {
+    if (!this.lightsOn) return;
+    for (const c of this.list) {
+      if (!c.route && c !== this.driven) continue;
+      const s = Math.sin(c.yaw), co = Math.cos(c.yaw);
+      out.push(new THREE.Vector4(c.x + s * (c.halfL + 4.5), c.root.position.y + 0.9, c.z + co * (c.halfL + 4.5), 45));
+    }
+  }
+
+  private lightsOn = false;
   setNight(n: number) {
-    // the probes were taken by day: at dusk the paint and glass reflect a much darker street
-    const k = n ? 0.12 : 1;
-    this.glass.envMapIntensity = 1.5 * k;
-    for (const c of this.list)
-      c.root.traverse((o) => {
-        const m = (o as THREE.Mesh).material as THREE.MeshPhysicalMaterial | undefined;
-        if (m && m.isMeshPhysicalMaterial && m !== this.glass) m.envMapIntensity = 1.2 * k;
-      });
+    if (this.lightsOn === n > 0 && this.nightSet) return;
+    this.nightSet = true;
+    this.lightsOn = n > 0;
     for (const c of this.list) {
       const [h, t] = c.lamps;
       if (h) h.emissiveIntensity = 0.4 + n * 6;

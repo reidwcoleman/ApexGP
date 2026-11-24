@@ -16,7 +16,7 @@ TEST = 'test' in argv
 # only=lm_a,lm_b: bake just these (the others keep work/<name>.png from the last bake; their UVs come out the same)
 ONLY = next((a.split('=', 1)[1].split(',') for a in argv if a.startswith('only=')), None)
 sc = bpy.context.scene
-SIZES = {'lm_block': 4096, 'lm_gnear': 4096, 'lm_front2': 2048, 'lm_city': 2048, 'lm_gfar': 2048}
+SIZES = {'lm_block': 4096, 'lm_gnear': 4096, 'lm_front2': 2048, 'lm_city': 4096, 'lm_gfar': 2048}
 if TEST:
     SIZES = {'lm_gnear': 1024}
 SAMPLES = 64 if TEST else 128

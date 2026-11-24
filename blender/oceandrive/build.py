@@ -50,6 +50,7 @@ except Exception as e:
     print('font fallback', e)
     hotels.FONT = bpy.data.fonts.get('Bfont Regular') or None
 
+hotels.STREET = ground.in_road
 # ------------------------------------------------------------------ frontage
 front = {}
 for w in geo.WAYS:
@@ -112,15 +113,7 @@ for w in geo.WAYS:
     if area < 0:
         pts = pts[::-1]
     city_feet.append(pts)
-    col = hexcol(rng.choice(['#f2efe6', '#f4e8d8', '#e8eef0', '#f3e1e4', '#e6efe6', '#efe9d2', '#e2e6ee', '#f6f1e9']))
-    z0, z1 = hotels.SW, hotels.SW + h
-    for i in range(len(pts)):
-        a, b = pts[i], pts[(i + 1) % len(pts)]
-        nx, ny = b[1] - a[1], -(b[0] - a[0])
-        mb_city.face([(a[0], a[1], z0), (b[0], b[1], z0), (b[0], b[1], z1), (a[0], a[1], z1)], 'od_far', col, n=(nx, ny, 0))
-        # parapet lip
-        mb_city.face([(a[0], a[1], z1), (b[0], b[1], z1), (b[0] + nx * 0.0, b[1] + ny * 0.0, z1 + 0.6), (a[0], a[1], z1 + 0.6)], 'od_far', col, n=(nx, ny, 0))
-    mb_city.face([(p[0], p[1], z1) for p in pts], 'od_roof', WHITE, n=(0, 0, 1))
+    hotels.city_building(mb_city, pts, h, rng, placements, street=ground.in_road)
 
 # ------------------------------------------------------------------ ground
 rng = random.Random('ground')
@@ -303,6 +296,8 @@ if PREVIEW:
         'aerial': ((70.0, -130.0, 45.0), (-20.0, 0.0, 0.0)),
         'beach': ((160.0, 10.0, 2.0), (0.0, 0.0, 9.0)),
         'colony': ((4.0, 2.0, 1.7), (-12.0, 8.0, 9.0)),
+        'eighth': ((-20.0, 68.0, 1.8), (-100.0, 68.0, 6.0)),
+        'roofs': ((-30.0, -20.0, 30.0), (-90.0, 40.0, 5.0)),
     }
     if len(argv) > 1:
         cams = {k: v for k, v in cams.items() if k in argv}

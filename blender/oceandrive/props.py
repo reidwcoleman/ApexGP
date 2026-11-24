@@ -122,9 +122,30 @@ def vball(mb, x, y, z, rot):
         mb.cyl((px, py, z), 0.05, 0.05, 2.55, 8, 'od_metal', hexcol('#d8d8d8'))
     a = (x - (-sn) * 4.9, y - cs * 4.9)
     b = (x + (-sn) * 4.9, y + cs * 4.9)
-    for zz, hh in ((z + 2.43, 0.07),):
-        mb.face([(a[0], a[1], zz - hh), (b[0], b[1], zz - hh), (b[0], b[1], zz + hh), (a[0], a[1], zz + hh)], 'od_fabric', WHITE, n=(cs, sn, 0))
-        mb.face([(a[0], a[1], zz - hh), (b[0], b[1], zz - hh), (b[0], b[1], zz + hh), (a[0], a[1], zz + hh)], 'od_fabric', WHITE, n=(-cs, -sn, 0))
+    # the net: white top and bottom tapes, a mesh of cords between (real geometry: it survives export)
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    L = math.hypot(dx, dy)
+    ux, uy = dx / L, dy / L
+    ax_, ay_, az_ = (ux, uy, 0), (cs, sn, 0), (0, 0, 1)
+    mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+    top, bot = z + 2.43, z + 1.55
+    mb.obox((mx, my, top), ax_, ay_, az_, L / 2, 0.006, 0.035, 'od_fabric', WHITE)
+    mb.obox((mx, my, bot), ax_, ay_, az_, L / 2, 0.006, 0.025, 'od_fabric', WHITE)
+    k = 0.1
+    t = 0.0
+    while t <= L:
+        px, py = a[0] + ux * t, a[1] + uy * t
+        mb.obox((px, py, (top + bot) / 2), ax_, ay_, az_, 0.006, 0.004, (top - bot) / 2, 'od_metal', hexcol('#2a2a2a'))
+        t += k * 1.0
+    zz = bot
+    while zz < top:
+        mb.obox((mx, my, zz), ax_, ay_, az_, L / 2, 0.004, 0.006, 'od_metal', hexcol('#2a2a2a'))
+        zz += 0.1
+    # guy lines to the sand
+    for s in (-1, 1):
+        px, py = x + (-sn) * s * 4.9, y + cs * s * 4.9
+        ex, ey = x + (-sn) * s * 6.6, y + cs * s * 6.6
+        mb.cyl((px, py, z + 2.4), 0.008, 0.008, math.hypot(1.7, 2.4), 4, 'od_metal', hexcol('#cfcfcf'), axis=(ex - px, ey - py, -2.4))
 
 
 def stop_sign(mb, x, y, z, facing):

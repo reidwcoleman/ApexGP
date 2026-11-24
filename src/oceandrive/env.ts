@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { CSM } from 'three/examples/jsm/csm/CSM.js';
 import { U } from './materials.ts';
 
@@ -10,7 +9,6 @@ import { U } from './materials.ts';
  * agree. Shadows: three cascades (CSM) out to 320 m, every lit material registered with them.
  */
 
-const BASE = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'oceandrive/';
 
 // sun direction in three's frame: toward the sun (x east-ish over the sea, y up, z = -north)
 const SUN_AZ = THREE.MathUtils.degToRad(-36);
@@ -26,7 +24,7 @@ export class Env {
   readonly fog: THREE.FogExp2;
   /** the backdrop: the sky photo with its highlights rolled off, and a drawn sun */
   readonly dome: THREE.Mesh;
-  private readonly domeMat: THREE.ShaderMaterial;
+  readonly domeMat: THREE.ShaderMaterial;
 
   constructor(readonly renderer: THREE.WebGLRenderer, readonly scene: THREE.Scene, readonly camera: THREE.PerspectiveCamera) {
     U.uSunDir.value.copy(this.toSun);
@@ -53,15 +51,32 @@ export class Env {
       l.shadow.radius = 2;
     }
     this.csm.fade = true;
+    fixCsmChunk();
     // haze: the Atlantic air at 5 pm, a little milky
-    this.fog = new THREE.FogExp2(0xb9c6d2, 0.0011);
+    this.fog = new THREE.FogExp2(0xb9c6d2, 0); // the haze is a post pass now (post.ts AtmosphereEffect)
     scene.fog = this.fog;
     this.domeMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
       depthTest: false,
       fog: false,
-      uniforms: { tSky: { value: null }, uSun: { value: this.toSun }, uK: { value: 1 }, uSunK: { value: 1 } },
+      uniforms: {
+        tSky: { value: null },
+        uSun: { value: this.toSun },
+        uK: { value: 1 },
+        uSunK: { value: 1 },
+        uSunTint: { value: new THREE.Vector3(1, 0.86, 0.66) },
+        uCloud: { value: 0 },
+        uCloudLit: { value: new THREE.Vector3(1.6, 1.5, 1.4) },
+        uCloudAmb: { value: new THREE.Vector3(0.7, 0.75, 0.85) },
+        uStars: { value: 0 },
+        uFlash: { value: 0 },
+        uHaze: { value: 0 },
+        uHazeCol: { value: new THREE.Vector3(0.5, 0.55, 0.6) },
+        uNightSky: { value: 0 },
+        uMoon: { value: 0 },
+        uTime: U.uTime,
+      },
       vertexShader: /* glsl */ `
         varying vec3 vDir;
         void main() {
@@ -74,22 +89,47 @@ export class Env {
         uniform vec3 uSun;
         uniform float uK;
         uniform float uSunK;
+        uniform vec3 uSunTint;
+        uniform float uCloud;
+        uniform vec3 uCloudLit;
+        uniform vec3 uCloudAmb;
+        uniform float uStars;
+        uniform float uFlash;
+        uniform float uHaze;
+        uniform vec3 uHazeCol;
+        uniform float uNightSky;
+        uniform float uMoon;
+        uniform float uTime;
         varying vec3 vDir;
         #include <common>
+        float h12( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
+        float h13( vec3 p3 ) { p3 = fract( p3 * 0.1031 ); p3 += dot( p3, p3.zyx + 31.32 ); return fract( ( p3.x + p3.y ) * p3.z ); }
+        float vn( vec2 x ) { vec2 i = floor( x ); vec2 f = fract( x ); f = f * f * ( 3.0 - 2.0 * f );
+          return mix( mix( h12( i ), h12( i + vec2( 1, 0 ) ), f.x ), mix( h12( i + vec2( 0, 1 ) ), h12( i + vec2( 1, 1 ) ), f.x ), f.y ); }
+        float fbm( vec2 p ) { float s = 0.0, a = 0.5; for ( int i = 0; i < 6; i ++ ) { s += a * vn( p ); p = mat2( 1.6, 1.2, -1.2, 1.6 ) * p + 7.3; a *= 0.5; } return s; }
         vec3 photo( vec3 d ) {
           vec2 uv = vec2( atan( d.z, d.x ) * RECIPROCAL_PI2 + 0.5, asin( clamp( d.y, -1.0, 1.0 ) ) * RECIPROCAL_PI + 0.5 );
           vec3 c = texture2D( tSky, uv ).rgb * uK;
           float m = max( c.r, max( c.g, c.b ) );
-          if ( m > 2.5 ) c *= ( 2.5 + log( 1.0 + ( m - 2.5 ) ) * 0.6 ) / m;
+          float lim = 2.5 * max( uK, 0.02 );
+          if ( m > lim ) c *= ( lim + log( 1.0 + ( m - lim ) ) * 0.6 * uK ) / m;
           return c;
+        }
+        float cloudDens( vec2 p ) {
+          vec2 q = vec2( fbm( p * 0.6 + uTime * 0.01 ), fbm( p * 0.6 - 3.7 ) );
+          float n = fbm( p + q * 1.3 + vec2( uTime * 0.006, uTime * 0.002 ) );
+          float cov = 1.0 - uCloud;
+          return smoothstep( cov * 0.75, cov * 0.75 + 0.28, n );
         }
         void main() {
           vec3 d = normalize( vDir );
           vec3 c = photo( d );
+          // night: the photo's last afterglow fades to a deep, slightly blue sky
+          c = mix( c, vec3( dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) ) * vec3( 0.45, 0.6, 1.0 ) * 0.7, uNightSky );
           float cs = dot( d, uSun );
           // the photo's own sun (with its lens starburst) is replaced by the sky from just outside it,
           // carried inward; a clean disc and glow are drawn over that
-          if ( cs > 0.97 ) {
+          if ( cs > 0.97 && uSunK > 0.0 ) {
             vec3 t1 = normalize( cross( uSun, vec3( 0.0, 1.0, 0.0 ) ) ), t2 = cross( t1, uSun );
             vec3 avg = vec3( 0.0 );
             for ( int i = 0; i < 12; i ++ ) {
@@ -98,9 +138,45 @@ export class Env {
             }
             c = mix( c, avg / 12.0, smoothstep( 0.975, 0.992, cs ) );
           }
+          // stars (night)
+          if ( uStars > 0.0 && d.y > 0.0 ) {
+            vec3 sd = d * 420.0;
+            vec3 cell = floor( sd );
+            float h = h13( cell );
+            if ( h > 0.996 ) {
+              vec3 f = fract( sd ) - 0.5;
+              float tw = 0.7 + 0.3 * sin( uTime * ( 2.0 + h * 40.0 ) + h * 100.0 );
+              c += vec3( 0.9, 0.95, 1.0 ) * smoothstep( 0.22, 0.0, length( f ) ) * ( h - 0.996 ) * 250.0 * tw * uStars * smoothstep( 0.0, 0.25, d.y );
+            }
+          }
+          float sunVis = 1.0;
+          // clouds: a layer at altitude, warped fbm, lit from the sun's side, silver at the rims near the sun
+          if ( uCloud > 0.0 && d.y > -0.05 ) {
+            vec2 p = d.xz / ( d.y + 0.12 ) * 1.4;
+            float dens = cloudDens( p );
+            vec2 toS = normalize( uSun.xz + 1e-4 ) * 0.09;
+            float ds = cloudDens( p + toS ) * 0.6 + cloudDens( p + toS * 2.5 ) * 0.4;
+            float lit = exp( -ds * 2.2 );
+            float rim = pow( max( cs, 0.0 ), 6.0 ) * ( 1.0 - dens ) * 2.5;
+            vec3 col = uCloudAmb * ( 1.0 - 0.45 * dens ) + uCloudLit * ( lit * 0.85 + rim );
+            col = mix( col, uHazeCol, 1.0 - smoothstep( 0.0, 0.3, d.y ) );
+            float a = dens * smoothstep( -0.03, 0.1, d.y );
+            c = mix( c, col, a );
+            sunVis = 1.0 - a * 0.97;
+          }
+          if ( uMoon > 0.0 ) {
+            // the moon: a pale disc with faint maria and a soft halo (it rides where the sun would be)
+            float md = smoothstep( 0.99995, 0.99997, cs );
+            vec3 t1 = normalize( cross( uSun, vec3( 0.0, 1.0, 0.0 ) ) ), t2 = cross( t1, uSun );
+            vec2 mp = vec2( dot( d, t1 ), dot( d, t2 ) ) * 180.0;
+            float maria = 0.75 + 0.25 * vn( mp * 0.9 + 3.0 );
+            c += vec3( 0.85, 0.9, 1.0 ) * ( md * 3.5 * maria + pow( max( cs, 0.0 ), 2000.0 ) * 0.25 + pow( max( cs, 0.0 ), 60.0 ) * 0.015 ) * uMoon * sunVis;
+          }
           float disc = smoothstep( 0.99996, 0.99998, cs );
-          vec3 sunC = vec3( 1.0, 0.86, 0.66 );
-          c += sunC * ( disc * 40.0 + pow( max( cs, 0.0 ), 3000.0 ) * 4.0 + pow( max( cs, 0.0 ), 400.0 ) * 0.9 + pow( max( cs, 0.0 ), 50.0 ) * 0.3 ) * uSunK;
+          c += uSunTint * ( disc * 40.0 + pow( max( cs, 0.0 ), 3000.0 ) * 4.0 + pow( max( cs, 0.0 ), 400.0 ) * 0.9 * sunVis + pow( max( cs, 0.0 ), 50.0 ) * 0.3 ) * uSunK * mix( 0.15, 1.0, sunVis );
+          // rain: the horizon greys out; lightning lights the whole sky
+          c = mix( c, uHazeCol, uHaze * ( 1.0 - smoothstep( -0.05, 0.45, d.y ) ) );
+          c += uFlash * vec3( 0.75, 0.8, 1.0 ) * ( 0.6 + 0.4 * d.y );
           gl_FragColor = vec4( c, 1.0 );
           #include <colorspace_fragment>
         }`,
@@ -111,57 +187,11 @@ export class Env {
     scene.add(this.dome);
   }
 
-  private skies = new Map<string, { hdr: THREE.DataTexture; env: THREE.Texture }>();
-  private dusk = false;
-
-  /** day (late afternoon sun) or dusk (blue hour, sun down, the neon on) */
-  async setDusk(on: boolean) {
-    this.dusk = on;
-    const file = on ? 'sky/qwantani_dusk_2_puresky.hdr' : 'sky/qwantani_late_afternoon_puresky.hdr';
-    let s = this.skies.get(file);
-    if (!s) {
-      const hdr = await new HDRLoader().setDataType(THREE.HalfFloatType).loadAsync(BASE + file);
-      hdr.mapping = THREE.EquirectangularReflectionMapping;
-      const pm = new THREE.PMREMGenerator(this.renderer);
-      const env = pm.fromEquirectangular(clampSun(hdr, 20)).texture;
-      pm.dispose();
-      this.skies.set(file, (s = { hdr, env }));
-    }
-    if (on !== this.dusk) return;
-    this.hdr = s.hdr;
-    this.scene.background = null;
-    this.domeMat.uniforms.tSky.value = s.hdr;
-    this.domeMat.uniforms.uK.value = on ? 0.13 : 1;
-    this.domeMat.uniforms.uSunK.value = on ? 0 : 1;
-    this.scene.environment = s.env;
-    // the dusk sky file is brighter than a real blue hour: bring it down to one
-    this.scene.backgroundIntensity = on ? 0.13 : 1;
-    this.scene.environmentIntensity = on ? 0.09 : 1;
-    for (const l of this.csm.lights) l.intensity = on ? 0 : Math.max(...SUN_E);
-    U.uNight.value = on ? 1 : 0;
-    U.uLmTint.value.set(...((on ? [0.24, 0.22, 0.36] : [1.55, 1.52, 1.5]) as [number, number, number]));
-    this.fog.color.set(on ? 0x2a2a44 : 0xb9c6d2);
-  }
-
-  async loadSky(file: string) {
-    const hdr = await new HDRLoader().setDataType(THREE.HalfFloatType).loadAsync(BASE + file);
-    hdr.mapping = THREE.EquirectangularReflectionMapping;
-    this.hdr = hdr;
-    const pm = new THREE.PMREMGenerator(this.renderer);
-    // the IBL without the sun disc (the directional light carries it)
-    this.envMap = pm.fromEquirectangular(clampSun(hdr, 20)).texture;
-    pm.dispose();
-    this.scene.background = null;
-    this.domeMat.uniforms.tSky.value = hdr;
-    this.scene.environment = this.envMap;
-    this.skies.set(file, { hdr, env: this.envMap });
-    this.scene.backgroundIntensity = 1;
-    this.scene.environmentIntensity = 1;
-  }
-
   /** reflection probes: the street as seen from a few points, filtered for glossy reflections */
   readonly probes: { pos: THREE.Vector3; tex: THREE.Texture }[] = [];
   bakeProbes(points: THREE.Vector3[], hide: THREE.Object3D[]) {
+    for (const p of this.probes) p.tex.dispose();
+    this.probes.length = 0;
     const pm = new THREE.PMREMGenerator(this.renderer);
     const rt = new THREE.WebGLCubeRenderTarget(256, { type: THREE.HalfFloatType });
     const cam = new THREE.CubeCamera(0.3, 2500, rt);
@@ -226,32 +256,23 @@ export class Env {
   }
 }
 
-/** a copy of the sky with the sun disc clamped out (for the PMREM) */
-function clampSun(hdr: THREE.DataTexture, max: number): THREE.DataTexture {
-  const img = hdr.image as { data: Uint16Array; width: number; height: number };
-  const src = img.data;
-  const out = new Uint16Array(src.length);
-  const maxH = THREE.DataUtils.toHalfFloat(max);
-  for (let i = 0; i < src.length; i++) {
-    // half floats: positive values order like their bit patterns
-    out[i] = (i & 3) === 3 ? src[i] : src[i] > maxH ? maxH : src[i];
-  }
-  // a "pure sky" has a bright haze where the ground would be: below the horizon, light that bounced
-  // off sand, asphalt and lawn instead (about a fifth of it), so nothing is lit brightly from below
-  const w = img.width, h = img.height;
-  for (let y = 0; y < h; y++) {
-    // an .hdr stores its top row first (flipY puts it at v = 1): v here is the height from the nadir
-    const v = 1 - (y + 0.5) / h;
-    if (v >= 0.5) continue;
-    const k = 0.22 + 0.78 * Math.max(0, (v - 0.47) / 0.03);
-    for (let x = 0; x < w; x++) {
-      const o = (y * w + x) * 4;
-      for (let c = 0; c < 3; c++) out[o + c] = THREE.DataUtils.toHalfFloat(THREE.DataUtils.fromHalfFloat(out[o + c]) * k * (c === 0 ? 1.05 : c === 2 ? 0.85 : 1));
-    }
-  }
-  const t = new THREE.DataTexture(out, img.width, img.height, THREE.RGBAFormat, THREE.HalfFloatType);
-  t.mapping = THREE.EquirectangularReflectionMapping;
-  t.colorSpace = hdr.colorSpace;
-  t.needsUpdate = true;
-  return t;
+/**
+ * three r186's CSM swaps its own copy of lights_fragment_begin into ShaderChunk, and that copy lacks
+ * the DFG lookup the stock chunk now does (material.dfg): left at zero, it multiplies every
+ * image-based reflection by nothing. Put the lookup back (the stock chunk's own block).
+ */
+function fixCsmChunk() {
+  const stock = THREE.ShaderChunk.lights_fragment_begin;
+  if (stock.includes('material.dfg =')) return;
+  const block = /* glsl */ `
+#ifdef STANDARD
+	float dotNVms = saturate( dot( geometryNormal, geometryViewDir ) );
+	material.dfg = texture2D( dfgLUT, vec2( material.roughness, dotNVms ) ).rg;
+	#if ( NUM_DIR_LIGHTS > 0 || NUM_POINT_LIGHTS > 0 || NUM_SPOT_LIGHTS > 0 )
+		float EssMs = material.dfg.x + material.dfg.y;
+		material.multiScatteringCompensation = 1.0 + material.specularColorBlended * ( 1.0 / EssMs - 1.0 );
+	#endif
+#endif
+IncidentLight directLight;`;
+  THREE.ShaderChunk.lights_fragment_begin = stock.replace('IncidentLight directLight;', block);
 }

@@ -21,6 +21,10 @@ export class Hud {
       #odhud .speed { position: absolute; right: 36px; bottom: 96px; font-size: 54px; font-weight: 800; font-style: italic; opacity: 0; transition: opacity .3s; text-shadow: 0 2px 16px rgba(0,0,0,.4); }
       #odhud .speed small { font-size: 18px; margin-left: 4px; letter-spacing: .1em; }
       #odhud .speed.on { opacity: 1; }
+      #odhud .sky { position: absolute; left: 50%; top: 9%; transform: translateX(-50%); text-align: center; opacity: 0; transition: opacity .6s; text-shadow: 0 2px 14px rgba(0,0,0,.5); }
+      #odhud .sky.on { opacity: 1; }
+      #odhud .sky b { display: block; font-size: 34px; font-weight: 800; font-style: italic; text-transform: uppercase; letter-spacing: .03em; }
+      #odhud .sky span { font-size: 15px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; opacity: .85; }
       #odhud .credit { position: absolute; left: 30px; top: 22px; font-size: 12px; opacity: .45; letter-spacing: .04em; }
     `;
     document.head.appendChild(css);
@@ -28,14 +32,28 @@ export class Hud {
     el.id = 'odhud';
     el.innerHTML = `
       <div class="loc"><b>Ocean Drive</b><span>7th – 8th Street · Miami Beach</span></div>
-      <div class="help"><kbd>W A S D</kbd> move &nbsp; <kbd>Shift</kbd> sprint &nbsp; <kbd>C</kbd> stroll &nbsp; <kbd>Space</kbd> jump<br><kbd>Mouse</kbd> look (click first) &nbsp; <kbd>F</kbd> get in / out of a car &nbsp; <kbd>T</kbd> day / dusk &nbsp; <kbd>H</kbd> hide HUD</div>
+      <div class="help"><kbd>W A S D</kbd> move &nbsp; <kbd>Shift</kbd> sprint &nbsp; <kbd>C</kbd> stroll &nbsp; <kbd>Space</kbd> jump<br><kbd>Mouse</kbd> look (click first) &nbsp; <kbd>F</kbd> get in / out of a car &nbsp; <kbd>T</kbd> time of day &nbsp; <kbd>Y</kbd> weather &nbsp; <kbd>H</kbd> hide HUD</div>
       <div class="prompt"><kbd style="border:1px solid #fff;border-radius:4px;padding:0 7px;margin-right:8px">F</kbd>Get in</div>
       <div class="speed">0<small>KM/H</small></div>
-      <div class="credit">Map © OpenStreetMap contributors · scans: Poly Haven (CC0) · people: Microsoft Rocketbox · car: Ferrari 458 by vicent091036 (CC BY 4.0)</div>`;
+      <div class="sky"><b></b><span></span></div>
+      <div class="credit">Map © OpenStreetMap contributors · scans: Poly Haven (CC0) · people: Microsoft Rocketbox · car: Ferrari 458 by vicent091036 (CC BY 4.0) · skies: Poly Haven (CC0)</div>`;
     parent.appendChild(el);
     this.prompt = el.querySelector('.prompt')!;
     this.speed = el.querySelector('.speed')!;
     this.help = el.querySelector('.help')!;
+  }
+
+  private skyT = 0 as unknown as ReturnType<typeof setTimeout>;
+  /** announce the time of day and the weather for a moment */
+  flash(time: string, weather: string) {
+    const el = this.el.querySelector('.sky') as HTMLElement;
+    const T: Record<string, string> = { day: 'Afternoon', sunset: 'Golden hour', dusk: 'Blue hour', night: 'Night' };
+    const W: Record<string, string> = { clear: 'Clear skies', clouds: 'Clouds rolling in', rain: 'Tropical storm' };
+    el.querySelector('b')!.textContent = T[time] ?? time;
+    el.querySelector('span')!.textContent = W[weather] ?? weather;
+    el.classList.add('on');
+    clearTimeout(this.skyT);
+    this.skyT = setTimeout(() => el.classList.remove('on'), 2600);
   }
 
   toggle() {

@@ -127,7 +127,7 @@ export function buildCar(m: ModelSpec): CarGeometry {
   const pillars = tall ? [] : m.id === 'pickup' ? [(cowl + roofR) / 2 - 0.1] : [(roofF + roofR) / 2 + 0.05, ...(m.id === 'suv' || m.id === 'gwagon' || m.id === 'policeSuv' ? [roofR + 0.05] : [])];
   const nearPillar = (z: number) => pillars.some((p) => Math.abs(z - p) < 0.06);
   const stations: Station[] = [];
-  const nZ = m.id === 'bus' ? 40 : 46;
+  const nZ = m.id === 'bus' ? 48 : 88;
   for (let k = 0; k <= nZ; k++) {
     const z = hl - (k / nZ) * m.L;
     const w = widthAt(z);
@@ -141,8 +141,9 @@ export function buildCar(m: ModelSpec): CarGeometry {
     const ylow = ya > 0 ? Math.min(Math.max(yb, ya), ybelt - 0.08) : yb;
     // the side: from the sill (tucked under) swelling to the shoulder crease at the belt
     const side: [number, number][] = [];
-    for (let i = 0; i < 6; i++) {
-      const t = i / 5;
+    const NS = 10;
+    for (let i = 0; i < NS; i++) {
+      const t = i / (NS - 1);
       const y = ylow + (ybelt - ylow) * t;
       const tuck = ya > 0 ? 0 : (1 - t) * (1 - t) * 0.07 * (0.5 + round);
       const swell = Math.sin(t * Math.PI) * 0.018 * round;
@@ -151,6 +152,14 @@ export function buildCar(m: ModelSpec): CarGeometry {
     const sh: [number, number] = [w - 0.012, ybelt + 0.012];
     const gMid: [number, number] = [THREE.MathUtils.lerp(w - 0.01, roofW, 0.55) + 0.02 * round * gh, ybelt + (ytop - ybelt) * 0.55];
     const rEdge: [number, number] = [roofW, ytop - 0.035 * (0.4 + round)];
+    // the greenhouse as a smooth curve through belt, mid and roof edge (5 points, not 3)
+    const gq = (t: number): [number, number] => {
+      const a = sh, b = gMid, c = rEdge;
+      const u = 1 - t;
+      // quadratic through b at t = 0.5: control point 2b - (a + c) / 2
+      const px = 2 * b[0] - (a[0] + c[0]) / 2, py = 2 * b[1] - (a[1] + c[1]) / 2;
+      return [u * u * a[0] + 2 * u * t * px + t * t * c[0], u * u * a[1] + 2 * u * t * py + t * t * c[1]];
+    };
     stations.push({
       z,
       bands: [
@@ -161,11 +170,11 @@ export function buildCar(m: ModelSpec): CarGeometry {
         // 2 the side
         { pts: side },
         // 3 the shoulder crease
-        { pts: [side[5], sh] },
+        { pts: [side[NS - 1], sh] },
         // 4 the greenhouse (glass in the glass span)
-        { pts: [sh, gMid, rEdge] },
+        { pts: [sh, gq(0.25), gMid, gq(0.75), rEdge] },
         // 5 the roof
-        { pts: [rEdge, [roofW * 0.55, ytop - 0.005 * round], [0, ytop + 0.01 * round]] },
+        { pts: [rEdge, [roofW * 0.82, ytop - 0.012 * round], [roofW * 0.55, ytop - 0.005 * round], [0, ytop + 0.01 * round]] },
       ],
     });
   }

@@ -12,6 +12,9 @@ if [[ "$1" == "build" ]]; then blender -b --factory-startup -P build.py > work/b
 grep -E "lm_|done" work/bake.log
 (cd work && blender -b oceandrive_baked.blend -P ../export.py > export.log 2>&1)
 grep -E "decimated|heightmap|glb|done|Error" work/export.log
+# quantize + meshopt (Blender's own meshopt pass barely compresses): ~half the size
+npx -y @gltf-transform/cli@4 meshopt ../../public/oceandrive/block.glb work/block_opt.glb --level medium > work/pack.log 2>&1 && mv work/block_opt.glb ../../public/oceandrive/block.glb
+tail -1 work/pack.log
 python3 - <<'PY'
 from PIL import Image
 import json, os

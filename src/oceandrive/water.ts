@@ -30,10 +30,19 @@ const WAVES: [number, number, number, number][] = [
   [Math.PI + 1.4, 3.1, 0.018, 0.45],
 ];
 
+/** the sea's weather: swell size, light from the sky, colour lost under grey, the sky photo's level */
+export const SEA = {
+  uSeaState: { value: 1 },
+  uSkyE: { value: new THREE.Vector3(1.1, 1.35, 1.8) },
+  uGrey: { value: 0 },
+  uSkyPhotoK: { value: 1 },
+};
+
 const COMMON = /* glsl */ `
 uniform float uTime;
 uniform float uWaterX;
 uniform float uSwash;
+uniform float uSeaState;
 uniform vec4 uW[8];
 float seaDepth( float x ) { return max( 0.0, ( x - uWaterX ) * 0.035 ); }
 // Gerstner sum: displacement and normal; shoaling grows the swell over the bar, the beach takes it out
@@ -49,7 +58,7 @@ void gerstner( vec2 p, float fade, out vec3 disp, out vec3 nrm, out float crest 
     float k = 6.2831853 / w.y;
     float c = sqrt( 9.81 / k );
     float f = k * ( dot( D, p ) - c * uTime ) + float( i ) * 1.3;
-    float a = w.z * ( i < 3 ? shoal : mix( 1.0, shoal, 0.5 ) ) * fade;
+    float a = w.z * ( i < 3 ? shoal : mix( 1.0, shoal, 0.5 ) ) * fade * ( i < 4 ? uSeaState : sqrt( uSeaState ) );
     float q = w.w * ( i < 3 ? mix( 1.0, 1.35, 1.0 - smoothstep( 1.0, 6.0, d ) ) : 1.0 );
     q = min( q, 0.95 ) / ( k * max( a, 1e-3 ) * 8.0 );
     float S = sin( f ), C = cos( f );
@@ -97,7 +106,7 @@ export function makeSea(waterX: number, sea: number, hdr: THREE.Texture, sunColo
         float crest = 0.0;
         #ifdef DISPLACED
           float r = max( abs( w.x - uCenter.x ), abs( w.z - uCenter.y ) );
-          float fade = 1.0 - smoothstep( uFadeR.x, uFadeR.y, r );
+          float fade = 1.0 - smoothstep( uFadeR.x / mix( 1.0, 1.8, clamp( uSeaState - 1.0, 0.0, 1.0 ) ), uFadeR.y, r );
           gerstner( w.xz, fade, disp, n, crest );
           disp *= smoothstep( 0.0, 0.5, seaDepth( w.x ) + 0.05 );
           w.xyz += disp;
@@ -115,6 +124,10 @@ export function makeSea(waterX: number, sea: number, hdr: THREE.Texture, sunColo
       uniform vec3 uSunCol;
       uniform vec3 uSunDir;
       uniform float uNight;
+      uniform vec3 uSkyE;
+      uniform float uSkyPhotoK;
+      uniform float uGrey;
+      uniform float uRain;
       uniform vec2 uCenter;
       uniform vec2 uFadeR;
       varying vec3 vW;
@@ -150,32 +163,35 @@ export function makeSea(waterX: number, sea: number, hdr: THREE.Texture, sunColo
           vec3 dsp;
           gerstner( vW.xz, 1.0 - smoothstep( 300.0, 1500.0, dist ), dsp, N, crest );
         #endif
-        vec2 rp = ripples( vW.xz, uTime ) * 0.09 * detail;
+        vec2 rp = ripples( vW.xz, uTime ) * 0.09 * detail * ( 1.0 + 0.6 * ( uSeaState - 1.0 ) );
+        if ( uRain > 0.0 ) rp += ( vec2( vn( vW.xz * 9.0 + uTime * 3.0 ), vn( vW.xz * 9.0 - uTime * 3.3 + 5.0 ) ) - 0.5 ) * 0.35 * uRain * detail;
         N = normalize( N + vec3( -rp.x, 0.0, -rp.y ) );
         float depth = seaDepth( vW.x );
         float dShore = vW.x - uWaterX;
         vec3 R = reflect( V, N );
         R.y = abs( R.y );
-        vec3 sky = min( texture2D( tSky, eqUv( R ) ).rgb, vec3( 40.0 ) ) * mix( 1.0, 0.14, uNight );
+        vec3 sky = min( texture2D( tSky, eqUv( R ) ).rgb * uSkyPhotoK, vec3( 40.0 ) );
         float cosi = max( dot( -V, N ), 0.0 );
         float F = 0.02 + 0.98 * pow( 1.0 - cosi, 5.0 );
-        F = min( F, 0.55 ) * 0.8;
+        F = min( F, 0.92 );
         vec3 shallow = vec3( 0.30, 0.86, 0.78 );
         vec3 mid = vec3( 0.05, 0.46, 0.52 );
         vec3 deep = vec3( 0.015, 0.12, 0.2 );
         vec3 body = mix( shallow, mid, smoothstep( 0.3, 2.4, depth ) );
         body = mix( body, deep, smoothstep( 2.4, 18.0, depth ) );
-        float sunUp = max( uSunDir.y, 0.0 ) * ( 1.0 - uNight );
-        vec3 E = uSunCol * sunUp + vec3( 1.1, 1.35, 1.8 ) * mix( 1.0, 0.1, uNight );
+        float sunUp = max( uSunDir.y, 0.0 );
+        vec3 E = uSunCol * sunUp + uSkyE;
+        // under a grey sky the sea loses its colour
+        body = mix( body, vec3( dot( body, vec3( 0.3, 0.5, 0.2 ) ) ) * vec3( 0.75, 0.9, 0.95 ), uGrey * 0.75 );
         body *= E * 0.3183;
         float back = pow( max( dot( V, normalize( uSunDir * vec3( 1.0, 0.3, 1.0 ) ) ), 0.0 ), 3.0 );
         float thin = clamp( vH * 1.6 + 0.35, 0.0, 1.0 ) * smoothstep( 0.2, 1.5, depth );
         vec3 sss = vec3( 0.12, 0.75, 0.6 ) * uSunCol * sunUp * back * thin * 0.22;
         float rs = max( dot( R, uSunDir ), 0.0 );
-        vec3 spec = uSunCol * ( pow( rs, 1200.0 ) * 18.0 + pow( rs, 140.0 ) * 0.9 ) * ( 0.3 + 0.7 * detail ) * ( 1.0 - uNight );
+        vec3 spec = uSunCol * ( pow( rs, 1200.0 ) * 18.0 + pow( rs, 140.0 ) * 0.9 ) * ( 0.3 + 0.7 * detail );
         float fn = fbm( vW.xz * vec2( 0.55, 0.35 ) + vec2( uTime * 0.25, 0.0 ) );
         float fd = fbm( vW.xz * 2.4 - uTime * 0.1 );
-        float whitecap = smoothstep( 0.55, 0.95, crest ) * smoothstep( 0.35, 0.65, fn );
+        float whitecap = smoothstep( 0.55 - 0.18 * ( uSeaState - 1.0 ), 0.95 - 0.2 * ( uSeaState - 1.0 ), crest ) * smoothstep( 0.35, 0.65, fn );
         float surf = ( 1.0 - smoothstep( 0.6, 2.2, depth ) ) * smoothstep( 0.15, 0.9, vH + 0.4 * fn ) * smoothstep( 0.3, 0.6, fd );
         // the swash edge: where the sheet over the sand thins out (the beach rises ~2 cm per metre)
         float thick = dShore < 0.0 ? uSwash + dShore * 0.02 : depth + uSwash;
@@ -198,6 +214,9 @@ export function makeSea(waterX: number, sea: number, hdr: THREE.Texture, sunColo
   m.uniforms.uSwash = U.uSwash;
   m.uniforms.uSunDir = U.uSunDir;
   m.uniforms.uNight = U.uNight;
+  m.uniforms.uSunCol = U.uSunCol;
+  m.uniforms.uRain = U.uRain;
+  Object.assign(m.uniforms, SEA);
   return m;
 }
 

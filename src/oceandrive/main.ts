@@ -2,7 +2,7 @@
 // built from OpenStreetMap in Blender, lit by a Cycles bake, walked and driven in the browser.
 import * as THREE from 'three';
 import { Env } from './env.ts';
-import { loadWorld } from './world.ts';
+import { loadWorld, makeNets } from './world.ts';
 import { Ground } from './height.ts';
 import { Input } from './input.ts';
 import { Player } from './player.ts';
@@ -18,6 +18,9 @@ import '@fontsource/barlow-condensed/800-italic.css';
 import { Hud } from './hud.ts';
 import { Ambience } from './audio.ts';
 import { Gulls } from './gulls.ts';
+import { Sky, TIMES, WEATHERS, type TimeOfDay, type Weather } from './sky.ts';
+import { Rain } from './rain.ts';
+import { SEA } from './water.ts';
 
 const BASE = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'oceandrive/';
 const Q = new URLSearchParams(location.search);
@@ -44,13 +47,18 @@ async function boot() {
 
   step('Reading the sky', 0.05);
   const env = new Env(renderer, scene, camera);
-  await env.loadSky('sky/qwantani_late_afternoon_puresky.hdr');
+  const sky = new Sky(env, renderer);
+  const time0 = (TIMES as string[]).includes(Q.get('time') ?? '') ? (Q.get('time') as TimeOfDay) : 'day';
+  const weather0 = (WEATHERS as string[]).includes(Q.get('weather') ?? '') ? (Q.get('weather') as Weather) : 'clear';
+  await sky.init(time0, weather0);
   step('Painting the hotels', 0.15);
   setPeopleCore(PEOPLE);
   setPeopleRest(false);
   const peopleP = loadPeople();
   const [world, ground] = await Promise.all([loadWorld(env, renderer, (f, label) => step(label, 0.15 + f * 0.7)), Ground.load(BASE + 'height.bin')]);
   scene.add(world.root);
+  const nets = makeNets(world.meta);
+  scene.add(nets);
   const near = new NearSea(makeSea(world.meta.water_x, world.meta.sea, env.hdr!, world.sea.uniforms.uSunCol.value, true), world.sea, world.meta.water_x);
   scene.add(near.mesh);
   U.uSea.value = world.meta.sea;
@@ -72,6 +80,20 @@ async function boot() {
   const peds = new Peds(scene, env, kit, ground);
   peds.spawn();
   const gulls = new Gulls(scene);
+  const rain = new Rain(scene);
+  sky.onSwap((info) => {
+    world.sea.uniforms.tSky.value = info.hdr;
+    near.mat.uniforms.tSky.value = info.hdr;
+  });
+  // what lights the street at night: the lamps along the park, the shop windows, headlights
+  const lampSpots: THREE.Vector4[] = [];
+  for (let y = -320; y < 410; y += 26) lampSpots.push(new THREE.Vector4(7.15, 4.4, -(y + 4), 150));
+  for (let z = -95; z <= 95; z += 6) lampSpots.push(new THREE.Vector4(-12.6, 2.4, z, 28));
+  // the side streets: light spilling from the shopfronts on 7th, 8th and Collins
+  for (let x = -98; x <= -16; x += 9)
+    for (const z of [-75, -61.6, 62.4, 75.6]) lampSpots.push(new THREE.Vector4(x + (z > 0 ? 4 : 0), 2.4, z, 22));
+  for (let z = -92; z <= 92; z += 9) for (const x of [-98.6, -116.2]) lampSpots.push(new THREE.Vector4(x, 2.4, z, 22));
+  const lampList: THREE.Vector4[] = [];
   // the beach rental's umbrella poles (too thin to survive the export's decimation)
   {
     const spots: [number, number][] = [];
@@ -91,6 +113,7 @@ async function boot() {
     scene.add(im);
   }
   env.prepObject(gulls.root, true, false);
+  env.prepObject(nets, true, true);
   await carsP;
   player.obstacle = (x, z) => cars.blocks(x, z);
   const post = new Post(renderer, scene, camera);
@@ -128,24 +151,30 @@ async function boot() {
   renderer.compile(scene, camera);
   await new Promise((r) => setTimeout(r, 30));
 
-  let dusk = false;
-  const setDusk = (on: boolean) => {
-    dusk = on;
-    void env.setDusk(on).then(() => {
-      for (const m of world.neon) m.color.setScalar(on ? 9 : 3.2);
-      cars.setNight(on ? 1 : 0);
-      world.windows(env.probeAt(0, 0), on ? 0.1 : 1);
-      for (const m of world.lamps) {
-        m.emissive.setRGB(1, 0.72, 0.42);
-        m.emissiveIntensity = on ? (m.name.includes('bulb') ? 40 : 6) : 0;
-      }
-      post.exposure.value = (Number(Q.get('ev')) || 0.74) * (on ? 2.6 : 1);
-      world.sea.uniforms.tSky.value = env.hdr;
-      near.mat.uniforms.tSky.value = env.hdr;
-      post.reset();
-    });
+  // time of day (T) and weather (Y): ?time=day|sunset|dusk|night&weather=clear|clouds|rain
+  const setLook = (tm: TimeOfDay, w: Weather) => {
+    void sky.set(tm, w);
+    hud.flash(tm, w);
+    // the reflections are re-taken once the light has settled
+    clearTimeout(probeTimer);
+    probeTimer = setTimeout(reprobe, 3300);
   };
-  if (Q.get('time') === 'dusk') setDusk(true);
+  let probeTimer = 0 as unknown as ReturnType<typeof setTimeout>;
+  const reprobe = () => {
+    env.bakeProbes(
+      [new THREE.Vector3(0, 1.6, 50), new THREE.Vector3(0, 1.6, 0), new THREE.Vector3(0, 1.6, -50), new THREE.Vector3(-60, 1.6, 0), new THREE.Vector3(150, 1.8, 0)],
+      [player.person.root, ...cars.list.map((c) => c.root), ...peds.list.map((p) => p.p.root), near.mesh, gulls.root, rain.mesh],
+    );
+    cars.applyProbes();
+    world.windows(env.probeAt(0, 0));
+    post.reset();
+  };
+  if (time0 !== 'day' || weather0 !== 'clear') {
+    sky.update(0);
+    reprobe();
+  }
+  sky.onThunder = (delay, loud) => setTimeout(() => audio.thunder(loud), delay * 1000);
+  const ev0 = Number(Q.get('ev')) || 0.74;
   // adaptive resolution: keep ~60 fps by trading render scale (re-checked every 2 s)
   const maxDpr = Math.min(devicePixelRatio, Number(Q.get('dpr')) || 1.5);
   let dpr = renderer.getPixelRatio();
@@ -196,7 +225,8 @@ async function boot() {
       }
     }
     if (input.hit('KeyH')) hud.toggle();
-    if (input.hit('KeyT')) setDusk(!dusk);
+    if (input.hit('KeyT')) setLook(TIMES[(TIMES.indexOf(sky.time) + 1) % TIMES.length], sky.weather);
+    if (input.hit('KeyY')) setLook(sky.time, WEATHERS[(WEATHERS.indexOf(sky.weather) + 1) % WEATHERS.length]);
     if (camQ && lookQ) {
       player.update(dt, input, camera);
       camera.position.set(camQ[0], camQ[1], camQ[2]);
@@ -211,7 +241,29 @@ async function boot() {
     cars.update(dt, driving ? null : player.pos, camera.position);
     peds.update(dt, driving ? cars.playerPos() : player.pos, camera.position);
     hud.update(driving, cars.near(player.pos, 3.2) && !driving, cars.speedKmh());
-    audio.update(t, driving ? cars.playerPos().x : player.pos.x, U.uSwash.value, driving ? cars.speedKmh() : -1);
+    audio.update(t, driving ? cars.playerPos().x : player.pos.x, U.uSwash.value, driving ? cars.speedKmh() : -1, sky.out.rain);
+    // weather and light
+    sky.update(dt);
+    const o = sky.out;
+    post.exposure.value = ev0 * o.exposure;
+    post.air.u('uDensity').value = o.fogDensity;
+    post.air.u('uHeightK').value = o.rain > 0.5 ? 0.006 : 0.02;
+    (post.air.u('uFogCol').value as THREE.Vector3).copy(o.fogColor);
+    (post.air.u('uSunDir').value as THREE.Vector3).copy(env.toSun);
+    (post.air.u('uSunScat').value as THREE.Vector3).copy(o.sunScatter);
+    rain.update(camera.position, o.rain, o.fogColor);
+    for (const m of world.neon) m.color.setScalar(3.2 + 5.8 * o.night);
+    for (const m of world.lamps) {
+      m.emissive.setRGB(1, 0.72, 0.42);
+      m.emissiveIntensity = o.lamps > 0.05 ? (m.name.includes('bulb') ? 40 : 6) * Math.min(1, o.lamps) : 0;
+    }
+    cars.setNight(o.lightsOn ? 1 : 0);
+    if (o.lamps > 0) {
+      lampList.length = 0;
+      for (const l of lampSpots) lampList.push(l);
+      cars.headlights(lampList);
+      sky.setLamps(camera.position, lampList);
+    }
     env.update();
     post.render(t);
     adapt(dt);
@@ -220,7 +272,7 @@ async function boot() {
   };
   $('#loading').classList.add('done');
   requestAnimationFrame(frame);
-  (window as unknown as { od: unknown }).od = { THREE, renderer, scene, camera, player, cars, peds, env, post, world, ground };
+  (window as unknown as { od: unknown }).od = { THREE, U, sky, renderer, scene, camera, player, cars, peds, env, post, world, ground };
 }
 
 boot().catch((e) => {

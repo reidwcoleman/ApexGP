@@ -39,6 +39,38 @@ for mname, ratio in BUDGET.items():
     bpy.data.objects.remove(tmp)
     print('decimated', mname, len(me.polygons), '->', len(new.polygons))
 
+# ------------------------------------------------------------------ volleyball nets: drawn in the browser
+# (cords a few mm thick don't survive quantization: take them out here, the page draws the net)
+import geo
+NETS = []
+for w in geo.WAYS:
+    t = w['tags']
+    if t.get('leisure') == 'pitch' and t.get('surface') == 'sand':
+        q = geo.way_local(w)
+        if len(q) >= 4 and ground.NEAR[2] < q[0][1] < ground.NEAR[3] and q[0][0] < 100:
+            q = q[:4]
+            cx = sum(p[0] for p in q) / 4; cy = sum(p[1] for p in q) / 4
+            NETS.append((cx, cy, ground.terrain_h(cx, cy), math.atan2(q[1][1] - q[0][1], q[1][0] - q[0][0])))
+ps = bpy.data.objects.get('props_static')
+if ps and NETS:
+    bm = bmesh.new()
+    bm.from_mesh(ps.data)
+    kill = []
+    for f in bm.faces:
+        c = f.calc_center_median()
+        for (x, y, z, rot) in NETS:
+            cs, sn = math.cos(rot), math.sin(rot)
+            dx, dy = c.x - x, c.y - y
+            across = dx * cs + dy * sn
+            along = -dx * sn + dy * cs
+            if abs(across) < 0.03 and abs(along) < 4.95 and z + 1.5 < c.z < z + 2.5:
+                kill.append(f)
+                break
+    bmesh.ops.delete(bm, geom=kill, context='FACES')
+    bm.to_mesh(ps.data)
+    bm.free()
+    print('nets: removed', len(kill), 'faces')
+
 # ------------------------------------------------------------------ sea grape: card bushes
 def bush(name, r, h, n):
     mb = MB(name)
@@ -168,7 +200,7 @@ print('glb', os.path.getsize(os.path.join(OUT, 'block.glb')) / 1e6, 'MB')
 
 lm = json.load(open(os.path.join(WORK, 'lightmaps.json')))
 sun = [o for o in bpy.data.objects if o.type == 'LIGHT']
-meta = dict(lightmaps=lm, sea=ground.SEA, water_x=ground.WATER_X, sw=hotels.SW, palms=len(palms),
+meta = dict(lightmaps=lm, sea=ground.SEA, water_x=ground.WATER_X, sw=hotels.SW, palms=len(palms), nets=[[round(v, 3) for v in n] for n in NETS],
             height=dict(x0=HX0, y0=HY0, res=RES, nx=nx, ny=ny))
 json.dump(meta, open(os.path.join(OUT, 'scene.json'), 'w'), indent=1)
 print('done')

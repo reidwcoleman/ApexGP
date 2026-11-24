@@ -656,8 +656,17 @@ npm run check    # tsc --noEmit
 
 One block of Miami Beach made as real as a browser allows: Ocean Drive from 7th to 8th Street, the
 Art Deco hotels on it (Avalon, Beacon, Colony, Boulevard, Starlite, News Cafe; Park Central to the
-south, the Pelican to the north), Lummus Park, the dunes, the beach and the Atlantic. Walk it, sit
-the camera on a café porch, or get in one of the parked cars and drive the strip.
+south, the Pelican to the north), the streets behind, Lummus Park, the dunes, the beach and the
+Atlantic. Walk it, sit the camera on a café porch, or take any car (a driver gets out) and drive.
+Traffic loops the block with drivers at the wheel; about 80 people walk, jog and stand about.
+
+Four times of day (afternoon, golden hour, blue hour, night under the moon) and three weathers
+(clear, clouds, tropical storm) make twelve looks (`sky.ts`). Each starts from a real sky photo
+(Poly Haven), measured on load (sun position and irradiance, sky light, horizon colour) and turned
+so its sun sits where the game's does; drawn over it are a sunlit cloud layer, stars, the moon,
+rain and lightning. The storm wets everything (glossy streets, puddles ringing with drops, lamp
+glints), raises the sea and pulls the haze in; at night the lamps, shopfronts and headlights light
+the ground. The haze is a depth-based height fog that glows toward the sun (`post.ts`).
 
 How it's made (`blender/oceandrive/`, `./make.sh build` reruns all of it):
 
@@ -665,22 +674,28 @@ How it's made (`blender/oceandrive/`, `./make.sh build` reruns all of it):
   from OpenStreetMap (`data/osm.json`), in a local frame along Ocean Drive (`geo.py`).
 - **Blender** (`build.py`): the frontage becomes Tropical Deco hotels (`hotels.py`: porches and
   loggias, recessed windows with frames and sills, eyebrow ledges, racing stripes, stepped crowns,
-  pylons carrying neon tube lettering), the streets get curbs, crosswalks and the bike lane, the
+  pylons carrying neon tube lettering, parapets, bulkheads and downspouts); every building behind
+  gets recessed windows by floor and bay, shopfronts where it faces a street, cornices, parapets,
+  AC units and roof clutter (`city_building`); the streets get curbs, crosswalks and the bike lane, the
   park its coral rock wall and serpentine beachwalk (`ground.py`), 150 procedural coconut palms
   (`palms.py`), café tables, parasols, lamps and dune planting (`props.py`, Poly Haven scans).
 - **Cycles bake** (`bake.py`): sky light and the sun's bounce light into lightmaps (4096² for the
   block and the street, 2048² beyond); the browser adds the sun itself with cascaded shadows.
-- **Export** (`export.py`): meshopt GLB with GPU instancing, a 25 cm walk heightmap ray-cast from
-  the scene, the lightmaps as WebP.
+- **Export** (`export.py`): GLB with GPU instancing (then quantized and meshopt-packed with
+  gltf-transform, ~18 MB), a 25 cm walk heightmap ray-cast from the scene, the lightmaps as WebP.
 - **In the browser** (`src/oceandrive/`): scanned PBR surfaces with anti-tiling, weathering and
   specular occlusion from the bake; interior-mapped windows (rooms, curtains, blinds); a sky-lit
   sea with swell, glints, surf and swash; contact AO, TAA, bloom, AgX and a grade.
 
 Keys: W A S D move, Shift sprint, C stroll, Space jump, mouse look (click to capture), F get in /
-out of a car (W/S throttle and brake, A/D steer, Space handbrake), H hides the HUD.
-Flags: `?ev=` exposure, `?dpr=` render scale.
+out of a car (W/S throttle and brake, A/D steer, Space handbrake), T time of day, Y weather,
+H hides the HUD. Flags: `?time=day|sunset|dusk|night`, `?weather=clear|clouds|rain`, `?ev=`
+exposure, `?dpr=` render scale.
 
-Credits: map data © OpenStreetMap contributors (ODbL); textures, sky and props from Poly Haven
+Note: three r186's CSM installs an older copy of `lights_fragment_begin` that skips the DFG
+lookup, which zeroes every image-based reflection; `env.ts` puts the lookup back.
+
+Credits: map data © OpenStreetMap contributors (ODbL); textures, skies and props from Poly Haven
 (CC0); people from Microsoft Rocketbox (MIT); Ferrari 458 Italia model by vicent091036 (CC BY 4.0)
 via the three.js examples.
 

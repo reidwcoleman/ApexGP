@@ -13,6 +13,8 @@ export interface SceneMeta {
   water_x: number;
   sw: number;
   height: { x0: number; y0: number; res: number; nx: number; ny: number };
+  /** volleyball nets: Blender x, y, ground z, rotation */
+  nets?: [number, number, number, number][];
 }
 
 export interface World {
@@ -32,8 +34,34 @@ function foliage(name: string, map: THREE.Texture, normal: THREE.Texture | null,
   m.customProgramCacheKey = () => 'od-foliage';
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uSunDir = U.uSunDir;
+    sh.uniforms.uSunCol = U.uSunCol;
+    sh.uniforms.uTime = U.uTime;
+    sh.uniforms.uWind = U.uWind;
+    // wind: the crowns sway together, each leaf flutters on its own; more in a storm
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uWind;')
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        {
+          mat3 odM = mat3( modelMatrix );
+          vec4 wp0 = modelMatrix * vec4( transformed, 1.0 );
+          #ifdef USE_INSTANCING
+            wp0 = modelMatrix * instanceMatrix * vec4( transformed, 1.0 );
+            odM = odM * mat3( instanceMatrix );
+          #endif
+          float hgt = smoothstep( 3.0, 12.0, wp0.y );
+          float ph = dot( wp0.xz, vec2( 0.11, 0.07 ) );
+          float gust = 0.6 + 0.4 * sin( uTime * 0.37 + ph * 0.3 );
+          vec3 sway = vec3( sin( uTime * 1.1 + ph ) + 0.6, 0.0, cos( uTime * 0.9 + ph * 1.3 ) * 0.5 ) * 0.16 * uWind * gust * hgt;
+          vec3 flut = vec3( sin( uTime * 7.0 + wp0.x * 3.1 + wp0.y * 2.3 ), sin( uTime * 6.1 + wp0.z * 2.7 ) * 0.6, cos( uTime * 7.7 + wp0.y * 3.3 ) ) * 0.035 * ( 0.3 + uWind ) * hgt;
+          vec3 off = sway + flut;
+          // world offset back into the model's frame (palms are only translated/rotated/scaled uniformly)
+          transformed += inverse( odM ) * off;
+        }`,
+      );
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 uSunDir;')
+      .replace('#include <common>', '#include <common>\nuniform vec3 uSunDir;\nuniform vec3 uSunCol;')
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
@@ -42,7 +70,7 @@ function foliage(name: string, map: THREE.Texture, normal: THREE.Texture | null,
           vec3 Vv = normalize( vViewPosition );
           vec3 Lv = normalize( ( viewMatrix * vec4( uSunDir, 0.0 ) ).xyz );
           float back = pow( max( dot( Vv, Lv ), 0.0 ), 3.0 );
-          totalEmissiveRadiance += diffuseColor.rgb * vec3( 1.0, 1.05, 0.55 ) * back * 2.2;
+          totalEmissiveRadiance += diffuseColor.rgb * vec3( 1.0, 1.05, 0.55 ) * back * 2.2 * ( uSunCol.g / 7.38 );
         }`,
       );
   };
@@ -219,4 +247,48 @@ function instanceRepeats(root: THREE.Object3D) {
     saved += list.length - 1;
   }
   console.info('[oceandrive] instanced', saved, 'meshes away');
+}
+
+/** the volleyball nets: a 10 cm mesh of dark cord (a tiling texture, alpha-tested), white tapes round it */
+export function makeNets(meta: SceneMeta): THREE.Group {
+  const g = new THREE.Group();
+  if (!meta.nets?.length) return g;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const x = c.getContext('2d')!;
+  x.clearRect(0, 0, 64, 64);
+  x.fillStyle = '#1b1b1b';
+  x.fillRect(0, 0, 64, 5);
+  x.fillRect(0, 0, 5, 64);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(98, 8.8);
+  tex.anisotropy = 8;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.9 });
+  const tape = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.7 });
+  const netGeo = new THREE.PlaneGeometry(9.8, 0.88);
+  const topGeo = new THREE.BoxGeometry(9.8, 0.07, 0.012);
+  const botGeo = new THREE.BoxGeometry(9.8, 0.05, 0.01);
+  const sideGeo = new THREE.BoxGeometry(0.05, 0.95, 0.01);
+  for (const [bx, by, bz, rot] of meta.nets) {
+    const n = new THREE.Group();
+    n.position.set(bx, bz, -by);
+    const cs = Math.cos(rot), sn = Math.sin(rot);
+    n.rotation.y = Math.atan2(cs, -sn);
+    const net = new THREE.Mesh(netGeo, mesh);
+    net.position.y = 1.99;
+    const top = new THREE.Mesh(topGeo, tape);
+    top.position.y = 2.43;
+    const bot = new THREE.Mesh(botGeo, tape);
+    bot.position.y = 1.55;
+    n.add(net, top, bot);
+    for (const s of [-1, 1]) {
+      const sd = new THREE.Mesh(sideGeo, tape);
+      sd.position.set(s * 4.9, 1.99, 0);
+      n.add(sd);
+    }
+    g.add(n);
+  }
+  return g;
 }

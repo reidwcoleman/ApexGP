@@ -34,7 +34,7 @@ interface Ped {
 export function fill(root: THREE.Object3D) {
   root.traverse((o) => {
     const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
-    if (m && 'envMapIntensity' in m) m.envMapIntensity = 1.9;
+    if (m && "envMapIntensity" in m) m.envMapIntensity = 1.15;
   });
 }
 
