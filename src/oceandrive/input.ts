@@ -4,6 +4,9 @@ export class Input {
   private pressed = new Set<string>();
   mdx = 0;
   mdy = 0;
+  /** mouse buttons held (0 left, 2 right), and pressed this frame */
+  readonly buttons = new Set<number>();
+  private clicked = new Set<number>();
   wheel = 0;
   locked = false;
   private dragging = false;
@@ -16,7 +19,10 @@ export class Input {
       if (['Space', 'ArrowUp', 'ArrowDown', 'Tab'].includes(e.code)) e.preventDefault();
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
-    addEventListener('blur', () => this.keys.clear());
+    addEventListener('blur', () => {
+      this.keys.clear();
+      this.buttons.clear();
+    });
     el.addEventListener('click', () => {
       if (!this.locked) el.requestPointerLock?.();
     });
@@ -27,9 +33,31 @@ export class Input {
         this.mdy += e.movementY;
       }
     });
-    el.addEventListener('mousedown', () => (this.dragging = true));
-    addEventListener('mouseup', () => (this.dragging = false));
+    el.addEventListener('mousedown', (e) => {
+      this.dragging = true;
+      // the click that captures the mouse doesn't also fire
+      if (!this.locked && e.button === 0 && !this.freeFire) return;
+      this.buttons.add(e.button);
+      this.clicked.add(e.button);
+    });
+    addEventListener('mouseup', (e) => {
+      this.dragging = false;
+      this.buttons.delete(e.button);
+    });
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
     el.addEventListener('wheel', (e) => (this.wheel += Math.sign(e.deltaY)), { passive: true });
+  }
+
+  /** fire without the mouse captured (tests, touch) */
+  freeFire = false;
+
+  /** a mouse button pressed this frame */
+  click(b: number): boolean {
+    return this.clicked.has(b);
+  }
+
+  mouse(b: number): boolean {
+    return this.buttons.has(b);
   }
 
   /** true once per key press */
@@ -62,6 +90,7 @@ export class Input {
 
   endFrame() {
     this.pressed.clear();
+    this.clicked.clear();
     this.mdx = this.mdy = 0;
     this.wheel = 0;
   }

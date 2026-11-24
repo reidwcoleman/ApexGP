@@ -22,6 +22,11 @@ import { Sky, TIMES, WEATHERS, type TimeOfDay, type Weather } from './sky.ts';
 import { Rain } from './rain.ts';
 import { Dressing, type DressData } from './dressing.ts';
 import { SEA } from './water.ts';
+import { makePhys, CarBodies, Fx, Sfx } from './combat.ts';
+import { loadGuns } from './weapons.ts';
+import { Arsenal, type Actor } from './gunplay.ts';
+import { Police } from './police.ts';
+import { drawMap } from './minimap.ts';
 
 const BASE = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'oceandrive/';
 const Q = new URLSearchParams(location.search);
@@ -53,10 +58,13 @@ async function boot() {
   const weather0 = (WEATHERS as string[]).includes(Q.get('weather') ?? '') ? (Q.get('weather') as Weather) : 'clear';
   await sky.init(time0, weather0);
   step('Painting the hotels', 0.15);
-  setPeopleCore(PEOPLE);
+  // the street clothes, and the uniforms (police polo, SWAT kit)
+  setPeopleCore([...PEOPLE, 'Pilot_Male_03', 'Pilot_Female_02', 'Gardener_Male_01']);
   setPeopleRest(false);
   const peopleP = loadPeople();
   const [world, ground] = await Promise.all([loadWorld(env, renderer, (f, label) => step(label, 0.15 + f * 0.7)), Ground.load(BASE + 'height.bin')]);
+  const physP = makePhys(ground);
+  const gunsP = loadGuns(env);
   scene.add(world.root);
   const nets = makeNets(world.meta);
   scene.add(nets);
@@ -79,7 +87,7 @@ async function boot() {
   const cars = new Cars(scene, env, ground, world.meta.sw, kit);
   const carsP = cars.load();
   const peds = new Peds(scene, env, kit, ground);
-  peds.cars = { strike: (x, z) => cars.strike(x, z), blocks: (x, z) => cars.blocks(x, z) };
+  peds.cars = { strike: (x, z, r) => cars.strike(x, z, r), blocks: (x, z) => cars.blocks(x, z), reseat: (c, p) => cars.reseat(c, p) };
   peds.spawn();
   const gulls = new Gulls(scene);
   const rain = new Rain(scene);
@@ -172,10 +180,119 @@ async function boot() {
     void frameNo;
   }
   player.obstacle = (x, z) => cars.blocks(x, z);
+  // ---------------------------------------------------------------- the fight
+  const [phys] = await Promise.all([physP, gunsP]);
+  const fx = new Fx(scene);
+  const carBodies = new CarBodies(phys);
+  let sfxOut: () => { ctx: AudioContext; master: GainNode } | null = () => null;
+  const sfx = new Sfx(() => sfxOut());
+  const police = new Police(scene, env, kit, ground, cars, phys, fx, sfx, dress.data);
+  police.witnesses = () => peds.positions();
+  peds.phys = phys;
+  peds.fx = fx;
+  peds.sfx = sfx;
+  peds.crime = (k, x, z) => police.crime(k, x, z);
+  const actors = (): Actor[] => [...(peds.list as Actor[]).filter((d) => d.alive), ...police.actors()];
+  const arsenal = new Arsenal(scene, player, {
+    ground, fx, sfx, cars,
+    actors,
+    noise: (x, z, r) => peds.panic(x, z, r),
+    crime: (k, x, z) => police.crime(k, x, z),
+    punchTarget: (from, yaw) => {
+      const cop = police.punchTarget(from, yaw);
+      if (cop) return { hit: (d) => cop.hurt(22, d, 1, true) };
+      const ped = peds.punchAt(from, yaw);
+      return ped ? { hit: (d) => peds.shove(ped, d, 25) } : null;
+    },
+    carShot: (c) => {
+      // a round through their window: the driver bails out and runs
+      if (c.driver && !c.police && Math.random() < 0.6) {
+        const out = cars.ejectDriver(c);
+        if (out) peds.fromCar(out.p, c, out.x, out.z, out.yaw, 'flee');
+      }
+      if (c.police) police.crime('copCar', c.x, c.z);
+    },
+  });
+  // your car hit theirs: out they get (most of them) to have words
+  cars.onBump = (c, speed) => {
+    if (c.police) {
+      police.crime('copCar', c.x, c.z);
+      return;
+    }
+    if (speed < 2 || Math.random() < 0.25) return;
+    const out = cars.ejectDriver(c);
+    if (out) peds.fromCar(out.p, c, out.x, out.z, out.yaw, arsenal.armed && Math.random() < 0.5 ? 'flee' : 'angry');
+  };
+  cars.onHitCar = (c) => police.crime('hitcar', c.x, c.z);
+  cars.onJack = (c, p, x, z, yaw) => {
+    peds.fromCar(p, c, x, z, yaw, 'jacked');
+    police.crime('carjack', x, z);
+  };
+  cars.onExplode = (c) => {
+    const p = new THREE.Vector3(c.x, c.y + 0.8, c.z);
+    fx.explosion(p);
+    sfx.explosion(p);
+    fx.shake = Math.min(1, fx.shake + 12 / Math.max(6, p.distanceTo(camera.position)));
+    peds.panic(c.x, c.z, 70, 'boom');
+    if (c.blame) police.crime('explode', c.x, c.z);
+    for (const a of actors()) {
+      const d = Math.hypot(a.x - c.x, a.z - c.z);
+      if (d > 9) continue;
+      const dir = new THREE.Vector3(a.x - c.x, 0.6, a.z - c.z).normalize();
+      a.hurt(d < 4 ? 400 : 90 * (1 - d / 9), dir, 1, c.blame);
+    }
+    if (c === cars.yours) player.hurt(500, new THREE.Vector3(0, 1, 0));
+    else {
+      const d = Math.hypot(player.pos.x - c.x, player.pos.z - c.z);
+      if (d < 9 && !driving) {
+        const dir = new THREE.Vector3(player.pos.x - c.x, 0, player.pos.z - c.z).normalize();
+        player.hurt(d < 4 ? 400 : 160 * (1 - d / 9), dir);
+        if (!player.dead) player.knock(dir.x * 8, dir.z * 8);
+      }
+    }
+    for (const o of cars.list) {
+      if (o === c) continue;
+      const d = Math.hypot(o.x - c.x, o.z - c.z);
+      if (d > 10) continue;
+      o.vx += ((o.x - c.x) / (d || 1)) * (10 - d) * 0.8;
+      o.vz += ((o.z - c.z) / (d || 1)) * (10 - d) * 0.8;
+      cars.damage(o, (10 - d) * 9, c.blame);
+    }
+  };
+  // you: hurt, killed
+  player.onHurt = (dmg) => {
+    hud.hurt(Math.min(0.9, dmg / 40));
+    fx.shake = Math.min(1, fx.shake + dmg / 80);
+  };
+  let downT = -1;
+  let downKind: 'dead' | 'busted' = 'dead';
+  player.onDie = (dir) => {
+    downT = 0;
+    downKind = 'dead';
+    if (driving) {
+      // out of the wreck
+      const c = cars.yours;
+      if (c) {
+        const out = cars.takeExitNow();
+        if (out) player.spawn(out.x, out.z, out.yaw);
+      }
+      driving = false;
+      player.hidden = false;
+    }
+    player.person.root.visible = true;
+    playerRag = phys.ragdoll(player.person, dir.clone().multiplyScalar(2), 1, dir, 40);
+  };
+  let playerRag: ReturnType<typeof phys.ragdoll> | null = null;
+  police.onBust = () => {
+    if (downT >= 0) return;
+    downT = 0;
+    downKind = 'busted';
+  };
   const post = new Post(renderer, scene, camera);
   post.exposure.value = Number(Q.get('ev')) || 0.74;
   const hud = new Hud(document.body);
   const audio = new Ambience();
+  sfxOut = () => audio.out();
   cars.onCrash = (sp) => audio.crash(sp);
   if (Q.get('hud') === '0') hud.toggle();
   // a fixed camera for stills: ?cam=x,y,z&look=x,y,z (three coords)
@@ -256,6 +373,8 @@ async function boot() {
   let last = performance.now();
   let t = 0;
   let driving = false;
+  let frameN = 0;
+  const camDir = new THREE.Vector3();
   const frame = () => {
     const now = performance.now();
     const dt = Math.min(0.05, (now - last) / 1000);
@@ -264,14 +383,18 @@ async function boot() {
     seaTick(t);
     near.update(camera.position);
     gulls.update(t);
-    if (input.hit('KeyF')) {
+    const canAct = downT < 0 && !player.dead;
+    const nearCar = canAct && !driving ? cars.nearest(player.pos, 3.2) : null;
+    // (a police car with its crew aboard isn't yours to take)
+    const takeable = nearCar && !nearCar.wreck && !(nearCar.police && nearCar.driver) ? nearCar : null;
+    if (input.hit('KeyF') && canAct) {
       if (driving) cars.requestExit();
-      else {
-        const car = cars.nearest(player.pos, 3.2);
-        if (car) {
-          cars.enter(car, camera);
+      else if (takeable) {
+        const cop = takeable.police;
+        if (cars.enter(takeable, camera)) {
           driving = true;
           player.hidden = true;
+          if (cop) police.crime('copCar', takeable.x, takeable.z);
         }
       }
     }
@@ -297,11 +420,20 @@ async function boot() {
     } else {
       player.update(dt, input, camera);
     }
-    // a car that hits you knocks you down
-    if (!driving) {
+    if (downT >= 0 && !player.dead) {
+      // the cuffs: you stand still
+      player.aimK = 0;
+    }
+    arsenal.update(dt, input, camera, driving || downT >= 0);
+    // a car that hits you knocks you down (and hurts: fast enough, it kills)
+    if (!driving && !player.dead) {
       const hit = cars.strike(player.pos.x, player.pos.z);
-      if (hit) player.knock(hit.vx, hit.vz);
-      else {
+      if (hit) {
+        const sp = Math.hypot(hit.vx, hit.vz);
+        player.hurt(sp > 3 ? sp * sp * 0.9 : 0, new THREE.Vector3(hit.vx, 0, hit.vz).normalize());
+        if (!player.dead) player.knock(hit.vx, hit.vz);
+        else if (playerRag) playerRag.blast(player.pos.clone().sub(new THREE.Vector3(hit.vx, 0, hit.vz).normalize()), sp * 4, 3);
+      } else {
         // a car creeping into you nudges you aside rather than driving through you
         const push = cars.pushOut(player.pos.x, player.pos.z, 0.32);
         if (push && player.clearAt(player.pos.x + push.x, player.pos.z + push.z, player.pos.y)) {
@@ -312,8 +444,60 @@ async function boot() {
     }
     cars.setWalkers(peds.positions());
     cars.update(dt, driving ? null : player.pos, camera.position);
+    const yourCar = driving ? cars.yours : null;
+    peds.you = {
+      pos: driving ? cars.playerPos() : player.pos, driving, car: yourCar, armed: arsenal.armed && !driving,
+      aimFrom: arsenal.aiming ? arsenal.aimFrom : null, aimDir: arsenal.aiming ? arsenal.aimDir : null,
+      hurt: (d, dir) => player.hurt(d, dir),
+    };
     peds.update(dt, driving ? cars.playerPos() : player.pos, camera.position);
-    hud.update(driving, cars.near(player.pos, 3.2) && !driving, cars.speedKmh());
+    const youSpeed = driving && yourCar ? Math.hypot(yourCar.vx, yourCar.vz) : (player as unknown as { speed: number }).speed;
+    police.update(dt, {
+      pos: driving ? cars.playerPos() : player.pos, driving, car: yourCar, armed: arsenal.armed,
+      hostile: arsenal.firedT < 10 || police.stars >= 2, speed: youSpeed, dead: player.dead || downT >= 0,
+      hurt: (d, dir) => player.hurt(d, dir),
+    }, camera.position);
+    // your car going up with you in it
+    if (driving && yourCar && yourCar.wreck && !player.dead) player.hurt(500, new THREE.Vector3(0, 1, 0));
+    carBodies.update(cars.list, camera.position);
+    phys.step(dt);
+    for (const h of cars.hurtCars()) fx.smoke(h.p, h.fire, dt);
+    fx.update(dt, camera);
+    sfx.listen(camera);
+    if (fx.shake > 0) camera.position.add(new THREE.Vector3((Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5)).multiplyScalar(fx.shake * 0.12));
+    // wasted / busted: the banner, then a fresh start
+    if (downT >= 0) {
+      downT += dt;
+      if (downT > 1.2) hud.banner(downKind === 'dead' ? 'Hospitalized' : 'Arrested', downKind === 'dead' ? 'Mount Sinai Medical Center' : 'Miami Beach Police Department');
+      if (downT > 5.5) {
+        downT = -1;
+        hud.banner(null);
+        if (playerRag) {
+          playerRag.dispose();
+          playerRag = null;
+        }
+        player.revive();
+        police.reset(true);
+        if (driving) {
+          cars.takeExitNow();
+          driving = false;
+          player.hidden = false;
+        }
+        // the hospital's at the south end of the beach walk; the station is on Washington Avenue
+        if (downKind === 'dead') player.spawn(-7.3, 88, Math.PI, camera);
+        else player.spawn(-99.6, 10, Math.PI, camera);
+        post.reset();
+      }
+    }
+    hud.update(dt, driving, !!takeable, cars.speedKmh(), !!takeable && !!takeable.driver);
+    hud.fight({
+      stars: police.stars, searching: police.searching, t, hp: player.hp, maxHp: player.maxHp, armor: player.armor,
+      weapon: arsenal.weapon, mag: arsenal.weapon === 'fists' ? 0 : arsenal.ammo[arsenal.weapon].mag, reserve: arsenal.weapon === 'fists' ? 0 : arsenal.ammo[arsenal.weapon].reserve,
+      reloading: arsenal.reloading, aim: player.aimK, armed: arsenal.armed && !driving,
+    });
+    if ((frameN++ & 1) === 0)
+      drawMap(hud.map, dress.data, { x: driving ? cars.playerPos().x : player.pos.x, z: driving ? cars.playerPos().z : player.pos.z, yaw: driving && yourCar ? yourCar.yaw : player.yaw, camYaw: Math.atan2(camDir.set(0, 0, -1).applyQuaternion(camera.quaternion).x, camDir.z) },
+        police.blips(), police.searching ? { x: police.lastKnown.x, z: police.lastKnown.z, r: 45 } : null, t);
     audio.update(t, driving ? cars.playerPos().x : player.pos.x, U.uSwash.value, driving ? cars.speedKmh() : -1, sky.out.rain);
     // weather and light
     sky.update(dt);
@@ -326,6 +510,7 @@ async function boot() {
     (post.air.u('uSunScat').value as THREE.Vector3).copy(o.sunScatter);
     rain.update(camera.position, o.rain, o.fogColor);
     dress.update(dt, o.night, o.lamps);
+    police.night = o.lamps;
     for (const m of world.neon) m.color.setScalar(3.2 + 5.8 * o.night);
     for (const m of world.lamps) {
       m.emissive.setRGB(1, 0.72, 0.42);
@@ -336,6 +521,7 @@ async function boot() {
       lampList.length = 0;
       for (const l of lampSpots) lampList.push(l);
       cars.headlights(lampList);
+      for (const l of fx.lights) lampList.push(new THREE.Vector4(l.p.x, l.p.y, l.p.z, l.i));
       sky.setLamps(camera.position, lampList);
     }
     env.update();
@@ -346,7 +532,7 @@ async function boot() {
   };
   $('#loading').classList.add('done');
   requestAnimationFrame(frame);
-  (window as unknown as { od: unknown }).od = { THREE, U, sky, dress, get shadowPasses() { return shadowPasses; }, renderer, scene, camera, player, cars, peds, env, post, world, ground };
+  (window as unknown as { od: unknown }).od = { THREE, U, sky, dress, arsenal, police, fx, phys, input, get driving() { return driving; }, get shadowPasses() { return shadowPasses; }, renderer, scene, camera, player, cars, peds, env, post, world, ground };
 }
 
 boot().catch((e) => {

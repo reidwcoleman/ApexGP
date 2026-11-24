@@ -704,9 +704,22 @@ How it's made (`blender/oceandrive/`, `./make.sh build` reruns all of it):
   specular occlusion from the bake; interior-mapped windows (rooms, curtains, blinds); a sky-lit
   sea with swell, glints, surf and swash; contact AO, TAA, bloom, AgX and a grade.
 
+Crime and the police (`gunplay.ts`, `weapons.ts`, `police.ts`, `combat.ts`): a pistol, a pump
+shotgun and a carbine (Last Frame's models, held by IK over whatever the legs are doing), fists. Shots
+are marched through the city's heightmap and tested against everyone's capsule and every car's box:
+dust, sparks, blood, bullet holes, pools of blood, ragdolls (Last Frame's Rapier ragdolls over a 50 cm
+copy of the heightmap, with the nearby cars as boxes). Cars take damage, smoke, burn and explode.
+People flee gunfire, duck, put their hands up when a gun's on them, and die; a driver you rear-end
+gets out and has words (and fists), then drives off; one you pull out shouts or runs. Crimes raise a
+wanted level of one to six stars: patrol cars route through the street grid, officers get out and
+arrest you at one star and shoot above it, ram you from three, SWAT come at four, the helicopter
+(searchlight by night, a marksman at six) at five. Stay out of sight and they lose you; die and you
+wake up hospitalized, get caught and you're arrested.
+
 Keys: W A S D move, Shift sprint, C stroll, Space jump, mouse look (click to capture), F get in /
-out of a car (W/S throttle and brake, A/D steer, Space handbrake), T time of day, Y weather,
-H hides the HUD. Flags: `?time=day|sunset|dusk|night`, `?weather=clear|clouds|rain`, `?ev=`
+out of a car (pulls a driver out; W/S throttle and brake, A/D steer, Space handbrake), 1-4 fists,
+pistol, shotgun, carbine (Q/Tab cycles), right mouse aim, left mouse fire / punch, R reload, T time
+of day, Y weather, H hides the HUD. Flags: `?time=day|sunset|dusk|night`, `?weather=clear|clouds|rain`, `?ev=`
 exposure, `?dpr=` render scale.
 
 Note: three r186's CSM installs an older copy of `lights_fragment_begin` that skips the DFG

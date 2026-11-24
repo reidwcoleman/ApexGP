@@ -15,6 +15,11 @@ export class Ambience {
   private rain!: GainNode;
   private master!: GainNode;
 
+  /** the audio graph, once the first gesture has started it */
+  out(): { ctx: AudioContext; master: GainNode } | null {
+    return this.ctx ? { ctx: this.ctx, master: this.master } : null;
+  }
+
   constructor() {
     const start = () => {
       if (this.ctx) return;

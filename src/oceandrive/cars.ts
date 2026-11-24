@@ -72,6 +72,22 @@ export interface Car {
   /** a traffic car knocked off its route remembers it, and rejoins once it's stopped near it */
   routeMem: Route | null;
   rest: number;
+  // ---- damage
+  hp: number;
+  /** burnt out */
+  wreck: boolean;
+  /** seconds on fire (it goes up at 6) */
+  burnT: number;
+  // ---- police
+  police: boolean;
+  /** a driver at the wheel steering for (tx, tz): the police, chasing */
+  ai: { tx: number; tz: number; stop: number; ram: boolean; stuck: number; rev: number; on: boolean } | null;
+  lightbar: THREE.MeshBasicMaterial[];
+  siren: boolean;
+  /** who else is in it (the passenger seat), shown seated */
+  crew: Person[];
+  /** you did it (the damage that put it on fire) */
+  blame: boolean;
 }
 
 const lampHead = () => new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff4e0, emissiveIntensity: 0.4, roughness: 0.15, vertexColors: true });
@@ -164,7 +180,7 @@ export class Cars {
     const r = this.rnd();
     const table: [string, number][] = [
       ['sedan', 14], ['compact', 9], ['suv', 14], ['gwagon', 8], ['pickup', 5], ['coupe', 8], ['super', 6], ['muscle', 6],
-      ['ferrari', 7], ['van', 4], ['taxi', moving ? 7 : 3], ['police', moving ? 2 : 1], ['policeSuv', 1], ['cyber', 2],
+      ['ferrari', 7], ['van', 4], ['taxi', moving ? 7 : 3], ['police', moving ? 0 : 1], ['policeSuv', moving ? 0 : 1], ['cyber', 2],
     ];
     const tot = table.reduce((a, b) => a + b[1], 0);
     let acc = 0;
@@ -261,6 +277,7 @@ export class Cars {
       vx: 0, vz: 0, w: 0, y: 0, vy: 0, pitch: 0, roll: 0, aF: 0, aL: 0,
       mass: spec ? spec.mass : 1480, tw: (spec ? spec.W : 1.95) / 2 - 0.15, top: kind === 'van' || kind === 'pickup' ? 40 : fast ? 72 : 52,
       acc: spec ? Math.min(13, 1.5 + spec.power / spec.mass / 22) : 12, routeMem: null, rest: 0,
+      hp: 100, wreck: false, burnT: 0, police: kind === 'police' || kind === 'policeSuv', ai: null, lightbar: [], siren: false, crew: [], blame: false,
     };
     if (moving) this.seatDriver(car);
     this.list.push(car);
@@ -520,8 +537,89 @@ export class Cars {
         a.w += (raz * J * bx - rax * J * bz) / Ia;
         b.w -= (rbz * J * bx - rbx * J * bz) / Ib;
         if (-vr > 2) this.crash(-vr, a === this.driven ? a : b);
+        // dents: a hard enough hit takes its toll on both
+        if (-vr > 3) {
+          const you = a === this.driven || b === this.driven;
+          // (the AI's scrapes with parked cars shouldn't burn the street down)
+          const k = you ? 2 : 0.6;
+          this.damage(a, (-vr - 3) * 2.2 * (mb / (ma + mb)) * k, you);
+          this.damage(b, (-vr - 3) * 2.2 * (ma / (ma + mb)) * k, you);
+        }
+        // you hit someone's car: they'll have something to say
+        if (-vr > 1.2) {
+          if (a === this.driven && b.driver) this.onBump?.(b, -vr);
+          if (b === this.driven && a.driver) this.onBump?.(a, -vr);
+          if (a === this.driven || b === this.driven) this.onHitCar?.(a === this.driven ? b : a, -vr);
+        }
       }
     }
+  }
+
+  /** your car struck one with a driver in it (speed of the impact) */
+  onBump: ((c: Car, speed: number) => void) | null = null;
+  /** your car struck any car */
+  onHitCar: ((c: Car, speed: number) => void) | null = null;
+  /** you pulled someone out (the person, and the door they land at) */
+  onJack: ((c: Car, p: Person, x: number, z: number, yaw: number) => void) | null = null;
+  /** a car went up */
+  onExplode: ((c: Car) => void) | null = null;
+
+  /** damage a car (bullets, crashes): it smokes below a third, burns below a tenth, and goes up */
+  damage(c: Car, amt: number, byYou: boolean) {
+    if (c.wreck || amt <= 0) return;
+    c.hp -= amt;
+    if (byYou) c.blame = true;
+    if (c.hp <= 0 && c.burnT === 0) c.burnT = 0.01;
+  }
+
+  /** the burnt shell: black, glassless, dark, dead */
+  private wreckIt(c: Car) {
+    c.wreck = true;
+    c.hp = 0;
+    c.siren = false;
+    c.ai = null;
+    c.route = null;
+    c.routeMem = null;
+    if (c.driver) {
+      c.root.remove(c.driver.root);
+      c.driver = null;
+    }
+    for (const p of c.crew) p.root.removeFromParent();
+    c.crew.length = 0;
+    c.root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const mat = m.material as THREE.MeshPhysicalMaterial;
+      if (mat === this.glass) {
+        m.visible = false;
+        return;
+      }
+      if (!(mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) return;
+      const burnt = mat.clone();
+      burnt.color = new THREE.Color(0.035, 0.032, 0.03);
+      burnt.roughness = 0.95;
+      burnt.metalness = 0.2;
+      if ((burnt as THREE.MeshPhysicalMaterial).isMeshPhysicalMaterial) (burnt as THREE.MeshPhysicalMaterial).clearcoat = 0;
+      burnt.emissiveIntensity = 0;
+      burnt.map = null;
+      m.material = burnt;
+    });
+    for (const l of c.lightbar) l.color.setScalar(0.02);
+    // thrown up by the blast
+    c.vy = 5;
+    c.w += (Math.random() - 0.5) * 2;
+    this.onExplode?.(c);
+  }
+
+  /** a wreck smokes and burns: (x, y, z) of the bonnet, how badly; called by main for the effects */
+  hurtCars(): { c: Car; p: THREE.Vector3; fire: boolean }[] {
+    const out: { c: Car; p: THREE.Vector3; fire: boolean }[] = [];
+    for (const c of this.list) {
+      if (c.hp > 35 && !c.wreck) continue;
+      const s = Math.sin(c.yaw), co = Math.cos(c.yaw);
+      out.push({ c, p: new THREE.Vector3(c.x + s * c.halfL * 0.62, c.y + 1.0, c.z + co * c.halfL * 0.62), fire: c.burnT > 0 || (c.wreck && c.burnT < 40) });
+    }
+    return out;
   }
 
   private knockLoose(c: Car) {
@@ -570,7 +668,7 @@ export class Cars {
   }
 
   /** a moving car hitting a person at (x, z): its velocity (for the knock), or null */
-  strike(x: number, z: number, r = 0.35): { vx: number; vz: number } | null {
+  strike(x: number, z: number, r = 0.35): { vx: number; vz: number; car: Car } | null {
     for (const c of this.list) {
       const sp = Math.hypot(c.vx, c.vz);
       if (sp < 1.6) continue;
@@ -578,7 +676,7 @@ export class Cars {
       if (dx * dx + dz * dz > 25) continue;
       const s = Math.sin(c.yaw), co = Math.cos(c.yaw);
       const lz = dx * s + dz * co, lx = dx * co - dz * s;
-      if (Math.abs(lx) < c.halfW + r && Math.abs(lz) < c.halfL + r) return { vx: c.vx, vz: c.vz };
+      if (Math.abs(lx) < c.halfW + r && Math.abs(lz) < c.halfL + r) return { vx: c.vx, vz: c.vz, car: c };
     }
     return null;
   }
@@ -616,10 +714,21 @@ export class Cars {
   }
 
   enter(c: Car, camera: THREE.Camera) {
+    if (c.wreck) return false;
     if (c.driver) {
-      c.root.remove(c.driver.root);
+      const p = c.driver;
       c.driver = null;
+      const s = Math.sin(c.yaw), co = Math.cos(c.yaw);
+      this.scene.attach(p.root);
+      this.onJack?.(c, p, c.x + co * (c.halfW + 0.9), c.z - s * (c.halfW + 0.9), c.yaw);
+      if (!p.root.parent) p.root.removeFromParent();
     }
+    for (const q of c.crew) {
+      q.root.removeFromParent();
+    }
+    c.crew.length = 0;
+    c.ai = null;
+    c.siren = false;
     if (c.route) this.knockLoose(c);
     c.routeMem = null;
     this.driven = c;
@@ -627,6 +736,123 @@ export class Cars {
     this.camYawOff = 0;
     // the chase camera starts where the walking camera was
     this.camPos.copy(camera.position);
+    return true;
+  }
+
+  /** the car you're in (or null) */
+  get yours(): Car | null {
+    return this.driven;
+  }
+
+  /** a driver gets out where you can see them (their car stays where it stopped): the person and the door */
+  ejectDriver(c: Car): { p: Person; x: number; z: number; yaw: number } | null {
+    if (!c.driver || c === this.driven) return null;
+    const p = c.driver;
+    c.driver = null;
+    if (c.route) this.knockLoose(c);
+    const s = Math.sin(c.yaw), co = Math.cos(c.yaw);
+    this.scene.attach(p.root);
+    return { p, x: c.x + co * (c.halfW + 0.6), z: c.z - s * (c.halfW + 0.6), yaw: c.yaw - Math.PI / 2 };
+  }
+
+  /** back behind the wheel (they'll rejoin the traffic once stopped near it) */
+  reseat(c: Car, p: Person): boolean {
+    if (c.wreck || c.driver || c === this.driven) return false;
+    c.driver = p;
+    c.root.add(p.root);
+    p.root.position.copy(c.seat).add(new THREE.Vector3(0, -0.42, 0));
+    p.root.rotation.set(0, 0, 0);
+    p.play('sit', { fade: 0.2 });
+    c.rest = 0;
+    return true;
+  }
+
+  /** a car for the police: a seated officer at the wheel and one beside, lights on the roof */
+  spawnUnit(kind: string, x: number, z: number, yaw: number, driver: Person, mate: Person | null): Car {
+    const c = this.make(kind, false);
+    c.x = x;
+    c.z = z;
+    c.yaw = yaw;
+    c.police = true;
+    c.top = 62;
+    c.acc = Math.max(c.acc, 9);
+    this.reseat(c, driver);
+    if (mate) {
+      c.root.add(mate.root);
+      mate.root.position.set(-c.seat.x, c.seat.y - 0.42, c.seat.z);
+      mate.play('sit', { fade: 0 });
+      c.crew.push(mate);
+    }
+    // the light bar (the SWAT van gets a pair of strobes in the grille instead)
+    const red = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.2, 0.01, 0.01), toneMapped: false });
+    const blue = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.01, 0.02, 0.2), toneMapped: false });
+    const spec = MODELS[kind as ModelId];
+    const top = spec ? spec.H + 0.04 : 1.5;
+    const bar = new THREE.Group();
+    const bg = new THREE.BoxGeometry(0.52, 0.09, 0.22);
+    const l = new THREE.Mesh(bg, red), r = new THREE.Mesh(bg, blue);
+    l.position.set(0.28, 0, 0);
+    r.position.set(-0.28, 0, 0);
+    const base = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.05, 0.26), new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 }));
+    base.position.y = -0.05;
+    bar.add(l, r, base);
+    bar.position.set(0, top, -0.1);
+    c.root.add(bar);
+    c.lightbar = [red, blue];
+    c.ai = { tx: x, tz: z, stop: 6, ram: false, stuck: 0, rev: 0, on: true };
+    this.place(c, 0);
+    this.env.prepObject(c.root, true, true);
+    return c;
+  }
+
+  /** take a car away for good */
+  remove(c: Car) {
+    c.root.removeFromParent();
+    const i = this.list.indexOf(c);
+    if (i >= 0) this.list.splice(i, 1);
+  }
+
+  /**
+   * A driver steering for (tx, tz): full throttle on the straight, lifting for the turn, braking to
+   * stop `stop` metres short (or not at all when ramming); stuck against something, it backs out.
+   */
+  private aiDrive(c: Car, dt: number) {
+    const A = c.ai!;
+    const dx = A.tx - c.x, dz = A.tz - c.z;
+    const dist = Math.hypot(dx, dz);
+    let ang = Math.atan2(dx, dz) - c.yaw;
+    ang = Math.atan2(Math.sin(ang), Math.cos(ang));
+    const vF = c.vx * Math.sin(c.yaw) + c.vz * Math.cos(c.yaw);
+    let thr = 0, brk = 0, steer = THREE.MathUtils.clamp(ang * 2.2, -1, 1);
+    if (A.rev > 0) {
+      A.rev -= dt;
+      thr = 0;
+      brk = 1;
+      steer = -steer;
+      if (vF > 0.5) brk = 1;
+    } else if (!A.on || (!A.ram && dist < A.stop)) {
+      brk = vF > 0.2 ? 1 : 0;
+    } else {
+      // slow for a sharp turn, and for the stop
+      const turn = Math.abs(ang);
+      const vmax = A.ram ? 40 : Math.min(40, 6 + (dist - A.stop) * 0.9);
+      const want = turn > 1.4 ? 5 : turn > 0.7 ? 9 : vmax;
+      if (turn > 2.2 && dist < 25) {
+        // it's behind: back round
+        A.rev = 1.2;
+      }
+      if (vF < want) thr = 1;
+      else brk = Math.min(1, (vF - want) * 0.3);
+      // wedged: throttle on, going nowhere
+      A.stuck = Math.hypot(c.vx, c.vz) < 0.8 && thr > 0 ? A.stuck + dt : 0;
+      if (A.stuck > 1.4) {
+        A.stuck = 0;
+        A.rev = 1.3;
+      }
+    }
+    const n = Math.max(1, Math.ceil(dt / 0.01));
+    for (let i = 0; i < n; i++) this.stepBody(c, dt / n, thr, brk, steer, false);
+    this.place(c, dt);
   }
 
   private exitWanted = false;
@@ -650,6 +876,17 @@ export class Cars {
     }
     // nowhere clear: out the top (rare: boxed in) — on the driver's side anyway
     return this.leave(c, c.x + (c.halfW + 0.6) * co, c.z - (c.halfW + 0.6) * s);
+  }
+
+  /** out now, wherever the car is (it's burning, or you're dead) */
+  takeExitNow(): { x: number; z: number; yaw: number } | null {
+    const c = this.driven;
+    if (!c) return null;
+    const s = Math.sin(c.yaw), co = Math.cos(c.yaw);
+    const x = c.x + co * (c.halfW + 0.8), z = c.z - s * (c.halfW + 0.8);
+    this.driven = null;
+    this.exitWanted = false;
+    return { x, z, yaw: c.yaw };
   }
 
   private leave(c: Car, x: number, z: number) {
@@ -717,7 +954,7 @@ export class Cars {
   drive(dt: number, inp: Input, camera: THREE.PerspectiveCamera) {
     const c = this.driven;
     if (!c) return;
-    const mv = inp.move();
+    const mv = c.wreck ? { x: 0, y: 0 } : inp.move();
     const sF = c.vx * Math.sin(c.yaw) + c.vz * Math.cos(c.yaw);
     let thr = Math.max(0, mv.y), brk = Math.max(0, -mv.y), hand = inp.down('Space');
     // S while rolling forward brakes; held at a stop it reverses (stepBody sorts which)
@@ -751,9 +988,26 @@ export class Cars {
     camera.lookAt(this.camLook);
   }
 
+  private flash = 0;
   update(dt: number, walker: THREE.Vector3 | null, eye: THREE.Vector3) {
+    this.flash += dt;
     for (const c of this.list) {
+      // burning: it goes up after a few seconds
+      if (c.burnT > 0 && !c.wreck) {
+        c.burnT += dt;
+        if (c.burnT > 5.5) this.wreckIt(c);
+      } else if (c.wreck) c.burnT += dt;
+      if (c.lightbar.length) {
+        const on = c.siren && !c.wreck;
+        const ph = Math.floor(this.flash * 7) % 4;
+        c.lightbar[0].color.setRGB(on && ph < 2 ? 30 : 0.2, on && ph < 2 ? 0.6 : 0.01, on && ph < 2 ? 0.4 : 0.01);
+        c.lightbar[1].color.setRGB(on && ph >= 2 ? 0.4 : 0.01, on && ph >= 2 ? 1.2 : 0.02, on && ph >= 2 ? 30 : 0.2);
+      }
       if (c === this.driven) continue;
+      if (c.ai && c.driver && !c.wreck) {
+        this.aiDrive(c, dt);
+        continue;
+      }
       if (!c.route) {
         // loose: parked, abandoned, or knocked off its route
         const n = Math.max(1, Math.ceil(dt / 0.012));

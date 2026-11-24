@@ -26,6 +26,19 @@ export class Player {
   camDist = 3.4;
   private camD = 3.4;
   hidden = false;
+  // ---- the fight
+  hp = 200;
+  readonly maxHp = 200;
+  armor = 0;
+  dead = false;
+  /** 0 at ease … 1 aiming down the gun (set by the arsenal each frame) */
+  aimK = 0;
+  /** you can't run flat out with a gun up */
+  /** a hit: (damage, direction it came from) */
+  onHurt: ((dmg: number, dir: THREE.Vector3) => void) | null = null;
+  onDie: ((dir: THREE.Vector3) => void) | null = null;
+  /** for the bullets: your capsule */
+  readonly hit = { x: 0, y: 0, z: 0, h: 1.8, r: 0.3, alive: true, hurt: (dmg: number, dir: THREE.Vector3) => this.hurt(dmg, dir) };
   /** other things that block (the cars) */
   obstacle: (x: number, z: number) => boolean = () => false;
   private readonly tmp = new THREE.Vector3();
@@ -38,6 +51,31 @@ export class Player {
   /** the camera eases from where it was (the car's chase cam) to the shoulder over half a second */
   private blendFrom = new THREE.Vector3();
   private blendT = 1;
+  hurt(dmg: number, dir: THREE.Vector3) {
+    if (this.dead || dmg <= 0) return;
+    const a = Math.min(this.armor, dmg * 0.7);
+    this.armor -= a;
+    this.hp -= dmg - a;
+    this.onHurt?.(dmg, dir);
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.dead = true;
+      this.hit.alive = false;
+      this.onDie?.(dir);
+    }
+  }
+
+  /** back on your feet, whole (after the hospital, or a night in the cells) */
+  revive() {
+    this.hp = this.maxHp;
+    this.armor = 0;
+    this.dead = false;
+    this.hit.alive = true;
+    this.anim = '';
+    this.camPitch = -0.08;
+    this.person.root.rotation.set(0, this.yaw, 0);
+  }
+
   spawn(x: number, z: number, yaw: number, camera?: THREE.Camera) {
     const h = this.ground.height(x, z);
     this.pos.set(x, Number.isNaN(h) ? 0.15 : h, z);
@@ -96,9 +134,17 @@ export class Player {
   }
 
   update(dt: number, inp: Input, camera: THREE.PerspectiveCamera) {
-    // camera look
-    this.camYaw -= inp.mdx * 0.0026;
-    this.camPitch = THREE.MathUtils.clamp(this.camPitch - inp.mdy * 0.0022, -1.1, 0.55);
+    // camera look (slower aimed: finer)
+    const sens = 1 - this.aimK * 0.45;
+    this.camYaw -= inp.mdx * 0.0026 * sens;
+    this.camPitch = THREE.MathUtils.clamp(this.camPitch - inp.mdy * 0.0022 * sens, -1.1, 0.55);
+    if (this.dead) {
+      // the camera drifts round where you fell
+      this.camYaw += dt * 0.25;
+      this.camPitch += (-0.45 - this.camPitch) * Math.min(1, dt);
+      this.placeCamera(camera, dt);
+      return;
+    }
     this.camDist = THREE.MathUtils.clamp(this.camDist + inp.wheel * 0.45, 1.6, 9);
     if (this.knockT > 0) {
       this.knocked(dt, camera);
@@ -108,19 +154,25 @@ export class Player {
     const want = Math.hypot(mv.x, mv.y);
     const sprint = inp.down('ShiftLeft') || inp.down('ShiftRight');
     const walk = inp.down('KeyC') || inp.down('AltLeft');
-    const target = want * (sprint ? 6.2 : walk ? 1.45 : 3.3);
+    const target = want * (sprint && this.aimK < 0.3 ? 6.2 : walk ? 1.45 : this.aimK > 0.3 ? 2.4 : 3.3);
     this.speed += (target - this.speed) * Math.min(1, dt * (target > this.speed ? 5 : 8));
+    let moveYaw = this.yaw;
     if (want > 0.05) {
       // the camera's forward on the ground
       const fx = Math.sin(this.camYaw), fz = Math.cos(this.camYaw);
       const rx = -fz, rz = fx;
       const dx = fx * mv.y + rx * mv.x, dz = fz * mv.y + rz * mv.x;
-      const face = Math.atan2(dx, dz);
+      moveYaw = Math.atan2(dx, dz);
+    }
+    // aiming, you face the crosshair and strafe; otherwise you face where you're going
+    const face = this.aimK > 0.3 ? this.camYaw : want > 0.05 ? moveYaw : this.yaw;
+    {
       let d = face - this.yaw;
       d = Math.atan2(Math.sin(d), Math.cos(d));
-      this.yaw += d * Math.min(1, dt * 10);
+      this.yaw += d * Math.min(1, dt * (this.aimK > 0.3 ? 18 : 10));
     }
-    const sx = Math.sin(this.yaw) * this.speed * dt, sz = Math.cos(this.yaw) * this.speed * dt;
+    if (this.aimK <= 0.3) moveYaw = want > 0.05 ? this.yaw : moveYaw;
+    const sx = Math.sin(moveYaw) * this.speed * dt, sz = Math.cos(moveYaw) * this.speed * dt;
     const y = this.pos.y + (this.grounded ? 0 : 0.35);
     if (this.walkable(this.pos.x + sx, this.pos.z + sz, y)) {
       this.pos.x += sx;
@@ -169,6 +221,9 @@ export class Player {
     this.person.root.rotation.set(0, this.yaw, 0);
     this.person.root.visible = !this.hidden;
     this.person.update(dt);
+    this.hit.x = this.pos.x;
+    this.hit.y = this.pos.y;
+    this.hit.z = this.pos.z;
     this.placeCamera(camera, dt);
   }
 
@@ -214,20 +269,30 @@ export class Player {
     this.placeCamera(camera, dt);
   }
 
+  private aimCam = 0;
   placeCamera(camera: THREE.PerspectiveCamera, dt: number) {
-    const tgt = this.tmp.set(this.pos.x, this.pos.y + 1.55, this.pos.z);
-    // over the right shoulder
+    this.aimCam += (this.aimK - this.aimCam) * Math.min(1, dt * 9);
+    const a = this.aimCam;
+    const fov = 52 - a * 12;
+    if (Math.abs(camera.fov - fov) > 0.05) {
+      camera.fov = fov;
+      camera.updateProjectionMatrix();
+    }
+    const tgt = this.tmp.set(this.pos.x, this.pos.y + 1.55 + a * 0.05, this.pos.z);
+    // over the right shoulder (further over, and closer in, aiming)
     const rx = -Math.cos(this.camYaw), rz = Math.sin(this.camYaw);
-    tgt.x += rx * 0.45;
-    tgt.z += rz * 0.45;
+    tgt.x += rx * (0.45 + a * 0.22);
+    tgt.z += rz * (0.45 + a * 0.22);
     const cp = Math.cos(this.camPitch), sp = Math.sin(this.camPitch);
     const bx = -Math.sin(this.camYaw) * cp, by = -sp, bz = -Math.cos(this.camYaw) * cp;
     // pull in when the ground or a wall is in the way
-    let d = this.camDist;
-    for (let s = 0.4; s <= this.camDist; s += 0.15) {
+    const want = this.camDist + (1.55 - this.camDist) * a;
+    let d = want;
+    for (let s = 0.4; s <= want; s += 0.15) {
       const px = tgt.x + bx * s, py = tgt.y + by * s, pz = tgt.z + bz * s;
       const h = this.ground.height(px, pz);
-      if (!(py > h + 0.25)) {
+      // (and a car: the camera doesn't go through its roof)
+      if (!(py > h + 0.25) || (py < this.pos.y + 1.7 && this.obstacle(px, pz))) {
         d = Math.max(0.5, s - 0.25);
         break;
       }
