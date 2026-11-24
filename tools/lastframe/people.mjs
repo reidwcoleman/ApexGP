@@ -57,4 +57,39 @@ for (const [n, cx, cy, cz, cyaw, pitch] of views) {
   await p.waitForTimeout(700);
   await p.screenshot({ path: `${out}/${n}.png` });
 }
+// FIRE=1: one of them fires a string of shots, seen from the side, a picture every frame (the game stopped and stepped by hand)
+if (process.env.FIRE) {
+  const shots = [];
+  await p.evaluate(([v, y0, slot]) => {
+    const g = __lf.g; g.camHold = v; Object.assign(g.me.m, { x: v[0] + Math.sin(v[3]) * 1.5, y: y0, z: v[2] + Math.cos(v[3]) * 1.5 }); g.me.yaw = v[3];
+    g.halt = true;
+    window.__n = 0;
+    window.__step = () => {
+      const a = g.actors.get(slot), sol = a?.soldier;
+      if (sol && window.__n % 5 === 0 && window.__n < 20) {
+        const muz = sol.gun.group.localToWorld(new (sol.root.position.constructor)(0, 0.043, 0.695));
+        const dir = sol.gun.group.getWorldDirection(new (sol.root.position.constructor)());
+        sol.muzzle(muz); sol.kick = 1; g.fx.muzzle(muz, dir, 1); g.muzzleLight(muz, 3, dir);
+      }
+      window.__n++;
+      g.time += 1 / 60; g.tick(1 / 60, 1 / 60);
+    };
+    for (let k = 0; k < 30; k++) { window.__n = 99; window.__step(); }
+    window.__n = 0;
+  }, [cam('fire', 2.0, -3.7, 1.32, -0.84, -0.02).slice(1), y, info[0][0]]);
+  for (let k = 0; k < 12; k++) {
+    await p.evaluate(() => window.__step());
+    await p.waitForTimeout(60);
+    shots.push(await p.screenshot({ clip: { x: 380, y: 130, width: 840, height: 600 } }));
+  }
+  const sheet = await p.evaluate(async (list) => {
+    const ims = await Promise.all(list.map((d) => new Promise((res) => { const i = new Image(); i.onload = () => res(i); i.src = 'data:image/png;base64,' + d; })));
+    const cols = 4, rows = Math.ceil(ims.length / cols), w = 490, h = 350;
+    const c = document.createElement('canvas'); c.width = cols * w; c.height = rows * h;
+    const x = c.getContext('2d');
+    ims.forEach((im, i) => x.drawImage(im, (i % cols) * w, Math.floor(i / cols) * h, w, h));
+    return c.toDataURL('image/jpeg', 0.9).split(',')[1];
+  }, shots.map((s) => s.toString('base64')));
+  fs.writeFileSync(`${out}/fire.jpg`, Buffer.from(sheet, 'base64'));
+}
 await b.close();

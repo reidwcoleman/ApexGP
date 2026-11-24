@@ -1053,7 +1053,7 @@ export class Game {
           const id = WEAPON_LIST[e.w];
           this.fx.muzzle(muz, dir, id === 'pistol' ? 0.7 : id === 'carbine' ? 1 : 1.5);
           const dist = this.cam.position.distanceTo(muz);
-          if (dist < 34) this.muzzleLight(muz);
+          if (dist < 34) this.muzzleLight(muz, 3, dir);
           this.fx.tracerLine(muz, e.e[0], e.e[1], e.e[2]);
           // a round past the ear
           const ab = new THREE.Vector3(e.e[0], e.e[1], e.e[2]).sub(muz);
@@ -1727,8 +1727,15 @@ export class Game {
     if (this.doorHoles.length > 40) this.doorHoles.shift()!.removeFromParent();
   }
 
-  muzzleLight(p: THREE.Vector3, k = 3) {
+  /** dir: for a shot, the way the barrel points. The flash is a ball of burning gas out in front of the muzzle, not a
+   *  lamp at the crown: lit from where it really is, it throws its light on the room ahead and does not bleach the
+   *  gun, the hands and the chest of whoever fired it */
+  muzzleLight(p: THREE.Vector3, k = 3, dir?: THREE.Vector3) {
     this.flashPoint.position.copy(p);
+    if (dir) {
+      const hit = this.L.world.ray(p.x, p.y, p.z, dir.x, dir.y, dir.z, 1.3);
+      this.flashPoint.position.addScaledVector(dir, hit ? Math.max(0.05, hit.t - 0.2) : 1.1);
+    }
     this.flashK = k;
   }
 
@@ -1856,7 +1863,7 @@ export class Game {
       for (const i of hit.cams) this.req({ t: 'camhit', i });
       for (const i of hit.trips) this.req({ t: 'triphit', i });
     },
-    muzzleLight: (p) => this.muzzleLight(p),
+    muzzleLight: (p, dir) => this.muzzleLight(p, 3, dir),
     prompt: (s, k) => this.hud.prompt(s, k),
     hitMark: () => {},
   };
@@ -2834,7 +2841,7 @@ export class Game {
     for (const o of this.others) o.distance = o.intensity > 0.05 ? 30 : 0.01;
     this.shade(s, T.own, 0);
     if (this.others[0].castShadow) this.shade(this.others[0], T.others, 1 % T.others);
-    this.flashPoint.intensity = this.flashK * 7;
+    this.flashPoint.intensity = this.flashK * 5.5;
     this.flashK = Math.max(0, this.flashK - dt * 110);
     // the fill stands behind and above the lens: from there the near arm and the far hand get much the same of it,
     // where a light among the arms burnt whatever passed closest white

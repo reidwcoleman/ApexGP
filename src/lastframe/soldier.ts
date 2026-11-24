@@ -334,7 +334,7 @@ function armsMesh(P: Person, dye: THREE.Color, wounds: { value: THREE.Vector4[] 
   float wf = 1.0 - smoothstep( 0.5, 1.6, max( fwidth( wq.x ), fwidth( wq.y ) ) );
   float weave = sin( wq.x + sin( wq.y * 0.5 ) * 0.6 ) * sin( wq.y ) * wf;
   // (up a glove's cuff it is dark; where a sleeve runs off the edge of the frame its inside is the same cloth)
-  float inside = gl_FrontFacing ? 1.0 : mix( 0.1, 0.8, tx.a );
+  float inside = gl_FrontFacing ? 1.0 : mix( 0.1, 0.4, tx.a );
   diffuseColor.rgb *= mix( tx.rgb, tx.rgb * lfDye * 2.0, tx.a ) * inside * mix( 1.0, shade * shade, 0.8 ) * ( 1.0 + weave * mix( 0.05, 0.085, tx.a ) );
   // a round through the arm: the cloth dark and wet round where it went in
   for ( int wi = 0; wi < 4; wi++ ) {
@@ -349,7 +349,7 @@ function armsMesh(P: Person, dye: THREE.Color, wounds: { value: THREE.Vector4[] 
 }`)
       .replace('#include <lights_fragment_end>', envFrag('0.5') + '#include <lights_fragment_end>');
   };
-  m.customProgramCacheKey = () => key + 'arms5';
+  m.customProgramCacheKey = () => key + 'arms6';
   const mesh = new THREE.SkinnedMesh(g, m);
   mesh.bind(P.skeleton, (P.body as THREE.SkinnedMesh).bindMatrix);
   mesh.frustumCulled = false;
@@ -446,6 +446,15 @@ function gearMaterial(team: number, wounds: { value: THREE.Vector4[] }) {
   diffuseColor.rgb *= 0.66 + 0.5 * gn;
   float dust = smoothstep( 0.5, 0.85, gearN( vGearP * 8.0 + 4.0 ) ) * 0.3 + smoothstep( 0.6, 0.9, gearN( vGearP * 31.0 ) ) * 0.16;
   diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.115, 0.107, 0.094 ) * ( 0.7 + 0.5 * gn ), dust );
+  #ifdef USE_NORMALMAP
+  if ( vNormalMapUv.x > 2000.0 ) {
+    // the placards on a search team's vest, chest and back: pale reflective cloth, and where the lettering was a bar
+    // of tape over it (see gear.py: the two boxes at y 1.412 and 1.4)
+    vec3 pale = vec3( 0.36, 0.37, 0.39 ) * ( 0.8 + 0.3 * gn );
+    float bar = vGearP.z > 0.0 ? step( abs( vGearP.y - 1.412 ), 0.0075 ) * step( abs( vGearP.x + 0.095 ), 0.037 ) : step( abs( vGearP.y - 1.4 ), 0.014 ) * step( abs( vGearP.x ), 0.078 );
+    diffuseColor.rgb = mix( pale, vec3( 0.012, 0.012, 0.014 ), bar );
+  }
+  #endif
 }
 gSoak = 0.0;
 for ( int wi = 0; wi < 4; wi++ ) {
@@ -466,7 +475,7 @@ for ( int wi = 0; wi < 4; wi++ ) {
 }`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.22, gSoak );');
   };
-  m.customProgramCacheKey = () => 'lfgear4';
+  m.customProgramCacheKey = () => 'lfgear5';
   return applyLF(m, { person: true });
 }
 

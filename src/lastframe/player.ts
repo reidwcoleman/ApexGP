@@ -173,7 +173,7 @@ export interface PlayerCtx {
   forts: { o: { i: number; x: number; y: number; z: number; w: number; alongX: boolean }; boards: number; charge: unknown }[];
   /** the attack-and-defend game: is it on, may this one act now, is it attacking, charges left */
   siege(): { on: boolean; act: boolean; attacker: boolean; charges: number; sheets: number; trips: number; kit: KitId; tripAt(i: number): boolean };
-  muzzleLight(p: THREE.Vector3): void;
+  muzzleLight(p: THREE.Vector3, dir?: THREE.Vector3): void;
   /** what can be done here; k: how far along the thing being done is (0..1) */
   prompt(s: string, k?: number): void;
   hitMark(kill: boolean): void;
@@ -1327,7 +1327,7 @@ export class LocalPlayer {
     sol.kick = 1;
     c.sound.shot(wi, null);
     c.fx.muzzle(muz, this.barrel, this.weapon === 'shotgun' || this.weapon === 'rifle' ? 1.5 : this.weapon === 'pistol' ? 0.7 : 1);
-    c.muzzleLight(muz);
+    c.muzzleLight(muz, this.barrel);
   }
 
   private throwNade(kind: NadeKind, c: PlayerCtx, cam: THREE.PerspectiveCamera) {

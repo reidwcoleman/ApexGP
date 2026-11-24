@@ -19,6 +19,7 @@ class Part:
         s.name = name
         s.bm = bmesh.new()
         s.shade = s.bm.faces.layers.float.new('shade')
+        s.old = s.bm.faces.layers.int.new('old')
     def _set(s, faces, k):
         for f in faces: f[s.shade] = k
     def grid(s, fn, nu, nv, closeu=False, closev=False, k=1.0):
@@ -48,8 +49,9 @@ class Part:
         return A, B
     def box(s, c, sz, k=1.0, bevel=0.0, rot=None):
         """c centre, sz full size, rot (axis, angle) about the centre"""
-        # (a bevel makes the box's faces again: whatever is new when it is done is this box)
-        for f in s.bm.faces: f.tag = True
+        # (a bevel makes the box's faces again: whatever is new when it is done is this box. A layer of its own says which
+        # were there before; the tag flag will not do, the bevel uses it and wipes it on every face in the mesh)
+        for f in s.bm.faces: f[s.old] = 1
         m = bmesh.ops.create_cube(s.bm, size=1.0)
         vs = m['verts']
         from mathutils import Matrix
@@ -62,7 +64,7 @@ class Part:
         if bevel:
             es = list({e for v in vs for e in v.link_edges})
             bmesh.ops.bevel(s.bm, geom=es + vs, offset=bevel, segments=1, profile=0.5, affect='EDGES')
-        fs = [f for f in s.bm.faces if not f.tag]
+        fs = [f for f in s.bm.faces if f[s.old] == 0]
         s._set(fs, k)
         return vs
     def tube(s, pts, r, n=8, k=1.0):
@@ -224,7 +226,7 @@ def vest():
     p.cyl((0.0, 1.415, chest_curve(0, 0.175, 0.04) + 0.03), (0, 0, 1), 0.013, 0.008, k=0.28)
     # a plain placard on the chest and a wide one across the back: the way a search team is marked, with nothing written on it
     p.box((-0.095, 1.412, chest_curve(0.095, 0.17, 0.04) + 0.004), (0.098, 0.034, 0.005), k=2.3, bevel=0.001)
-    p.box((0, 1.4, -0.199), (0.2, 0.062, 0.006), k=2.3, bevel=0.001)
+    p.box((0, 1.4, -0.2135), (0.2, 0.062, 0.006), k=2.3, bevel=0.001)
     # back: a hydration pouch and a drag handle
     pouch(p, 0, 1.25, -0.2, 0.2, 0.24, 0.05, s=-1, flap=False, k=0.88)
     p.tube([(-0.06, 1.44, -0.178), (-0.05, 1.47, -0.195), (0.05, 1.47, -0.195), (0.06, 1.44, -0.178)], 0.008, 6, k=0.7)
@@ -307,9 +309,9 @@ def beanie():
     def fn(u, v):
         th = u * 2 * PI
         f = math.cos(th)
-        lim = 1.2 + 0.36 * math.sin(th) ** 2 + 0.42 * max(0.0, -f) ** 1.5
+        lim = 1.27 + 0.26 * math.sin(th) ** 2 + 0.4 * max(0.0, -f) ** 1.5
         ph = v * lim
-        cuff = 1.045 if v > 0.74 else 1.0
+        cuff = 1.0 + 0.045 * min(1.0, max(0.0, (v - 0.68) / 0.1))
         rib = 1 + 0.016 * math.sin(th * 30) * (0.35 + 0.65 * v)
         k = cuff * rib
         # the crown has a little cloth to spare and lies back
@@ -402,13 +404,15 @@ for o in parts:
     o.data.materials.append(mm)
     # box-projected uvs for the weave: 1 unit = 6 cm
     uvl = o.data.uv_layers.new(name='uv')
+    # (a placard is told apart in the shader by where its weave is: the same weave, 4096 squares along)
+    shade0 = list(o['shade'])
     for poly in o.data.polygons:
         n = poly.normal
         ax = max(range(3), key=lambda i: abs(n[i]))
         for li in poly.loop_indices:
             c = o.data.vertices[o.data.loops[li].vertex_index].co
             a, b = [(c.y, c.z), (c.x, c.z), (c.x, c.y)][ax]
-            uvl.data[li].uv = (a / 0.06, b / 0.06)
+            uvl.data[li].uv = (a / 0.06 + (4096.0 if poly.index < len(shade0) and shade0[poly.index] > 2.0 else 0.0), b / 0.06)
 bpy.data.objects.remove(stand)
 bpy.ops.object.select_all(action='DESELECT')
 for o in parts: o.select_set(True)
