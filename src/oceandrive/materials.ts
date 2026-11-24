@@ -248,9 +248,13 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
         float dry = smoothstep( 0.45, 0.75, odFbm( vOdWorld.xz * 0.11 + 7.0 ) );
         float stripe = step( 0.5, fract( ( vOdWorld.x * 0.86 + vOdWorld.z * 0.5 ) / 3.2 ) );
         vec3 lush = vec3( 0.86, 0.95, 0.7 );
-        vec3 hay = vec3( 1.1, 1.0, 0.62 );
-        diffuseColor.rgb *= mix( lush, hay, dry * 0.8 );
-        diffuseColor.rgb *= mix( 0.95, 1.03, stripe ) * mix( 0.8, 1.08, v );
+        vec3 hay = vec3( 1.18, 1.02, 0.6 );
+        // Florida St. Augustine grass: sun-bleached and thin in the open, worn to sand in spots
+        float worn = smoothstep( 0.68, 0.8, odFbm( vOdWorld.xz * 0.06 - 3.0 ) );
+        float clump = odFbm( vOdWorld.xz * 1.6 );
+        diffuseColor.rgb *= mix( lush, hay, dry );
+        diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * vec3( 0.78, 0.68, 0.5 ), worn * 0.6 );
+        diffuseColor.rgb *= mix( 0.94, 1.04, stripe ) * mix( 0.72, 1.12, v ) * mix( 0.88, 1.06, clump );
       }`;
     } else if (kind === 'ground') {
       albedo = /* glsl */ `
