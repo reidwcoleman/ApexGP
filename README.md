@@ -869,8 +869,10 @@ and bots; the contestants are original bean characters, not marbles.
     zone and sometimes blitz; the safety stays deeper than the deepest receiver; once the ball
     is past the line the defence pursues and the offence blocks. The host runs it all and
     sends the drive in the `cup` packet; each browser puts its own beans on their marks; a
-    guest's throw is a `pass` message and the announcer a `say`. No mystery boxes here. Bot
-    games: about 25 plays, 60% of passes complete, two to four touchdowns.
+    guest's throw is a `pass` message and the announcer a `say`. No mystery boxes here. The
+    round is two minutes of football: the clock stops at the whistle and starts again at the
+    snap (`CupPlay.stopped`), so it runs about four minutes. Bot games: about 37 plays, half
+    to 60% of passes complete, one to three touchdowns.
     And Bean Hoops (basketball, rule `hoops`): a wooden court with a
     hoop high at each end. Run into the ball to dribble it, DIVE into it to shoot: it's thrown at
     the hoop on an arc that drops into it, truer the closer you are and the more squarely you

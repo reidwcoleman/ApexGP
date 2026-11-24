@@ -1445,7 +1445,8 @@ export class MarbleGame {
     const w = c.b.world;
     const G = this.cupP!;
     const A = c.cup!;
-    const x = w.time - c.state.go;
+    // (Bean Bowl's clock stops at the whistle)
+    const x = w.time - c.state.go - G.stopped;
     const on = this.state === 'play';
     if (A.gates) return this.gateRules(dt);
     if (on) {
@@ -3382,7 +3383,7 @@ export class MarbleGame {
     let timer: string | undefined;
     if (c.team && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, TEAM_T - this.playT));
     else if (c.cup?.gates && (this.state === 'play' || this.state === 'over')) timer = clock(Math.max(0, c.cup.cfg.T - this.playT));
-    else if (this.cupP && (this.state === 'play' || this.state === 'over')) timer = this.playT > this.cupP.cfg.T ? this.cupP.cfg.extra : clock(Math.max(0, this.cupP.cfg.T - this.playT));
+    else if (this.cupP && (this.state === 'play' || this.state === 'over')) timer = this.playT - this.cupP.stopped > this.cupP.cfg.T ? this.cupP.cfg.extra : clock(Math.max(0, this.cupP.cfg.T - (this.playT - this.cupP.stopped)));
     else if (c.keep && (this.state === 'play' || this.state === 'over')) timer = this.playT > KEEP.T ? 'OVERTIME' : clock(Math.max(0, KEEP.T - this.playT));
     else if (c.plate && (this.state === 'play' || this.state === 'over')) {
       timer = clock(SURVIVE_T - this.playT);

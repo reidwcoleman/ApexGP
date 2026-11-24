@@ -55,7 +55,7 @@ async function one(id) {
         if (b.kickT !== k0) { const H = A.hoops[P.teamOf(r.c.id)]; out.shots.push(+Math.hypot(H.x - b.pos.x, H.z - b.pos.z).toFixed(0) * (b.vel.y > 8.5 ? 1 : -1)); }
       };
     }
-    for (let t = 0; t < 270 && (g.state === 'play' || g.state === 'countdown' || g.state === 'intro'); t += 1 / 60) {
+    for (let t = 0; t < 460 && (g.state === 'play' || g.state === 'countdown' || g.state === 'intro'); t += 1 / 60) {
       g.ff(1 / 60);
       if (g.state !== 'play') continue;
       out.ticks++;

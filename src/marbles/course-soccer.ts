@@ -37,7 +37,7 @@ export const CUP = {
 export type CupRule = 'cup' | 'push' | 'fence' | 'volley' | 'hoops' | 'gates' | 'bowl';
 /**
  * Bean Bowl, football by the downs. The side with the ball has four downs to make ten yards
- * (a yard is half a metre here: the field's fifty metres are its hundred yards); make them and
+ * (the field between the goal lines is its hundred yards, whatever it measures); make them and
  * it's first down again, don't and the other side takes over where the ball lies.
  */
 export interface BowlDrive {
@@ -131,7 +131,7 @@ export const CUP_CFG: Record<CupRule, CupCfg> = {
   // basketball: a hoop high at each end; a dive into the ball is a shot at it
   hoops: { rule: 'hoops', ...CUP, HW: 17, HL: 25, cut: 5, goalHalf: 0, goalH: 0, goalD: 0, R: 1.15, ceil: 15, T: 100, restart: 2.6, second: 0, over: 45, balls: 1, kick: 1, loft: 6.5, push: 0.55, fenceH: 0, top: 24, credit: 7, hoopY: 5.4, hoopR: 2.3, hoopIn: 3.3, three: 15, endZone: 0, call: 'DRIBBLE IT UP THE COURT · DIVE INTO IT TO SHOOT', goalLine: 'Most points stays in the show. A shot from outside the arc is worth three', goalWord: 'BASKET!', extra: 'NEXT BASKET WINS' },
   // football: a ball you carry. Run it into their end zone for a touchdown; a tackle knocks it loose; throw it to a team-mate
-  bowl: { rule: 'bowl', ...CUP, ...NOHOOP, HW: 16, HL: 31, cut: 3, goalHalf: 0, goalH: 0, goalD: 0, R: 0.72, ceil: 16, T: 170, restart: 3, second: 0, over: 45, balls: 1, kick: 1, loft: 6, push: 1, fenceH: 0, top: 30, credit: 8, endZone: 6, call: 'FOUR DOWNS TO MAKE TEN YARDS · GET IT TO THEIR END ZONE', goalLine: 'Real football: four downs to make ten yards. A touchdown is 7. Most points stays in the show', goalWord: 'TOUCHDOWN!', extra: 'NEXT SCORE WINS' },
+  bowl: { rule: 'bowl', ...CUP, ...NOHOOP, HW: 19, HL: 37, cut: 3, goalHalf: 0, goalH: 0, goalD: 0, R: 0.72, ceil: 16, T: 120, restart: 3, second: 0, over: 45, balls: 1, kick: 1, loft: 6, push: 1, fenceH: 0, top: 30, credit: 8, endZone: 6, call: 'FOUR DOWNS TO MAKE TEN YARDS · GET IT TO THEIR END ZONE', goalLine: 'Real football: four downs to make ten yards. A touchdown is 7. Most points stays in the show', goalWord: 'TOUCHDOWN!', extra: 'NEXT SCORE WINS' },
   // the final: a ring, a gate each, and every bean for itself (course-gates.ts)
   gates: { rule: 'gates', ...CUP, ...NOHOOP, HW: 17, HL: 17, cut: 0, goalHalf: 0, goalH: 0, goalD: 0, R: 1.3, ceil: 12, T: 150, restart: 1.5, second: 0, over: 0, balls: 3, kick: 0.82, loft: 4.2, push: 0.9, fenceH: 0, top: 30, credit: 6, call: 'GUARD YOUR GATE · KNOCK IT THROUGH THEIRS', goalLine: 'A ball through your gate and you are out. Last bean standing takes the crown', goalWord: '', extra: '' },
 };

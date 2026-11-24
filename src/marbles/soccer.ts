@@ -313,7 +313,7 @@ export class CupPlay {
     D.down = n.down;
     D.los = THREE.MathUtils.clamp(n.los, -play + 0.5, play - 0.5);
     // (a new set of downs: ten yards on from here, or the goal line if that's nearer)
-    if (newSeries || !D.seq) D.first = THREE.MathUtils.clamp(D.los + dir * 5, -play, play);
+    if (newSeries || !D.seq) D.first = THREE.MathUtils.clamp(D.los + (dir * 10) / this.ypm, -play, play);
     this.nextUp = null;
     D.phase = 'set';
     D.snapAt = t + wait;
@@ -322,7 +322,7 @@ export class CupPlay {
     const side = this.who().filter((r) => r.m.active && !r.out && this.teamOf(r.c.id) === D.off).sort((p, q) => p.c.id - q.c.id);
     const people = side.filter((r) => r.c.human), bots = side.filter((r) => !r.c.human);
     // the play: a run or a pass (short to go: run it more; long: throw it), then which
-    const togo = (D.first - D.los) * dir * 2;
+    const togo = (D.first - D.los) * dir * this.ypm;
     const run = side.length >= 5 && Math.random() < (togo <= 3 ? 0.6 : togo > 12 || (D.down >= 3 && togo > 5) ? 0.06 : 0.36);
     const book = PLAYS.map((_, k) => k).filter((k) => PLAYS[k].run === run && k !== D.play);
     D.play = book[Math.floor(Math.random() * book.length)] ?? 0;
@@ -333,15 +333,24 @@ export class CupPlay {
     D.qb = qb ? qb.m.id : -1;
     this.pend.push({ k: 'say', a: `${ordinalOf(D.down)} & ${this.toGo()}`, b: `${CUP_NAMES[D.off]} ball ${this.where(D.los)}`, big: false });
   }
+  /** yards to a metre: the field between the goal lines is a hundred yards */
+  get ypm() {
+    return 50 / (this.cfg.HL - this.cfg.endZone);
+  }
+  /**
+   * The game clock stops at the whistle and starts again at the snap: this is how long it's
+   * been stopped (the round's two minutes are two minutes of football).
+   */
+  stopped = 0;
   /** yards to the line to gain ("GOAL" inside the ten) */
   toGo() {
     const D = this.drive, C = this.cfg, dir = D.off === 0 ? 1 : -1;
     if (Math.abs(D.first) >= C.HL - C.endZone - 0.01) return 'GOAL';
-    return String(Math.max(1, Math.round((D.first - D.los) * dir * 2)));
+    return String(Math.max(1, Math.round((D.first - D.los) * dir * this.ypm)));
   }
   /** where a line is, the way a commentator says it: "on the PINK 35" */
   where(z: number) {
-    const yard = Math.round(50 - Math.abs(z) * 2);
+    const yard = Math.round(50 - Math.abs(z) * this.ypm);
     if (yard >= 50) return 'at midfield';
     return `on the ${CUP_NAMES[z < 0 ? 0 : 1]} ${Math.max(1, yard)}`;
   }
@@ -595,10 +604,10 @@ export class CupPlay {
       // an interception: theirs, where the runner was brought down (in its own end zone: out to the 20)
       const nd = other === 0 ? 1 : -1;
       this.stats.turnovers++;
-      this.nextUp = { off: other, down: 1, los: z * nd < -play ? -nd * (play - 10) : z };
+      this.nextUp = { off: other, down: 1, los: z * nd < -play ? -nd * play * 0.6 : z };
       return;
     }
-    const gain = (z - D.los) * dir, yards = Math.round(gain * 2);
+    const gain = (z - D.los) * dir, yards = Math.round(gain * this.ypm);
     this.stats.yards[D.off] += yards;
     if (sacked && gain < 0) this.stats.sacks++;
     if (D.run || (!D.passed && !sacked)) this.stats.runs++;
@@ -635,6 +644,7 @@ export class CupPlay {
   private blocks = new Map<number, { seq: number; t: number; free: number; need: number }>();
   private engage(dt: number) {
     const D = this.drive, all = this.who(), ball = this.arena.balls[0];
+    if (D.phase !== 'live') this.stopped += dt;
     const S = D.phase === 'live' && !D.turned ? this.lineup() : null;
     for (const r of all) {
       const m = r.m;
@@ -1256,7 +1266,7 @@ export class CupPlay {
     // (Bean Bowl: and who's carrying it)
     if (this.cfg.rule === 'bowl') {
       const D = this.drive;
-      out.push(this.arena.balls[0].held, D.phase === 'set' ? 0 : D.phase === 'live' ? 1 : 2, +(D.snapAt - this.now).toFixed(2), D.los, D.first, D.down, D.off, D.qb, D.play, D.seq, D.passed ? 1 : 0, D.turned ? 1 : 0, +(this.now - D.liveAt).toFixed(2));
+      out.push(this.arena.balls[0].held, D.phase === 'set' ? 0 : D.phase === 'live' ? 1 : 2, +(D.snapAt - this.now).toFixed(2), D.los, D.first, D.down, D.off, D.qb, D.play, D.seq, D.passed ? 1 : 0, D.turned ? 1 : 0, +(this.now - D.liveAt).toFixed(2), +this.stopped.toFixed(2));
     }
     return out.map((v) => Math.round(v * 100) / 100);
   }
@@ -1294,6 +1304,7 @@ export class CupPlay {
         D.passed = s[o2 + 10] > 0;
         D.turned = s[o2 + 11] > 0;
         D.liveAt = this.now - s[o2 + 12];
+        if (s[o2 + 13] !== undefined) this.stopped = s[o2 + 13];
         if (held !== q.held) {
           // (what happened, as near as a guest can tell)
           if (held >= 0) {
