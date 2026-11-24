@@ -124,7 +124,39 @@ export class Cars {
   private ferrariFwd = 1;
   /** the bodies modelled in Blender (cars.glb): body / glass / heads / tails per model */
   private modelled = new Map<string, Record<string, THREE.BufferGeometry>>();
-  private glass = new THREE.MeshPhysicalMaterial({ color: 0x080b0e, metalness: 0.3, roughness: 0.02, transparent: true, opacity: 0.88, clearcoat: 1, envMapIntensity: 1.5 });
+  private glass = new THREE.MeshPhysicalMaterial({ color: 0x0c1216, metalness: 0.3, roughness: 0.02, transparent: true, opacity: 0.6, clearcoat: 1, envMapIntensity: 1.5 });
+  private cabinMat = new THREE.MeshStandardMaterial({ color: 0x232325, roughness: 0.85, name: 'od-cabin' });
+  private cabins = new Map<string, THREE.BufferGeometry>();
+  /** what you see through the glass: the tub, the dash, two seat backs with headrests, the rear bench */
+  private cabin(id: ModelId): THREE.BufferGeometry {
+    let g = this.cabins.get(id);
+    if (g) return g;
+    const m = MODELS[id];
+    const hl = m.L / 2;
+    const zF = m.cowl * hl, zR = m.roofR * hl;
+    const parts: THREE.BufferGeometry[] = [];
+    const box = (w: number, h: number, d: number, x: number, y: number, z: number) => {
+      const b = new THREE.BoxGeometry(w, h, d);
+      b.translate(x, y, z);
+      parts.push(b.index ? b.toNonIndexed() : b);
+    };
+    const inW = m.W - 0.24;
+    // the tub up to the sills
+    box(inW, 0.12, zF - zR, 0, m.beltH - 0.12, (zF + zR) / 2);
+    // the dash
+    box(inW, 0.16, 0.42, 0, m.beltH + 0.02, zF - 0.24);
+    // front seats
+    const zs = -m.L * 0.04 - 0.32;
+    for (const sx of [1, -1]) {
+      box(0.48, 0.58, 0.1, sx * m.W * 0.2, m.beltH + 0.12, zs);
+      box(0.24, 0.2, 0.09, sx * m.W * 0.2, Math.min(m.H - 0.12, m.beltH + 0.52), zs - 0.01);
+    }
+    // the rear bench
+    if (zs - zR > 0.5) box(inW - 0.05, 0.5, 0.12, 0, m.beltH + 0.08, zR + 0.3);
+    g = mergeGeometries(parts)!;
+    this.cabins.set(id, g);
+    return g;
+  }
   private wheelMat = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.6, roughness: 0.4 });
   private walkers: { x: number; z: number }[] = [];
   private nightSet = false;
@@ -270,6 +302,7 @@ export class Cars {
       const body = new THREE.Mesh(g.body, kind === 'cyber' ? new THREE.MeshPhysicalMaterial({ color: 0xb8bcc2, metalness: 1, roughness: 0.32, vertexColors: true }) : paintMaterial(paint, this.rnd() < 0.6));
       root.add(body);
       root.add(new THREE.Mesh(g.glass, this.glass));
+      root.add(new THREE.Mesh(this.cabin(id), this.cabinMat));
       const hm = lampHead(), tm = lampTail();
       lamps.push(hm, tm);
       root.add(new THREE.Mesh(g.heads, hm), new THREE.Mesh(g.tails, tm));
