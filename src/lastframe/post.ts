@@ -1014,8 +1014,12 @@ export class Planar {
     this.rt?.dispose();
     this.rt = new THREE.WebGLRenderTarget(Math.round(w / 2.4), Math.round(h / 2.4), { type: THREE.HalfFloatType, depthBuffer: true, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
   }
-  render(scene: THREE.Scene, cam: THREE.PerspectiveCamera, hide: THREE.Object3D[], on: boolean) {
-    LF.planarK.value = on ? 1 : 0;
+  /** `floor`: indoors, the height of the floor the mirror lies in (the street's own otherwise) */
+  render(scene: THREE.Scene, cam: THREE.PerspectiveCamera, hide: THREE.Object3D[], on: boolean, floor: number | null = null) {
+    this.y = floor === null ? -0.06 : floor;
+    LF.planarK.value = on && floor === null ? 1 : 0;
+    LF.planarIn.value = on && floor !== null ? 1 : 0;
+    LF.planarY.value = this.y;
     if (!on || !this.rt) {
       LF.planar.value = this.black;
       return;

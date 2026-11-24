@@ -3,6 +3,7 @@ import { MOVER } from './sun.ts';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Person, loadPeople, setPeopleCore, setPeopleRest, type Look, type PeopleKit } from '../people/Humans.ts';
 import { applyLF } from './lighting.ts';
+import { ENV, ENV_PARS, envFrag } from './envcube.ts';
 import { BASE } from './world.ts';
 import { refine } from './refine.ts';
 import { F, WEAPONS, WEAPON_LIST, type WeaponId } from './shared.ts';
@@ -18,6 +19,9 @@ export interface Gun {
   action: THREE.Object3D | null;
   actionRest: THREE.Vector3;
   magRest: THREE.Vector3;
+  /** the middle of the magazine in the gun's own space, and how tall it is */
+  magMid: THREE.Vector3;
+  magLen: number;
 }
 
 const PARTS: Record<WeaponId, string[]> = {
@@ -46,13 +50,15 @@ export async function loadGuns() {
         // the made-up guns are baked without any surface: give them the fine grain of real finish (stippled
         // polymer, bead-blasted and parkerised steel), and the dull sheen of it rather than a plastic gloss
         const made = !mat.normalMap;
-        applyLF(mat, { spec: made ? 0.3 : 0.38, view: 1 });
-        mat.metalness *= made ? 0.5 : 0.7;
-        mat.roughness *= made ? 1.6 : 1.1;
+        // (the room's own reflection is on them now, see envcube.ts: the baked probes' share is small, and the finish is
+        // what it is on the real thing: parkerised steel and anodised alloy are dull but they are metal, polymer is neither)
+        applyLF(mat, { spec: made ? 0.14 : 0.18, view: 1 });
+        mat.metalness *= made ? 0.6 : 0.75;
+        mat.roughness = Math.min(1, Math.max(made ? 0.5 : 0.42, mat.roughness * (made ? 1.75 : 1.3)));
         if (made) mat.color.multiplyScalar(1.18);
         if (made) {
           mat.normalMap = grain();
-          mat.normalScale.set(0.16, 0.16);
+          mat.normalScale.set(0.07, 0.07);
         }
         if (mat.map) mat.map.anisotropy = 8;
         worn(mat);
@@ -70,9 +76,13 @@ function worn(mat: THREE.MeshStandardMaterial) {
   const prev = mat.onBeforeCompile, key = mat.customProgramCacheKey?.() ?? '';
   mat.onBeforeCompile = (s, r) => {
     prev?.call(mat, s, r);
+    s.uniforms.lfEnv = ENV.map;
+    s.uniforms.lfEnvK = ENV.k;
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vGunP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvGunP = position;');
     s.fragmentShader = s.fragmentShader
+      .replace('#include <lights_fragment_end>', envFrag('0.42') + '#include <lights_fragment_end>')
       .replace('#include <common>', `#include <common>
+${ENV_PARS}
 varying vec3 vGunP;
 float gWear;
 float gunH( vec3 p ) { return fract( sin( dot( p, vec3( 127.1, 311.7, 74.7 ) ) ) * 43758.5453 ); }
@@ -97,7 +107,7 @@ float gunN( vec3 p ) {
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.34, gWear * 0.8 );')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = mix( metalnessFactor, 0.9, gWear * 0.7 );');
   };
-  mat.customProgramCacheKey = () => key + 'worn';
+  mat.customProgramCacheKey = () => key + 'worn4';
 }
 
 /** a tiling height field of fine grain, as a normal map: a few octaves of value noise, wrapped */
@@ -171,7 +181,15 @@ export function buildGun(id: WeaponId): Gun {
     dot.visible = false;
     group.add(dot);
   }
-  return { group, id, dot, mag, action, actionRest: action?.position.clone() ?? new THREE.Vector3(), magRest: mag?.position.clone() ?? new THREE.Vector3() };
+  const magMid = new THREE.Vector3();
+  let magLen = 0.1;
+  if (mag) {
+    group.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(mag);
+    bb.getCenter(magMid);
+    magLen = bb.max.y - bb.min.y;
+  }
+  return { group, id, dot, mag, action, actionRest: action?.position.clone() ?? new THREE.Vector3(), magRest: mag?.position.clone() ?? new THREE.Vector3(), magMid, magLen };
 }
 
 export function preparePeople(): Promise<PeopleKit> {
@@ -213,6 +231,93 @@ export async function loadGear() {
     const m = o as THREE.Mesh;
     if (m.isMesh && WEAR[m.name]) parts.set(m.name, m.geometry);
   });
+}
+
+// ---- the wearer's own sleeves and gloves: their own mesh and pictures (tools/lastframe/arms.py), on the avatar's skeleton
+interface ArmsKit { pos: Float32Array; nor: Float32Array; uv: Float32Array; sw: Float32Array; si: Uint8Array; index: Uint32Array; bones: string[]; c: THREE.Texture; n: THREE.Texture; orm: THREE.Texture }
+let armsKit: ArmsKit | null = null;
+
+export async function loadArms() {
+  try {
+    const meta = (await (await fetch(BASE + 'arms.json')).json()) as { verts: number; tris: number; bones: string[] };
+    const buf = await (await fetch(BASE + 'arms.bin')).arrayBuffer();
+    const n = meta.verts, t = meta.tris * 3;
+    let o = 0;
+    const f32 = (k: number) => { const a = new Float32Array(buf, o, n * k); o += n * k * 4; return a; };
+    const pos = f32(3), nor = f32(3), uv = f32(2), sw = f32(4);
+    const index = new Uint32Array(buf, o, t);
+    o += t * 4;
+    const si = new Uint8Array(buf, o, n * 4);
+    const L = new THREE.TextureLoader();
+    const tex = async (name: string, colour: boolean) => {
+      const x = await L.loadAsync(BASE + name);
+      x.colorSpace = colour ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      x.anisotropy = 8;
+      return x;
+    };
+    const [c, nm, orm] = await Promise.all([tex('arms_c.webp', true), tex('arms_n.webp', false), tex('arms_orm.webp', false)]);
+    armsKit = { pos, nor, uv, sw, si, index, bones: meta.bones, c, n: nm, orm };
+  } catch (e) {
+    // without them the avatar's own arms are drawn, as before
+    console.warn('[arms]', e);
+  }
+}
+
+/** the arms for one body: the mesh's bone numbers are the kit's own, turned into this skeleton's */
+function armsMesh(P: Person, dye: THREE.Color, wounds: { value: THREE.Vector4[] }): THREE.SkinnedMesh | null {
+  const K = armsKit;
+  if (!K) return null;
+  const map = K.bones.map((b) => P.skeleton.bones.indexOf(P.bones[b]));
+  if (map.some((i) => i < 0)) return null;
+  const si = new Uint16Array(K.si.length);
+  for (let i = 0; i < si.length; i++) si[i] = map[K.si[i]];
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(K.pos, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(K.nor, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(K.uv, 2));
+  g.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
+  g.setAttribute('skinWeight', new THREE.BufferAttribute(K.sw, 4));
+  g.setIndex(new THREE.BufferAttribute(K.index, 1));
+  // cloth and suede throw back a fraction of what a smooth surface of the same stuff would: without that taken down, a dark
+  // glove under a strip light goes the grey of frosted glass
+  const m = new THREE.MeshPhysicalMaterial({ map: K.c, normalMap: K.n, aoMap: K.orm, roughnessMap: K.orm, roughness: 1, metalness: 0, side: THREE.DoubleSide, specularIntensity: 0.35, sheen: 1, sheenRoughness: 0.55, sheenColor: new THREE.Color(0.035, 0.037, 0.042) });
+  m.normalScale.set(2.1, 2.1);
+  m.aoMapIntensity = 1;
+  const tint = { value: dye };
+  void wounds;
+  applyLF(m, { person: true, view: 1, spec: 0.25 });
+  const prev = m.onBeforeCompile, key = m.customProgramCacheKey();
+  m.onBeforeCompile = (s, r) => {
+    prev.call(m, s, r);
+    s.uniforms.lfDye = tint;
+    s.uniforms.lfEnv = ENV.map;
+    s.uniforms.lfEnvK = ENV.k;
+    s.fragmentShader = s.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 lfDye;\n' + ENV_PARS)
+      // the cloth is baked a mid grey with the picture's alpha saying where it is: the side's dye goes over that, and the
+      // glove keeps the colours it was made in. Looked at from inside (up a cuff) it is the dark of a sleeve
+      .replace('#include <map_fragment>', `{
+  vec4 tx = texture2D( map, vMapUv );
+  // (the shade down in a fold or a seam is shade whatever the light is doing: the baked occlusion goes on everything)
+  float shade = texture2D( aoMap, vMapUv ).r;
+  // the weave: too fine for the picture, so it is drawn here, and let go of before it is small enough to shimmer
+  vec2 wq = vMapUv * 4100.0;
+  float wf = 1.0 - smoothstep( 0.5, 1.6, max( fwidth( wq.x ), fwidth( wq.y ) ) );
+  float weave = sin( wq.x + sin( wq.y * 0.5 ) * 0.6 ) * sin( wq.y ) * wf;
+  // (up a glove's cuff it is dark; where a sleeve runs off the edge of the frame its inside is the same cloth)
+  float inside = gl_FrontFacing ? 1.0 : mix( 0.1, 0.8, tx.a );
+  diffuseColor.rgb *= mix( tx.rgb, tx.rgb * lfDye * 2.0, tx.a ) * inside * mix( 1.0, shade * shade, 0.8 ) * ( 1.0 + weave * mix( 0.05, 0.085, tx.a ) );
+}`)
+      .replace('#include <lights_fragment_end>', envFrag('0.5') + '#include <lights_fragment_end>');
+  };
+  m.customProgramCacheKey = () => key + 'arms4';
+  const mesh = new THREE.SkinnedMesh(g, m);
+  mesh.bind(P.skeleton, (P.body as THREE.SkinnedMesh).bindMatrix);
+  mesh.frustumCulled = false;
+  mesh.castShadow = false;
+  mesh.visible = false;
+  mesh.userData.arms = true;
+  return mesh;
 }
 
 /** one skinned mesh for a whole outfit: each part rides its bone */
@@ -355,6 +460,9 @@ export class Soldier {
   /** first person: the support hand leaves the gun and goes up to the camera on the chest, 0 to 1, and where that is */
   camHand = 0;
   readonly camAt = new THREE.Vector3();
+  /** first person: the support hand is somewhere of its own, in the gun's space (changing a magazine), 0 to 1 */
+  supK = 0;
+  readonly supAt = new THREE.Vector3();
   /** seconds since death, -1 alive */
   dead = -1;
   private clip = '';
@@ -374,6 +482,7 @@ export class Soldier {
   private hitDir = new THREE.Vector3();
   /** from inside, only the arms and legs are drawn */
   private fpHide = { value: 0 };
+  private arms: THREE.SkinnedMesh | null = null;
   /** where rounds went in, in the body's own rest pose, and how far each has soaked: the cloth takes it up and it spreads */
   private wounds = { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] };
   private woundTo = [0, 0, 0, 0];
@@ -381,7 +490,7 @@ export class Soldier {
   private face = 0;
   private marks: { neckY: number; chestY: number; waistY: number; wrist: THREE.Vector3 } | null = null;
 
-  constructor(kit: PeopleKit, readonly team: number, slot: number) {
+  constructor(kit: PeopleKit, readonly team: number, readonly slot: number) {
     this.person = new Person(kit, lookFor(team, slot));
     this.person.lively = true;
     this.geo0 = this.person.body.geometry;
@@ -432,7 +541,7 @@ export class Soldier {
       s.uniforms.lfFP = hide;
       s.uniforms.lfMask = mask;
       s.uniforms.lfWound = wounds;
-      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nfloat lfFpA = 1.0;\nvoid main() {\n  if ( lfFP > 0.5 ) {\n    // from inside the trunk is gone: the camera sits in it. The sleeves run on up out of the frame, whole, as arms do\n    float fa1 = ( vPart < 2.5 || vPart > 5.5 ) ? 1.0 - smoothstep( uL0.z - 0.15, uL0.z - 0.01, vRest.y ) : 1.0;\n    if ( fa1 < 0.4 ) discard;\n    // and the top of the legs goes into the shade of what is above them\n    lfFpA = smoothstep( 0.4, 1.0, fa1 );\n  }');
+      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nfloat lfFpA = 1.0;\nvoid main() {\n  if ( lfFP > 1.5 && vPart > 2.5 && vPart < 5.5 ) discard;\n  if ( lfFP > 0.5 ) {\n    // from inside the trunk is gone: the camera sits in it. The sleeves run on up out of the frame, whole, as arms do\n    float fa1 = ( vPart < 2.5 || vPart > 5.5 ) ? 1.0 - smoothstep( uL0.z - 0.15, uL0.z - 0.01, vRest.y ) : 1.0;\n    if ( fa1 < 0.4 ) discard;\n    // and the top of the legs goes into the shade of what is above them\n    lfFpA = smoothstep( 0.4, 1.0, fa1 );\n  }');
       // the head's own mesh, dyed: a balaclava that fits because it is the face. An eye slot, or a scarf to the nose
       s.fragmentShader = s.fragmentShader.replace('diffuseColor.rgb *= col;', `if ( part < 0.5 ) {
     float slot = abs( vRest.y - 1.703 ) - 0.021;
@@ -543,7 +652,7 @@ export class Soldier {
 }
 #include <lights_physical_fragment>`);
     };
-    bm.customProgramCacheKey = () => key + 'fp20';
+    bm.customProgramCacheKey = () => key + 'fp21';
     this.person.play('idle');
     this.root.traverse((o) => o.layers.enable(MOVER));
   }
@@ -590,7 +699,16 @@ export class Soldier {
   setFirstPerson(on: boolean) {
     this.far = false;
     this.firstPerson = on;
-    this.fpHide.value = on ? 1 : 0;
+    // the wearer's own arms are the made ones, if they loaded: the avatar's go
+    if (on && !this.arms) {
+      this.arms = armsMesh(this.person, new THREE.Color(lookFor(this.team, this.slot).topColor as string).multiplyScalar(0.36), this.wounds);
+      if (this.arms) {
+        this.person.body.parent!.add(this.arms);
+        this.arms.layers.enable(MOVER);
+      }
+    }
+    if (this.arms) this.arms.visible = on;
+    this.fpHide.value = on ? (this.arms ? 2 : 1) : 0;
     this.person.root.traverse((o) => {
       if (/hair/.test(o.name) || o.userData.gear) o.visible = !on;
       (o as THREE.Mesh).castShadow = !on;
@@ -893,6 +1011,7 @@ export class Soldier {
     const pistol = this.weapon === 'pistol';
     const mh = this.magHand;
     const sup = new THREE.Vector3(su[0] + (pistol ? 0.05 : 0.04), su[1] - (pistol ? 0.03 : 0.052) - mh * 0.14, su[2] - 0.06 - mh * (su[2] - 0.08)).applyMatrix4(g.matrixWorld);
+    if (this.supK > 0) sup.lerp(new THREE.Vector3().copy(this.supAt).applyMatrix4(g.matrixWorld), this.supK);
     const ch = this.firstPerson ? this.camHand : 0;
     if (ch > 0) sup.lerp(this.camAt, ch * ch * (3 - 2 * ch));
     this.reach('L', sup, new THREE.Vector3().copy(right).negate(), 1);

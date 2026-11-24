@@ -14,12 +14,13 @@ import { Nav } from './nav.ts';
 import { Bot } from './bots.ts';
 import { Match, type BodyState } from './match.ts';
 import { Input, LocalPlayer, type PlayerCtx } from './player.ts';
-import { Soldier, angleDiff, loadGear, loadGuns, preparePeople } from './soldier.ts';
+import { Soldier, angleDiff, loadArms, loadGear, loadGuns, preparePeople } from './soldier.ts';
 import { stepNade, type NadeSim } from './nade.ts';
 import { Rats } from './vermin.ts';
 import { F, MAX_PEOPLE, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow , BOARDS, SIEGE , oneLife , DEFAULT_KITS, KITS, kitCharges, kitSheets, type KitId } from './shared.ts';
 import { Walls, chargeMesh, chargeModel, siteAt, siteMid, siteOf, siteArr, sitesTouch, type Site } from './walls.ts';
 import { Gear } from './gear.ts';
+import { EnvCube } from './envcube.ts';
 import { Barricade, openingsOf } from './fort.ts';
 
 /** how far from the room its defenders may go before the round is on, metres */
@@ -123,6 +124,8 @@ export class Game {
   readonly cam = new THREE.PerspectiveCamera(84, 16 / 9, 0.045, 900);
   readonly post: Post;
   readonly planar: Planar;
+  /** the room as the wearer's own kit reflects it */
+  readonly env: EnvCube;
   readonly sound = new Sound();
   readonly hud: Hud;
   L!: Loaded;
@@ -218,6 +221,7 @@ export class Game {
   private lampT = 0;
   private liteK = 0;
   private wet = 1;
+  private floorY = 0;
   /** what was asked for: -1 leaves it to the machine, 0 to 3 is a level chosen by hand */
   gfx = -1;
   /** the level in force */
@@ -238,6 +242,7 @@ export class Game {
     softShadows();
     this.post = new Post(r);
     this.planar = new Planar(r);
+    this.env = new EnvCube(r);
     this.hud = new Hud(this);
     this.input = new Input(canvas, () => document.pointerLockElement === canvas || this.autoInput);
     // the building is heard from the first click anywhere, menu included: a browser allows no sound before one
@@ -382,7 +387,7 @@ export class Game {
       this.loadWhat = what;
       progress0(this.loadF, what);
     };
-    const [L, kit, phys] = await Promise.all([loadWorld(this.r, progress), preparePeople(), Phys.create(), loadGuns(), loadGear(), loadVolume(), graffitiFonts()]);
+    const [L, kit, phys] = await Promise.all([loadWorld(this.r, progress), preparePeople(), Phys.create(), loadGuns(), loadGear(), loadVolume(), graffitiFonts(), loadArms()]);
     this.L = L;
     for (const f of L.flicks) this.flickOf.set(f.l, f);
     this.phys = phys;
@@ -2379,7 +2384,29 @@ export class Game {
     }
     if (!this.frozen) {
       const out = !this.L.map.terrain && !this.post.lite && this.zone(this.cam.position.x, this.cam.position.y, this.cam.position.z) === 'street' && this.cam.position.y < 12;
-      this.planar.render(this.scene, this.cam, this.planarHide(), out);
+      // indoors, on a machine with frames to spare, the floor underfoot is the mirror: polished lino and tile show the room
+      let floor: number | null = null;
+      if (!out && this.tier >= 2 && !this.post.lite && this.inMatch && !this.L.map.terrain) {
+        const cp0 = this.cam.position;
+        const fy = this.L.world.floorAt(cp0.x, cp0.y, cp0.z, 0.05, 0.05, true);
+        if (Number.isFinite(fy) && cp0.y - fy < 2.6) this.floorY = fy;
+        floor = this.floorY;
+      }
+      if (floor !== null) {
+        const h = this.hideList;
+        h.length = 0;
+        h.push(this.fx.group);
+        if (this.mySoldier) h.push(this.mySoldier.root);
+        this.planar.render(this.scene, this.cam, h, true, floor);
+      } else this.planar.render(this.scene, this.cam, this.planarHide(), out);
+      // what the gun and the gloves reflect: a side of it every few frames, more often on a machine with frames to spare
+      if (this.inMatch && this.me.alive) {
+        const h = this.hideList;
+        h.length = 0;
+        h.push(this.fx.group);
+        if (this.mySoldier) h.push(this.mySoldier.root);
+        this.env.update(this.scene, this.cam.position, h, this.tier >= 2 ? 4 : this.tier === 1 ? 6 : 10);
+      }
       // after the mirror, which puts back whatever it hid
       const cp = this.cam.position;
       const rk = TIERS[this.tier].reach;

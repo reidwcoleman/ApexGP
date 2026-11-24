@@ -80,6 +80,8 @@ export const LF = {
   planar: { value: null as THREE.Texture | null },
   planarVP: { value: new THREE.Matrix4() },
   planarK: { value: 0 },
+  planarIn: { value: 0 },
+  planarY: { value: 0 },
   noise: { value: noiseTile() },
   /** 1 under open sky */
   rain: { value: 1 },
@@ -274,7 +276,13 @@ uniform sampler2D lfPlanar;
 uniform mat4 lfPlanarVP;
 uniform float lfPlanarK;
 uniform float lfRain;
+#elif defined( LF_LM )
+uniform sampler2D lfPlanar;
+uniform mat4 lfPlanarVP;
 #endif
+// indoors the mirror lies in the floor the wearer stands on: how much of it there is, and how high that floor is
+uniform float lfPlanarIn;
+uniform float lfPlanarY;
 vec3 lfDecode( vec3 e ) { return ( exp2( e * lfK.x ) - 1.0 ) / lfK.y; }
 vec3 lfFace( vec3 uvw, float f ) {
   // six stacked volumes along z; clamp inside this face's slab so filtering never crosses
@@ -392,7 +400,25 @@ const FRAG_LIGHT = /* glsl */ `
       mir += texture2D( lfPlanar, puv + wob + vec2( s, s * 3.0 ) ).rgb * 0.2;
       mir += texture2D( lfPlanar, puv + wob + vec2( -s, -s * 3.0 ) ).rgb * 0.2;
       mir += texture2D( lfPlanar, puv + wob + vec2( s * 0.5, -s * 5.0 ) ).rgb * 0.2;
-      lfRad = mix( lfRad, min( mir, vec3( 3.5 ) ), clamp( vLfN.y, 0.0, 1.0 ) * lfPlanarK );
+      float lfFloorK = lfPlanarIn * ( 1.0 - smoothstep( 0.03, 0.12, abs( vLfW.y - lfPlanarY ) ) ) * ( 1.0 - smoothstep( 0.4, 0.85, roughnessFactor ) );
+      lfRad = mix( lfRad, min( mir, vec3( 3.5 ) ), clamp( vLfN.y, 0.0, 1.0 ) * max( lfPlanarK, lfFloorK ) );
+    }
+    #else
+    if ( lfPlanarIn > 0.0 && vLfN.y > 0.95 ) {
+      // a polished floor indoors: the room stood on its head in it, as far as the floor's finish lets it show. Only the
+      // floor the wearer is on: the picture is of the room from under that one
+      float lfFloorK = lfPlanarIn * ( 1.0 - smoothstep( 0.03, 0.12, abs( vLfW.y - lfPlanarY ) ) ) * ( 1.0 - smoothstep( 0.4, 0.85, roughnessFactor ) );
+      if ( lfFloorK > 0.0 ) {
+        vec4 pc = lfPlanarVP * vec4( vLfW, 1.0 );
+        vec2 puv = pc.xy / pc.w * 0.5 + 0.5;
+        vec2 wob = ( lfNw.xz - vLfN.xz ) * ( 0.04 + roughnessFactor * 0.1 );
+        float s = 0.003 + roughnessFactor * 0.026;
+        vec3 mir = texture2D( lfPlanar, puv + wob ).rgb * 0.4;
+        mir += texture2D( lfPlanar, puv + wob + vec2( s, s * 3.0 ) ).rgb * 0.2;
+        mir += texture2D( lfPlanar, puv + wob + vec2( -s, -s * 3.0 ) ).rgb * 0.2;
+        mir += texture2D( lfPlanar, puv + wob + vec2( s * 0.5, -s * 5.0 ) ).rgb * 0.2;
+        lfRad = mix( lfRad, min( mir, vec3( 3.5 ) ), lfFloorK );
+      }
     }
     #endif
     radiance += lfRad * lfWorldLight;
@@ -682,6 +708,8 @@ export function applyLF<T extends THREE.MeshStandardMaterial>(m: T, o: LfOpts = 
     s.uniforms.lfPlanar = LF.planar;
     s.uniforms.lfPlanarVP = LF.planarVP;
     s.uniforms.lfPlanarK = LF.planarK;
+    s.uniforms.lfPlanarIn = LF.planarIn;
+    s.uniforms.lfPlanarY = LF.planarY;
     if (LF.sunOn || LF.shadeOn) {
       s.uniforms.lfSunQ = LF.sunQ;
       s.uniforms.lfSunPx = LF.sunPx;

@@ -30,26 +30,35 @@ class Sp {
 }
 
 /** reloads as poses on a timeline: t, then pitch, yaw, roll (radians) and x, y, toward-the-chest (metres), added to the gun */
+// (a magazine change: the gun comes up and is rolled over so the well faces in toward the hand that does the work)
 const RELOAD_MAG: number[][] = [
   [0.0, 0, 0, 0, 0, 0, 0],
-  [0.1, 0.1, 0.18, 0.5, -0.018, -0.028, 0.012],
-  [0.2, 0.16, 0.24, 0.62, -0.024, -0.012, 0.018],
-  [0.4, 0.21, 0.27, 0.69, -0.03, -0.042, 0.026],
-  [0.6, 0.25, 0.3, 0.73, -0.032, -0.05, 0.03],
-  [0.69, 0.11, 0.27, 0.6, -0.028, -0.014, 0.026],
-  [0.8, 0.13, 0.16, 0.36, -0.02, -0.03, 0.016],
-  [0.9, 0.04, 0.06, 0.12, -0.006, -0.012, 0.004],
+  [0.09, 0.2, 0.1, -0.5, -0.028, 0.012, 0.03],
+  [0.17, 0.3, 0.15, -0.86, -0.045, 0.022, 0.05],
+  [0.3, 0.32, 0.16, -0.94, -0.05, 0.012, 0.056],
+  [0.5, 0.34, 0.17, -0.97, -0.052, 0.02, 0.058],
+  [0.66, 0.32, 0.16, -0.94, -0.05, 0.02, 0.056],
+  [0.71, 0.37, 0.16, -0.9, -0.05, 0.034, 0.056],
+  [0.8, 0.27, 0.12, -0.64, -0.04, 0.02, 0.045],
+  [0.88, 0.2, 0.09, -0.44, -0.03, 0.012, 0.03],
+  [0.95, 0.07, 0.03, -0.14, -0.01, 0.004, 0.01],
   [1.0, 0, 0, 0, 0, 0, 0],
 ];
 const RELOAD_PISTOL: number[][] = [
   [0.0, 0, 0, 0, 0, 0, 0],
-  [0.12, 0.3, 0.12, 0.25, -0.01, -0.03, 0.05],
-  [0.22, 0.38, 0.14, 0.3, -0.012, -0.015, 0.06],
-  [0.6, 0.42, 0.16, 0.32, -0.014, -0.04, 0.07],
-  [0.69, 0.28, 0.14, 0.26, -0.012, -0.01, 0.06],
-  [0.86, 0.2, 0.06, 0.12, -0.006, -0.02, 0.04],
+  [0.1, 0.3, 0.1, -0.3, -0.012, 0.01, 0.05],
+  [0.18, 0.42, 0.14, -0.5, -0.02, 0.02, 0.07],
+  [0.5, 0.45, 0.15, -0.55, -0.022, 0.016, 0.075],
+  [0.66, 0.43, 0.14, -0.52, -0.02, 0.018, 0.072],
+  [0.71, 0.48, 0.14, -0.5, -0.02, 0.03, 0.072],
+  [0.86, 0.22, 0.06, -0.2, -0.008, 0.01, 0.04],
   [1.0, 0, 0, 0, 0, 0, 0],
 ];
+/** how far along, 0 to 1, between two moments of a reload, eased */
+const span = (t: number, a: number, b: number) => {
+  const k = Math.min(1, Math.max(0, (t - a) / (b - a)));
+  return k * k * (3 - 2 * k);
+};
 const RELOAD_SINGLE: number[][] = [
   [0.0, 0, 0, 0, 0, 0, 0],
   [0.07, 0.15, 0.16, 0.6, -0.02, -0.045, 0.02],
@@ -194,6 +203,12 @@ export class LocalPlayer {
   nades: Record<NadeKind, number> = { frag: 1, flash: 1 };
   private cool = 0;
   reloadT = 0;
+  private hA = new THREE.Vector3();
+  private hB = new THREE.Vector3();
+  private hC = new THREE.Vector3();
+  private hD = new THREE.Vector3();
+  private hE = new THREE.Vector3();
+  private hF = new THREE.Vector3();
   private reloadPose = [0, 0, 0, 0, 0, 0];
   private heat = 0;
   private reloadLen = 0;
@@ -707,14 +722,38 @@ export class LocalPlayer {
         gun.action.position.z -= back * dirZ;
       }
       if (gun.mag && this.reloadT > 0) {
+        // A magazine change is the support hand's work, and it is done where it can be seen. The hand comes back from the
+        // fore-end to the magazine, draws it and lets it fall, goes down to the belt for a full one, brings that up under
+        // the well, pushes it home, comes up the side of the gun to the catch that lets the bolt go, and goes forward again.
+        // The magazine is wherever that hand has it.
         const t = 1 - this.reloadT / this.reloadLen;
-        const out = t > 0.2 && t < 0.72;
-        const drop = t < 0.2 ? 0 : t < 0.32 ? (t - 0.2) / 0.12 : t < 0.6 ? 1 : t < 0.72 ? 1 - (t - 0.6) / 0.12 : 0;
+        const pistol = this.weapon === 'pistol';
+        const su = spec.support;
+        const fore = this.hA.set(su[0] + (pistol ? 0.05 : 0.04), su[1] - (pistol ? 0.03 : 0.052), su[2] - 0.06);
+        const grip = this.hB.copy(gun.magMid).add(this.v.set(pistol ? 0.02 : 0.034, -gun.magLen * (pistol ? 0.42 : 0.2), 0));
+        const pull = pistol ? 0.1 : 0.115;
+        const out = this.hC.copy(grip).add(this.v.set(0.012, -pull, -0.012));
+        const belt = this.hD.set(0.17, pistol ? -0.3 : -0.4, pistol ? -0.2 : -0.24);
+        const catchAt = this.hE.set(pistol ? su[0] + 0.05 : 0.046, pistol ? su[1] - 0.03 : gun.magMid.y + gun.magLen * 0.5 + 0.03, pistol ? su[2] - 0.06 : gun.magMid.z + 0.035);
+        const hand = this.hF;
+        if (t < 0.18) hand.lerpVectors(fore, grip, span(t, 0.08, 0.18));
+        else if (t < 0.3) hand.lerpVectors(grip, out, span(t, 0.18, 0.29));
+        else if (t < 0.45) hand.lerpVectors(out, belt, span(t, 0.3, 0.41));
+        else if (t < 0.6) hand.lerpVectors(belt, out, span(t, 0.45, 0.58));
+        else if (t < 0.7) hand.lerpVectors(out, grip, span(t, 0.6, 0.68) ** 1.6);
+        else if (t < 0.82) hand.lerpVectors(grip, catchAt, span(t, 0.71, 0.81));
+        else if (t < 0.9) hand.copy(catchAt).addScaledVector(this.v.set(-1, 0, 0), 0.012 * Math.sin(span(t, 0.84, 0.9) * Math.PI));
+        else hand.lerpVectors(catchAt, fore, span(t, 0.9, 0.99));
+        sol.supAt.copy(hand);
+        sol.supK = Math.min(1, t / 0.06, (1 - t) / 0.03);
+        sol.magHand = 0;
+        // the old one is in the well, then in the hand, then on the floor; the new one is in the hand from the belt on
+        const held = (t >= 0.18 && t < 0.3) || (t >= 0.45 && t < 0.68);
         gun.mag.position.copy(gun.magRest);
-        gun.mag.position.y -= drop * 0.3;
-        gun.mag.visible = !out || drop < 0.98;
-        if (t > 0.22 && !this.magGone) {
-          // the empty one goes where gravity sends it
+        if (held) gun.mag.position.add(this.v.copy(hand).sub(grip));
+        gun.mag.visible = t < 0.3 || t >= 0.45;
+        if (t >= 0.3 && !this.magGone) {
+          // let go: the empty one goes where gravity sends it
           this.magGone = true;
           const holder = new THREE.Group();
           const m2 = gun.mag.clone();
@@ -724,8 +763,8 @@ export class LocalPlayer {
           const bb = new THREE.Box3().setFromObject(m2);
           const mid = bb.getCenter(new THREE.Vector3()), sz = bb.getSize(new THREE.Vector3()).multiplyScalar(0.5);
           c.scene.add(holder);
-          const p0 = new THREE.Vector3(0, -0.04, 0).applyQuaternion(this.gunQuat).add(this.gunPos);
-          const fall = new THREE.Vector3(0, -1.3, 0).applyQuaternion(this.gunQuat);
+          const p0 = new THREE.Vector3().copy(out).sub(grip).applyQuaternion(this.gunQuat).add(this.gunPos);
+          const fall = new THREE.Vector3(0.2, -0.9, 0).applyQuaternion(this.gunQuat);
           fall.x += m.vx;
           fall.z += m.vz;
           c.phys.drop(holder, [sz.x, sz.y, sz.z], mid, p0, this.gunQuat, fall, 7, 0.35, 16);
@@ -733,12 +772,14 @@ export class LocalPlayer {
       } else if (gun.mag) {
         gun.mag.position.copy(gun.magRest);
         gun.mag.visible = true;
+        sol.supK *= Math.exp(-dt * 14);
       }
-      // the support hand goes down for the magazine or the shells
-      if (this.reloadT > 0) {
+      // (shells and single rounds: the support hand goes down for each)
+      if (this.reloadT > 0 && !gun.mag) {
         const t = 1 - this.reloadT / this.reloadLen;
-        sol.magHand = gun.mag ? Math.min(1, Math.min(t / 0.16, (1 - t) / 0.2)) : 0.55 + 0.4 * Math.sin(t * Math.PI * 2 * this.spec.mag);
+        sol.magHand = 0.55 + 0.4 * Math.sin(t * Math.PI * 2 * this.spec.mag);
       } else sol.magHand *= Math.exp(-dt * 12);
+      if (!gun.mag) sol.supK = 0;
     }
     sol.camHand = this.fixK;
     sol.camAt.set(-0.1, -0.13, -0.06).applyQuaternion(cam.quaternion).add(eye);
@@ -846,14 +887,14 @@ export class LocalPlayer {
         }
       } else {
         if (before < 0.02) this.magGone = false;
-        if (before < 0.18 && after >= 0.18) {
+        if (before < 0.2 && after >= 0.2) {
           c.sound.clack(null, 'mag_out');
           this.rkP.v -= 0.9;
         }
         if (this.fumble && before < 0.645 && after >= 0.645) {
           // the magazine catches the lip of the well instead of going in: back out, look, try again
           this.fumble = false;
-          this.reloadT = this.reloadLen * (1 - 0.47);
+          this.reloadT = this.reloadLen * (1 - 0.58);
           c.sound.clack(null, 'shell');
           this.rkR.v += 2.6;
           this.rkY.v += 1.6;
