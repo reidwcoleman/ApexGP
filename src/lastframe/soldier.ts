@@ -24,16 +24,26 @@ export interface Gun {
   magLen: number;
   /** where a hand takes hold of the action to work it (a bolt's handle), in the gun's own space */
   actionGrip: THREE.Vector3;
+  /** the full model, for the hands it is in, and the light one everybody else sees (if the gun has two) */
+  hi: THREE.Object3D | null;
+  lo: THREE.Object3D | null;
+}
+
+/** which of a gun's two models is drawn: the full one in the wearer's own hands */
+export function gunDetail(g: Gun, own: boolean) {
+  if (!g.hi || !g.lo) return;
+  g.hi.visible = own;
+  g.lo.visible = !own;
 }
 
 const PARTS: Record<WeaponId, string[]> = {
-  carbine: ['carbine', 'carbine_lens', 'carbine_mag'],
+  carbine: ['carbine', 'carbine_lo', 'carbine_lens', 'carbine_mag', 'carbine_bolt'],
   shotgun: ['shotgun', 'shotgun_pump'],
   rifle: ['rifle', 'rifle_bolt', 'rifle_trigger', 'rifle_scope'],
   pistol: ['pistol', 'pistol_slide', 'pistol_mag', 'pistol_hammer', 'pistol_trigger'],
 };
 const MAG: Partial<Record<WeaponId, string>> = { carbine: 'carbine_mag', pistol: 'pistol_mag' };
-const ACTION: Partial<Record<WeaponId, string>> = { shotgun: 'shotgun_pump', rifle: 'rifle_bolt', pistol: 'pistol_slide' };
+const ACTION: Partial<Record<WeaponId, string>> = { carbine: 'carbine_bolt', shotgun: 'shotgun_pump', rifle: 'rifle_bolt', pistol: 'pistol_slide' };
 
 let template: Map<string, THREE.Object3D> | null = null;
 
@@ -82,7 +92,7 @@ function worn(mat: THREE.MeshStandardMaterial) {
     s.uniforms.lfEnvK = ENV.k;
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vGunP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvGunP = position;');
     s.fragmentShader = s.fragmentShader
-      .replace('#include <lights_fragment_end>', envFrag('0.42') + '#include <lights_fragment_end>')
+      .replace('#include <lights_fragment_end>', envFrag('0.42 * ( 0.22 + 0.78 * ( 1.0 - smoothstep( 1.0, 2.6, length( vViewPosition ) ) ) )') + '#include <lights_fragment_end>')
       .replace('#include <common>', `#include <common>
 ${ENV_PARS}
 varying vec3 vGunP;
@@ -109,7 +119,7 @@ float gunN( vec3 p ) {
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.34, gWear * 0.8 );')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = mix( metalnessFactor, 0.9, gWear * 0.7 );');
   };
-  mat.customProgramCacheKey = () => key + 'worn4';
+  mat.customProgramCacheKey = () => key + 'worn5';
 }
 
 /** a tiling height field of fine grain, as a normal map: a few octaves of value noise, wrapped */
@@ -159,7 +169,7 @@ function grain() {
 
 export function buildGun(id: WeaponId): Gun {
   const group = new THREE.Group();
-  let mag: THREE.Object3D | null = null, action: THREE.Object3D | null = null;
+  let mag: THREE.Object3D | null = null, action: THREE.Object3D | null = null, hi: THREE.Object3D | null = null, lo: THREE.Object3D | null = null;
   for (const n of PARTS[id]) {
     const t = template!.get(n);
     if (!t) continue;
@@ -167,7 +177,10 @@ export function buildGun(id: WeaponId): Gun {
     group.add(c);
     if (n === MAG[id]) mag = c;
     if (n === ACTION[id]) action = c;
+    if (n === id + '_lo') lo = c;
+    if (n === id) hi = c;
   }
+  if (hi && lo) hi.visible = false;
   let dot: THREE.Mesh | null = null;
   if (id === 'carbine') {
     // the optic's glass and the dot it throws out in front
@@ -198,7 +211,7 @@ export function buildGun(id: WeaponId): Gun {
     const bb = new THREE.Box3().setFromObject(action);
     actionGrip.set(bb.min.x + 0.012, bb.min.y + 0.014, bb.min.z + 0.03);
   }
-  return { group, id, dot, mag, action, actionRest: action?.position.clone() ?? new THREE.Vector3(), magRest: mag?.position.clone() ?? new THREE.Vector3(), magMid, magLen, actionGrip };
+  return { group, id, dot, mag, action, actionRest: action?.position.clone() ?? new THREE.Vector3(), magRest: mag?.position.clone() ?? new THREE.Vector3(), magMid, magLen, actionGrip, hi, lo };
 }
 
 export function preparePeople(): Promise<PeopleKit> {
@@ -243,20 +256,24 @@ export async function loadGear() {
 }
 
 // ---- the wearer's own sleeves and gloves: their own mesh and pictures (tools/lastframe/arms.py), on the avatar's skeleton
-interface ArmsKit { pos: Float32Array; nor: Float32Array; uv: Float32Array; sw: Float32Array; si: Uint8Array; index: Uint32Array; bones: string[]; c: THREE.Texture; n: THREE.Texture; orm: THREE.Texture }
+interface ArmsGeo { pos: Float32Array; nor: Float32Array; uv: Float32Array; sw: Float32Array; si: Uint8Array; index: Uint32Array; bones: string[] }
+interface ArmsKit { hi: ArmsGeo; lo: ArmsGeo | null; c: THREE.Texture; n: THREE.Texture; orm: THREE.Texture }
 let armsKit: ArmsKit | null = null;
+
+async function armsGeo(name: string): Promise<ArmsGeo> {
+  const meta = (await (await fetch(BASE + name + '.json')).json()) as { verts: number; tris: number; bones: string[] };
+  const buf = await (await fetch(BASE + name + '.bin')).arrayBuffer();
+  const n = meta.verts, t = meta.tris * 3;
+  let o = 0;
+  const f32 = (k: number) => { const a = new Float32Array(buf, o, n * k); o += n * k * 4; return a; };
+  const pos = f32(3), nor = f32(3), uv = f32(2), sw = f32(4);
+  const index = new Uint32Array(buf, o, t);
+  o += t * 4;
+  return { pos, nor, uv, sw, si: new Uint8Array(buf, o, n * 4), index, bones: meta.bones };
+}
 
 export async function loadArms() {
   try {
-    const meta = (await (await fetch(BASE + 'arms.json')).json()) as { verts: number; tris: number; bones: string[] };
-    const buf = await (await fetch(BASE + 'arms.bin')).arrayBuffer();
-    const n = meta.verts, t = meta.tris * 3;
-    let o = 0;
-    const f32 = (k: number) => { const a = new Float32Array(buf, o, n * k); o += n * k * 4; return a; };
-    const pos = f32(3), nor = f32(3), uv = f32(2), sw = f32(4);
-    const index = new Uint32Array(buf, o, t);
-    o += t * 4;
-    const si = new Uint8Array(buf, o, n * 4);
     const L = new THREE.TextureLoader();
     const tex = async (name: string, colour: boolean) => {
       const x = await L.loadAsync(BASE + name);
@@ -264,8 +281,9 @@ export async function loadArms() {
       x.anisotropy = 8;
       return x;
     };
-    const [c, nm, orm] = await Promise.all([tex('arms_c.webp', true), tex('arms_n.webp', false), tex('arms_orm.webp', false)]);
-    armsKit = { pos, nor, uv, sw, si, index, bones: meta.bones, c, n: nm, orm };
+    // (the full pair is the wearer's own; everybody else wears the same pictures on a tenth of the mesh: armslod.py)
+    const [hi, lo, c, nm, orm] = await Promise.all([armsGeo('arms'), armsGeo('arms_lo').catch(() => null), tex('arms_c.webp', true), tex('arms_n.webp', false), tex('arms_orm.webp', false)]);
+    armsKit = { hi, lo, c, n: nm, orm };
   } catch (e) {
     // without them the avatar's own arms are drawn, as before
     console.warn('[arms]', e);
@@ -273,9 +291,10 @@ export async function loadArms() {
 }
 
 /** the arms for one body: the mesh's bone numbers are the kit's own, turned into this skeleton's */
-function armsMesh(P: Person, dye: THREE.Color, wounds: { value: THREE.Vector4[] }): THREE.SkinnedMesh | null {
-  const K = armsKit;
-  if (!K) return null;
+function armsMesh(P: Person, dye: THREE.Color, wounds: { value: THREE.Vector4[] }, own: boolean): THREE.SkinnedMesh | null {
+  const K = own ? armsKit?.hi : armsKit?.lo;
+  const T = armsKit;
+  if (!K || !T) return null;
   const map = K.bones.map((b) => P.skeleton.bones.indexOf(P.bones[b]));
   if (map.some((i) => i < 0)) return null;
   const si = new Uint16Array(K.si.length);
@@ -289,11 +308,10 @@ function armsMesh(P: Person, dye: THREE.Color, wounds: { value: THREE.Vector4[] 
   g.setIndex(new THREE.BufferAttribute(K.index, 1));
   // cloth and suede throw back a fraction of what a smooth surface of the same stuff would: without that taken down, a dark
   // glove under a strip light goes the grey of frosted glass
-  const m = new THREE.MeshPhysicalMaterial({ map: K.c, normalMap: K.n, aoMap: K.orm, roughnessMap: K.orm, roughness: 1, metalness: 0, side: THREE.DoubleSide, specularIntensity: 0.35, sheen: 1, sheenRoughness: 0.55, sheenColor: new THREE.Color(0.035, 0.037, 0.042) });
+  const m = new THREE.MeshPhysicalMaterial({ map: T.c, normalMap: T.n, aoMap: T.orm, roughnessMap: T.orm, roughness: 1, metalness: 0, side: THREE.DoubleSide, specularIntensity: 0.35, sheen: 1, sheenRoughness: 0.55, sheenColor: new THREE.Color(0.035, 0.037, 0.042) });
   m.normalScale.set(2.1, 2.1);
   m.aoMapIntensity = 1;
   const tint = { value: dye };
-  void wounds;
   applyLF(m, { person: true, view: 1, spec: 0.25 });
   const prev = m.onBeforeCompile, key = m.customProgramCacheKey();
   m.onBeforeCompile = (s, r) => {
@@ -301,8 +319,10 @@ function armsMesh(P: Person, dye: THREE.Color, wounds: { value: THREE.Vector4[] 
     s.uniforms.lfDye = tint;
     s.uniforms.lfEnv = ENV.map;
     s.uniforms.lfEnvK = ENV.k;
+    s.uniforms.lfWound = wounds;
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vArmP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvArmP = position;');
     s.fragmentShader = s.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 lfDye;\n' + ENV_PARS)
+      .replace('#include <common>', '#include <common>\nuniform vec3 lfDye;\nvarying vec3 vArmP;\nuniform vec4 lfWound[ 4 ];\n' + ENV_PARS)
       // the cloth is baked a mid grey with the picture's alpha saying where it is: the side's dye goes over that, and the
       // glove keeps the colours it was made in. Looked at from inside (up a cuff) it is the dark of a sleeve
       .replace('#include <map_fragment>', `{
@@ -316,16 +336,27 @@ function armsMesh(P: Person, dye: THREE.Color, wounds: { value: THREE.Vector4[] 
   // (up a glove's cuff it is dark; where a sleeve runs off the edge of the frame its inside is the same cloth)
   float inside = gl_FrontFacing ? 1.0 : mix( 0.1, 0.8, tx.a );
   diffuseColor.rgb *= mix( tx.rgb, tx.rgb * lfDye * 2.0, tx.a ) * inside * mix( 1.0, shade * shade, 0.8 ) * ( 1.0 + weave * mix( 0.05, 0.085, tx.a ) );
+  // a round through the arm: the cloth dark and wet round where it went in
+  for ( int wi = 0; wi < 4; wi++ ) {
+    vec4 w = lfWound[ wi ];
+    if ( w.w > 0.001 ) {
+      vec3 dp = vArmP - w.xyz;
+      dp.y *= dp.y > 0.0 ? 1.7 : 0.55;
+      float soak = smoothstep( w.w * 1.25, w.w * 0.5, length( dp ) );
+      diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.07, 0.005, 0.005 ), soak * 0.9 );
+    }
+  }
 }`)
       .replace('#include <lights_fragment_end>', envFrag('0.5') + '#include <lights_fragment_end>');
   };
-  m.customProgramCacheKey = () => key + 'arms4';
+  m.customProgramCacheKey = () => key + 'arms5';
   const mesh = new THREE.SkinnedMesh(g, m);
   mesh.bind(P.skeleton, (P.body as THREE.SkinnedMesh).bindMatrix);
   mesh.frustumCulled = false;
   mesh.castShadow = false;
   mesh.visible = false;
   mesh.userData.arms = true;
+  m.userData.gear = true;
   return mesh;
 }
 
@@ -388,7 +419,8 @@ function weave() {
   return t;
 }
 const nylon = weave();
-const GEAR_COLOR = [0x4a5264, 0x6e5e44];
+// (the search team's kit is the navy of their overalls, a tone down; the crew's is surplus webbing, coyote and olive)
+const GEAR_COLOR = [0x5a6375, 0x8c7654];
 const GEAR_NOISE = /* glsl */ `
 float gearH( vec3 p ) { return fract( sin( dot( p, vec3( 127.1, 311.7, 74.7 ) ) ) * 43758.5453 ); }
 float gearN( vec3 p ) {
@@ -411,8 +443,8 @@ function gearMaterial(team: number, wounds: { value: THREE.Vector4[] }) {
 {
   // nylon that has been worn for weeks: no bright new panels, the weave uneven, dust rubbed into it, darker in the seams
   float gn = gearN( vGearP * 16.0 ) * 0.55 + gearN( vGearP * 70.0 ) * 0.45;
-  diffuseColor.rgb = min( diffuseColor.rgb, vec3( 0.085 ) ) * ( 0.6 + 0.6 * gn );
-  float dust = smoothstep( 0.5, 0.85, gearN( vGearP * 8.0 + 4.0 ) ) * 0.4 + smoothstep( 0.6, 0.9, gearN( vGearP * 31.0 ) ) * 0.2;
+  diffuseColor.rgb *= 0.66 + 0.5 * gn;
+  float dust = smoothstep( 0.5, 0.85, gearN( vGearP * 8.0 + 4.0 ) ) * 0.3 + smoothstep( 0.6, 0.9, gearN( vGearP * 31.0 ) ) * 0.16;
   diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.115, 0.107, 0.094 ) * ( 0.7 + 0.5 * gn ), dust );
 }
 gSoak = 0.0;
@@ -434,7 +466,7 @@ for ( int wi = 0; wi < 4; wi++ ) {
 }`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.22, gSoak );');
   };
-  m.customProgramCacheKey = () => 'lfgear3';
+  m.customProgramCacheKey = () => 'lfgear4';
   return applyLF(m, { person: true });
 }
 
@@ -495,6 +527,8 @@ export class Soldier {
   /** from inside, only the arms and legs are drawn */
   private fpHide = { value: 0 };
   private arms: THREE.SkinnedMesh | null = null;
+  /** the same sleeves and gloves as everybody else sees them */
+  private armsLo: THREE.SkinnedMesh | null = null;
   /** where rounds went in, in the body's own rest pose, and how far each has soaked: the cloth takes it up and it spreads */
   private wounds = { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] };
   private woundTo = [0, 0, 0, 0];
@@ -518,6 +552,15 @@ export class Soldier {
     worn.userData.gear = true;
     P0.body.parent!.add(worn);
     this.skins = [P0.body as THREE.SkinnedMesh, worn];
+    this.armsLo = armsMesh(P0, new THREE.Color(lookFor(team, slot).topColor as string).multiplyScalar(0.36), this.wounds, false);
+    if (this.armsLo) {
+      this.armsLo.visible = true;
+      this.armsLo.layers.enable(MOVER);
+      this.armsLo.userData.gear = true;
+      P0.body.parent!.add(this.armsLo);
+      this.fpHide.value = -1;
+      this.skins.push(this.armsLo);
+    }
     this.person.body.traverse((o) => (o.castShadow = true));
     // the recording light on the chest camera: a steady green LED, and the little bloom of it that carries across a dark room
     {
@@ -529,7 +572,7 @@ export class Soldier {
         led.position.set(0.075, cy - 0.02, 0.185).applyMatrix4(inv);
         led.scale.setScalar(new THREE.Vector3().setFromMatrixColumn(inv, 0).length());
         const halo = new THREE.Sprite(LED_HALO);
-        halo.scale.setScalar(0.26);
+        halo.scale.setScalar(0.12);
         led.add(halo);
         led.userData.gear = halo.userData.gear = true;
         bone.add(led);
@@ -553,11 +596,15 @@ export class Soldier {
       s.uniforms.lfFP = hide;
       s.uniforms.lfMask = mask;
       s.uniforms.lfWound = wounds;
-      s.fragmentShader = s.fragmentShader.replace('void main() {', 'uniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nfloat lfFpA = 1.0;\nvoid main() {\n  if ( lfFP > 1.5 && vPart > 2.5 && vPart < 5.5 ) discard;\n  if ( lfFP > 0.5 ) {\n    // from inside the trunk is gone: the camera sits in it. The sleeves run on up out of the frame, whole, as arms do\n    float fa1 = ( vPart < 2.5 || vPart > 5.5 ) ? 1.0 - smoothstep( uL0.z - 0.15, uL0.z - 0.01, vRest.y ) : 1.0;\n    if ( fa1 < 0.4 ) discard;\n    // and the top of the legs goes into the shade of what is above them\n    lfFpA = smoothstep( 0.4, 1.0, fa1 );\n  }');
+      // (which triangles are arm and nothing else: 1 only where all three corners are. The part number itself slides
+      // through the arms' numbers across any triangle that joins the trunk to a leg)
+      s.vertexShader = s.vertexShader.replace('vPart = aPart;', 'vPart = aPart; lfArmV = ( aPart > 2.5 && aPart < 5.5 ) ? 1.0 : 0.0;').replace('varying float vPart;', 'varying float vPart; varying float lfArmV;');
+      s.fragmentShader = s.fragmentShader.replace('void main() {', 'varying float lfArmV;\nuniform float lfFP;\nuniform vec4 lfMask;\nuniform vec4 lfWound[ 4 ];\nfloat gBump;\nfloat lfFpA = 1.0;\nvoid main() {\n  if ( ( lfFP > 1.5 || lfFP < -0.5 ) && lfArmV > 0.999 ) discard;\n  if ( lfFP > 0.5 ) {\n    // from inside the trunk is gone: the camera sits in it. The sleeves run on up out of the frame, whole, as arms do\n    float fa1 = ( vPart < 2.5 || vPart > 5.5 ) ? 1.0 - smoothstep( uL0.z - 0.15, uL0.z - 0.01, vRest.y ) : 1.0;\n    if ( fa1 < 0.4 ) discard;\n    // and the top of the legs goes into the shade of what is above them\n    lfFpA = smoothstep( 0.4, 1.0, fa1 );\n  }');
       // the head's own mesh, dyed: a balaclava that fits because it is the face. An eye slot, or a scarf to the nose
       s.fragmentShader = s.fragmentShader.replace('diffuseColor.rgb *= col;', `if ( part < 0.5 ) {
     float slot = abs( vRest.y - 1.703 ) - 0.021;
-    float cover = lfMask.w > 1.5 ? smoothstep( 0.0, 0.006, 1.662 - vRest.y ) : smoothstep( 0.0, 0.005, slot );
+    // (a scarf has a hem: it stops in a line under the jaw, not wherever the head's own mesh happens to end)
+    float cover = lfMask.w > 1.5 ? smoothstep( 0.0, 0.006, 1.662 - vRest.y ) * smoothstep( 1.584, 1.59, vRest.y + 0.012 * smoothstep( 0.03, -0.05, vRest.z ) ) : smoothstep( 0.0, 0.005, slot );
     col = mix( col, lfMask.rgb * ( 0.9 + 0.2 * apNoise( vRest * 300.0 ) ), cover );
     gCloth = max( gCloth, cover );
     cloth = max( cloth, cover );
@@ -664,7 +711,7 @@ export class Soldier {
 }
 #include <lights_physical_fragment>`);
     };
-    bm.customProgramCacheKey = () => key + 'fp21';
+    bm.customProgramCacheKey = () => key + 'fp24';
     this.person.play('idle');
     this.root.traverse((o) => o.layers.enable(MOVER));
   }
@@ -713,14 +760,15 @@ export class Soldier {
     this.firstPerson = on;
     // the wearer's own arms are the made ones, if they loaded: the avatar's go
     if (on && !this.arms) {
-      this.arms = armsMesh(this.person, new THREE.Color(lookFor(this.team, this.slot).topColor as string).multiplyScalar(0.36), this.wounds);
+      this.arms = armsMesh(this.person, new THREE.Color(lookFor(this.team, this.slot).topColor as string).multiplyScalar(0.36), this.wounds, true);
       if (this.arms) {
         this.person.body.parent!.add(this.arms);
         this.arms.layers.enable(MOVER);
       }
     }
     if (this.arms) this.arms.visible = on;
-    this.fpHide.value = on ? (this.arms ? 2 : 1) : 0;
+    if (this.armsLo) this.armsLo.visible = !on;
+    this.fpHide.value = on ? (this.arms ? 2 : 1) : this.armsLo ? -1 : 0;
     this.person.root.traverse((o) => {
       if (/hair/.test(o.name) || o.userData.gear) o.visible = !on;
       (o as THREE.Mesh).castShadow = !on;
@@ -728,6 +776,7 @@ export class Soldier {
     this.person.bones.Head.scale.setScalar(on ? 0.001 : 1);
     for (const m of this.skins) m.frustumCulled = false;
     this.gun?.group.traverse((o) => (o.frustumCulled = !on));
+    for (const g of this.guns.values()) gunDetail(g, on);
     // your own arms and gun cover a quarter of the frame: drawn first, the room behind them is never shaded at all
     this.root.traverse((o) => { if ((o as THREE.Mesh).isMesh && !((o as THREE.Mesh).material as THREE.Material).transparent) o.renderOrder = on ? -10 : 0; });
     // your own arms fill a third of the frame: they get the fine mesh, and their insides, where a sleeve runs off the edge
@@ -747,6 +796,7 @@ export class Soldier {
     let g = this.guns.get(id);
     if (!g) this.guns.set(id, (g = buildGun(id)));
     this.gun = g;
+    gunDetail(g, this.firstPerson);
     this.holder.add(g.group);
     // it stands in the sun with whoever holds it
     g.group.traverse((o) => {
@@ -1124,7 +1174,7 @@ const LED_HALO = (() => {
   g.fillRect(0, 0, 64, 64);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  return new THREE.SpriteMaterial({ map: t, color: new THREE.Color(0.9, 0.9, 0.9), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
+  return new THREE.SpriteMaterial({ map: t, color: new THREE.Color(0.5, 0.5, 0.5), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
 })();
 
 const seenMat = new Set<THREE.Material>();

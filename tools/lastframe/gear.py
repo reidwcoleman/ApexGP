@@ -48,6 +48,8 @@ class Part:
         return A, B
     def box(s, c, sz, k=1.0, bevel=0.0, rot=None):
         """c centre, sz full size, rot (axis, angle) about the centre"""
+        # (a bevel makes the box's faces again: whatever is new when it is done is this box)
+        for f in s.bm.faces: f.tag = True
         m = bmesh.ops.create_cube(s.bm, size=1.0)
         vs = m['verts']
         from mathutils import Matrix
@@ -57,12 +59,10 @@ class Part:
             ax, ang = rot
             bmesh.ops.rotate(s.bm, verts=vs, cent=(0, 0, 0), matrix=Matrix.Rotation(ang, 3, Vector(P(*ax))))
         bmesh.ops.translate(s.bm, verts=vs, vec=P(*c))
-        fs = list({f for v in vs for f in v.link_faces})
         if bevel:
             es = list({e for v in vs for e in v.link_edges})
-            r = bmesh.ops.bevel(s.bm, geom=es + vs, offset=bevel, segments=1, profile=0.5, affect='EDGES')
-            fs = fs + r.get('faces', [])
-            fs = [f for f in fs if f.is_valid]
+            bmesh.ops.bevel(s.bm, geom=es + vs, offset=bevel, segments=1, profile=0.5, affect='EDGES')
+        fs = [f for f in s.bm.faces if not f.tag]
         s._set(fs, k)
         return vs
     def tube(s, pts, r, n=8, k=1.0):
@@ -222,6 +222,9 @@ def vest():
     # the camera on the chest: this is whose film it is
     p.box((0.0, 1.405, chest_curve(0, 0.175, 0.04) + 0.014), (0.062, 0.078, 0.026), k=0.5, bevel=0.003)
     p.cyl((0.0, 1.415, chest_curve(0, 0.175, 0.04) + 0.03), (0, 0, 1), 0.013, 0.008, k=0.28)
+    # a plain placard on the chest and a wide one across the back: the way a search team is marked, with nothing written on it
+    p.box((-0.095, 1.412, chest_curve(0.095, 0.17, 0.04) + 0.004), (0.098, 0.034, 0.005), k=2.3, bevel=0.001)
+    p.box((0, 1.4, -0.199), (0.2, 0.062, 0.006), k=2.3, bevel=0.001)
     # back: a hydration pouch and a drag handle
     pouch(p, 0, 1.25, -0.2, 0.2, 0.24, 0.05, s=-1, flap=False, k=0.88)
     p.tube([(-0.06, 1.44, -0.178), (-0.05, 1.47, -0.195), (0.05, 1.47, -0.195), (0.06, 1.44, -0.178)], 0.008, 6, k=0.7)
@@ -298,13 +301,21 @@ def pack():
 # ------------------------------------------------------------------ the other side
 def beanie():
     p = Part('beanie')
-    cx, cy, cz = 0, 1.7, 0.022
+    # a knitted watch cap pulled down: to the brow in front, over the tops of the ears, low on the back of the head; the
+    # cuff turned up round the bottom of it, the knit standing in ribs
+    cx, cy, cz = 0, 1.703, 0.024
     def fn(u, v):
         th = u * 2 * PI
-        ph = v * 1.32
-        rib = 1 + 0.012 * math.sin(th * 26) * (v > 0.72)
-        return (cx + math.sin(th) * math.sin(ph) * 0.106 * rib, cy + math.cos(ph) * 0.122, cz + math.cos(th) * math.sin(ph) * 0.127 * rib)
-    p.grid(fn, 52, 9, closeu=True, k=1.0)
+        f = math.cos(th)
+        lim = 1.2 + 0.36 * math.sin(th) ** 2 + 0.42 * max(0.0, -f) ** 1.5
+        ph = v * lim
+        cuff = 1.045 if v > 0.74 else 1.0
+        rib = 1 + 0.016 * math.sin(th * 30) * (0.35 + 0.65 * v)
+        k = cuff * rib
+        # the crown has a little cloth to spare and lies back
+        slack = (1 - v) ** 2
+        return (cx + math.sin(th) * math.sin(ph) * 0.1035 * k, cy + math.cos(ph) * 0.1295 + 0.006 * slack, cz + math.cos(th) * math.sin(ph) * 0.1245 * k - 0.008 * slack)
+    p.grid(fn, 120, 12, closeu=True, k=0.36)
     return p.finish()
 
 def hood():
@@ -315,7 +326,7 @@ def hood():
         b = v * 2 * PI
         r = 0.04 + 0.028 * math.cos(a * 0.8) ** 2
         return (math.sin(a) * (0.11 + r * math.cos(b)), 1.5 + r * math.sin(b) * 1.1 - 0.05 * abs(math.sin(a)), -0.015 + math.cos(a) * -(0.09 + r * math.cos(b)) * 1.0)
-    p.grid(fn, 22, 9, closev=True, k=0.92)
+    p.grid(fn, 22, 9, closev=True, k=0.5)
     return p.finish()
 
 def rig():

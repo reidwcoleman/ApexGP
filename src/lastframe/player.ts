@@ -731,7 +731,8 @@ export class LocalPlayer {
       gun.group.position.copy(this.gunPos);
       gun.group.quaternion.copy(this.gunQuat);
       if (gun.action) {
-        let back = this.weapon === 'pistol' ? Math.max(0, this.cool / spec.cycle) * 0.03 : cyc * (this.weapon === 'rifle' ? 0.09 : 0.1);
+        // (a self-loader's slide or bolt carrier is back and home again inside one shot's time)
+        let back = this.weapon === 'pistol' ? Math.max(0, this.cool / spec.cycle) * 0.03 : this.weapon === 'carbine' ? Math.sin(Math.max(0, this.cool / spec.cycle) * Math.PI) * 0.062 : cyc * (this.weapon === 'rifle' ? 0.09 : 0.1);
         if (ct >= 0 && this.reloadT <= 0) {
           if (bolt) {
             // the firing hand comes off the grip, up to the bolt handle, and goes back and forward with it
