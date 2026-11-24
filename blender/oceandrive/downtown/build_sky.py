@@ -91,6 +91,44 @@ mf.face([(-3600.0, 3300.0, 0.0), (-480.0, 3300.0, 0.0), (-480.0, K, 0.0), (-3600
 mf.face([(-3600.0, -K, 0.0), (-480.0, -K, 0.0), (-480.0, -3200.0, 0.0), (-3600.0, -3200.0, 0.0)], 'od_farground', WHITE, n=(0, 0, 1))
 obs.append(mf.build())
 
+# the city goes on past the mapped county: low blocks of every height to the horizon (they sit in the haze),
+# denser and taller toward the mapped edge, thinning out with distance
+import random as _r
+rr = _r.Random(77)
+mfc = MB('sky_farcity')
+FAR_COLS = ['#d8d2c6', '#cfc9bd', '#e2ddd2', '#bfb9ae', '#d9cfc0', '#c8ccd0', '#e6e1d6']
+def far_ok(x, y):
+    # land only: west of the bay and outside the mapped county box
+    if x > -480:
+        return False
+    return not (-3600 < x < -480 and -3200 < y < 3300)
+n = 0
+tries = 0
+while n < 5200 and tries < 60000:
+    tries += 1
+    x = rr.uniform(-8500, -500)
+    y = rr.uniform(-8500, 8500)
+    if not far_ok(x, y):
+        continue
+    d = max(0.0, max(-3600 - x, y - 3300, -3200 - y, 0.0))
+    if rr.random() > 1.0 - min(0.85, d / 6000):
+        pass
+    if rr.random() < d / 9000:
+        continue
+    w, l = rr.uniform(14, 45), rr.uniform(14, 60)
+    h = rr.choice([6, 8, 10, 12, 15, 20, 26]) if rr.random() < 0.9 else rr.uniform(30, 90) * max(0.3, 1 - d / 5000)
+    a = rr.uniform(0, 0.3)
+    ca, sa = math.cos(a), math.sin(a)
+    pts = [(x + ca * px - sa * py, y + sa * px + ca * py) for px, py in ((-w / 2, -l / 2), (w / 2, -l / 2), (w / 2, l / 2), (-w / 2, l / 2))]
+    c = hexcol(rr.choice(FAR_COLS))
+    for i in range(4):
+        p, q = pts[i], pts[(i + 1) % 4]
+        mfc.face([(p[0], p[1], 0.0), (q[0], q[1], 0.0), (q[0], q[1], h), (p[0], p[1], h)], 'od_far', c)
+    mfc.face([(p[0], p[1], h) for p in pts], 'od_roof', WHITE, n=(0, 0, 1))
+    n += 1
+obs.append(mfc.build())
+print('far city', n)
+
 for o in bpy.data.objects:
     o.select_set(False)
 bpy.ops.export_scene.gltf(

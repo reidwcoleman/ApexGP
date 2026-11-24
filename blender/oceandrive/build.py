@@ -199,6 +199,19 @@ for i, h in enumerate((9.5, 11.0, 12.2, 13.4, 14.6, 16.0)):
     move(ob, C_TPL)
     ob.hide_render = True
     variants.append(ob)
+# the park isn't all coconuts: tall skinny Mexican fan palms and Florida's own cabbage palms among them
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'downtown'))
+sys.modules.pop('flora', None)
+import flora
+others = []
+for i, h in enumerate((15.0, 18.5)):
+    ob = flora.washingtonia(f'palm_w{i}', random.Random(700 + i), h).build(weld=False)
+    move(ob, C_TPL); ob.hide_render = True
+    others.append(ob)
+for i, h in enumerate((6.5, 8.2)):
+    ob = flora.sabal(f'palm_s{i}', random.Random(800 + i), h).build(weld=False)
+    move(ob, C_TPL); ob.hide_render = True
+    others.append(ob)
 spots = []
 for e in geo.NODES.values():
     if e.get('tags', {}).get('natural') == 'tree':
@@ -223,7 +236,8 @@ for i, p in enumerate(walk):
                 if 12.5 < x < 98 and free(x, y) and not near_walk(x, y, 3.2):
                     spots.append((x, y))
 for (x, y) in spots:
-    v = rng.choice(variants)
+    # the row along Ocean Drive stays coconuts; inside the park one in four is a fan or a cabbage palm
+    v = rng.choice(others) if (x > 16 and rng.random() < 0.26) else rng.choice(variants)
     o = bpy.data.objects.new('palm', v.data)
     o.location = (x, y, ground.terrain_h(x, y) - 0.05)
     o.rotation_euler = (0, 0, rng.uniform(0, 6.28))
