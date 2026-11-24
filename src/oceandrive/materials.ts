@@ -73,6 +73,7 @@ uniform float uSea;
 uniform float uSwash;
 uniform float uNight;
 uniform vec3 uLmTint;
+uniform vec3 uSunCol;
 uniform float uWet;
 uniform float uRain;
 uniform float uSkyK;
@@ -338,7 +339,14 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
       // decode the gamma-stored map; keep the sky's diffuse out (the map holds it); grime where light is scarce
       f = f.replace(
         'vec3 lightMapIrradiance = lightMapTexel.rgb * lightMapIntensity;',
-        `vec3 lightMapIrradiance = pow( lightMapTexel.rgb, vec3( ${lm.info.gamma.toFixed(2)} ) ) * lightMapIntensity * uLmTint + odLamps( vOdWorld + vOdNormalW * 0.05, normalize( vOdNormalW ) );`,
+        `vec3 lightMapIrradiance = pow( lightMapTexel.rgb, vec3( ${lm.info.gamma.toFixed(2)} ) ) * lightMapIntensity * uLmTint + odLamps( vOdWorld + vOdNormalW * 0.05, normalize( vOdNormalW ) );
+        // the bake runs short of bounce light in the street canyons: the sunlit facades across the street
+        // lift what's in shade (a warm fill, strongest where the map is darkest)
+        {
+          float odLmL = dot( lightMapIrradiance, vec3( 0.2126, 0.7152, 0.0722 ) );
+          float odSunL = dot( uSunCol, vec3( 0.2126, 0.7152, 0.0722 ) ) + 1e-3;
+          lightMapIrradiance += uSunCol * vec3( 1.0, 0.94, 0.86 ) * 0.13 * ( 1.0 - smoothstep( 0.08, 0.5, odLmL / odSunL ) );
+        }`,
       );
       f = f.replace(
         /#if defined\( USE_ENVMAP \) && defined\( ENVMAP_TYPE_CUBE_UV \)\s*\n\s*#if defined\( STANDARD \) \|\| defined\( LAMBERT \) \|\| defined\( PHONG \)\s*\n\s*iblIrradiance \+= getIBLIrradiance\( geometryNormal \);\s*\n\s*#endif\s*\n\s*#endif/,
@@ -496,7 +504,7 @@ export const TABLE: Record<string, OdOpts> = {
   od_sidewalk: { name: 'od_sidewalk', diff: 'concrete_pavement_diff.webp', nor: 'concrete_pavement_nor.webp', rough: 'concrete_pavement_rough.webp', tile: 3.0, kind: 'ground', grime: 1, vertexColors: false },
   od_curb: { name: 'od_curb', diff: 'concrete_floor_01_diff.webp', nor: 'concrete_floor_01_nor.webp', rough: 'concrete_floor_01_rough.webp', tile: 1.5, kind: 'ground', grime: 1, vertexColors: false },
   od_roof: { name: 'od_roof', diff: 'concrete_floor_01_diff.webp', nor: 'concrete_floor_01_nor.webp', rough: 'concrete_floor_01_rough.webp', tile: 3, kind: 'ground', grime: 1, vertexColors: false },
-  od_asphalt: { name: 'od_asphalt', diff: 'asphalt_02_diff.webp', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.6, vertexColors: false, color: 0xd2d2d2 },
+  od_asphalt: { name: 'od_asphalt', diff: 'asphalt_02_diff.webp', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.45, vertexColors: false, color: 0xffffff },
   od_paint: { name: 'od_paint', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.4, vertexColors: true, color: 0xd8d6cf, roughness: 1 },
   od_paintyel: { name: 'od_paintyel', nor: 'asphalt_02_nor.webp', tile: 3.5, kind: 'ground', color: 0xd9a21b, roughness: 0.6 },
   od_bikelane: { name: 'od_bikelane', diff: 'asphalt_02_diff.webp', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.9, color: 0x648a6c, vertexColors: false },

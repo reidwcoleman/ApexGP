@@ -28,6 +28,10 @@ interface Ped {
   clip: string;
   acc: number;
   lod: number; // 0 near (shadows), 1 mid, 2 hidden
+  knockT: number;
+  kvx: number;
+  kvz: number;
+  kdir: number;
 }
 
 /** skin and clothes take more of the sky and the sand's bounce (the env map's dim lower half undersells it on a beach) */
@@ -43,6 +47,8 @@ const COLS = [0xffffff, 0xf2efe6, 0x1b1b1f, 0x2b3a55, 0xe8b4c0, 0x9fd3d6, 0xf3d3
 
 export class Peds {
   readonly list: Ped[] = [];
+  /** the cars: what blocks a sidewalk, and what's about to hit someone */
+  cars: { strike: (x: number, z: number, r?: number) => { vx: number; vz: number } | null; blocks: (x: number, z: number) => boolean } | null = null;
   private rnd: () => number;
   constructor(readonly scene: THREE.Scene, readonly env: Env, readonly kit: PeopleKit, readonly ground: Ground) {
     let s = 1234567;
@@ -67,7 +73,7 @@ export class Peds {
     this.env.prepObject(p.root, true, true);
     fill(p.root);
     const jog = clip === 'jog';
-    const ped: Ped = { p, x, z, dir, lane, speed: jog ? 2.6 + this.rnd() * 0.6 : 1.15 + this.rnd() * 0.45, side: 0, z0, z1, sit, yaw, t: this.rnd() * 10, clip, acc: this.rnd() * 0.25, lod: 0 };
+    const ped: Ped = { p, x, z, dir, lane, speed: jog ? 2.6 + this.rnd() * 0.6 : 1.15 + this.rnd() * 0.45, side: 0, z0, z1, sit, yaw, t: this.rnd() * 10, clip, acc: this.rnd() * 0.25, lod: 0, knockT: 0, kvx: 0, kvz: 0, kdir: 0 };
     p.play(clip, { offset: this.rnd() });
     p.update(0.016);
     const h = this.ground.height(x, z);
@@ -148,8 +154,50 @@ export class Peds {
     } else d.p.root.updateMatrixWorld(true);
   }
 
+  /** knocked down: thrown, slides, lies a moment, gets up and carries on */
+  private down(d: Ped, dt: number, eye: THREE.Vector3) {
+    d.knockT -= dt;
+    const t = 2.6 - d.knockT;
+    const nx = d.x + d.kvx * dt, nz = d.z + d.kvz * dt;
+    if (!this.ground.blocked(nx, nz)) {
+      d.x = nx;
+      d.z = nz;
+    }
+    const f = Math.max(0, 1 - dt * 3.5);
+    d.kvx *= f;
+    d.kvz *= f;
+    const down = t < 0.3 ? t / 0.3 : d.knockT < 0.6 ? Math.max(0, d.knockT / 0.6) : 1;
+    const e = down * down * (3 - 2 * down);
+    const h = this.ground.height(d.x, d.z);
+    d.p.root.position.set(d.x, (Number.isNaN(h) ? 0 : h) + e * 0.12, d.z);
+    d.p.root.rotation.set(-e * 1.45, d.kdir + Math.PI, 0, 'YXZ');
+    if (d.knockT < 0.65 && d.knockT + dt >= 0.65) d.p.play('crouch', { fade: 0.25 });
+    this.animate(d, dt, eye);
+    if (d.knockT <= 0) {
+      d.knockT = 0;
+      d.p.root.rotation.set(0, d.yaw, 0);
+      d.p.play(d.sit ? d.clip : d.clip === 'jog' ? 'jog' : d.sit ? 'sit' : d.clip, { fade: 0.3 });
+    }
+  }
+
   update(dt: number, you: THREE.Vector3, eye: THREE.Vector3 = you) {
     for (const d of this.list) {
+      // a car: knocked flat if it hits, a jump aside if it's coming
+      if (this.cars && d.knockT <= 0) {
+        const hit = this.cars.strike(d.x, d.z, 0.3);
+        if (hit) {
+          const sp = Math.hypot(hit.vx, hit.vz);
+          d.knockT = 2.6;
+          d.kvx = (hit.vx / sp) * Math.min(7, sp * 0.8);
+          d.kvz = (hit.vz / sp) * Math.min(7, sp * 0.8);
+          d.kdir = Math.atan2(hit.vx, hit.vz);
+          d.p.play('idle', { fade: 0.1 });
+        }
+      }
+      if (d.knockT > 0) {
+        this.down(d, dt, eye);
+        continue;
+      }
       if (d.sit) {
         this.animate(d, dt, eye);
         continue;
@@ -157,7 +205,14 @@ export class Peds {
       // keep to the lane, step round what blocks it
       let want = d.speed;
       const ax = d.x, az = d.z + d.dir * 0.9;
-      const ahead = this.ground.blocked(ax + d.side, az) || (Math.hypot(you.x - (d.x), you.z - az) < 0.8);
+      const ahead = this.ground.blocked(ax + d.side, az) || Math.hypot(you.x - d.x, you.z - az) < 0.8 || (!!this.cars && this.cars.blocks(ax + d.side, az));
+      // a car bearing down: step smartly out of its way
+      const coming = this.cars?.strike(d.x, d.z, 2.2);
+      if (coming) {
+        const side = Math.sign((d.x - you.x) || 1);
+        d.side += side * dt * 5;
+        want = Math.max(want, 3);
+      }
       if (ahead) {
         d.side += (d.side >= 0 ? 1 : -1) * dt * 1.6;
         if (Math.abs(d.side) > 1.4) {

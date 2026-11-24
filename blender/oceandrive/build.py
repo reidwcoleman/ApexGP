@@ -276,6 +276,11 @@ sun = bpy.data.objects.new('sun', sd)
 sun.rotation_euler = sun_dir.to_track_quat('Z', 'Y').to_euler()
 sc.collection.objects.link(sun)
 
+import json
+json.dump(dict(shops=hotels.SHOPS, xs=[[a, b, n] for a, b, n in ground.XS], ys=[[a, b] for a, b in ground.YS], od=[ground.OD_W, ground.OD_E],
+               city=[ground.CITY_X0, ground.CITY_X1, ground.CITY_Y0, ground.CITY_Y1], fronts=[[f[0], f[1], f[2], f[3], H, num] for f, H, num in front_feet]),
+          open(os.path.join(HERE, '..', '..', 'public', 'oceandrive', 'dressing.json'), 'w'))
+print('dressing', len(hotels.SHOPS))
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(WORK, 'oceandrive.blend'))
 print('saved')
 

@@ -658,7 +658,21 @@ One block of Miami Beach made as real as a browser allows: Ocean Drive from 7th 
 Art Deco hotels on it (Avalon, Beacon, Colony, Boulevard, Starlite, News Cafe; Park Central to the
 south, the Pelican to the north), the streets behind, Lummus Park, the dunes, the beach and the
 Atlantic. Walk it, sit the camera on a café porch, or take any car (a driver gets out) and drive.
-Traffic loops the block with drivers at the wheel; about 80 people walk, jog and stand about.
+Traffic loops the block with drivers at the wheel and stops at the signals on Collins; about 80
+people walk, jog and stand about, step out of the way of cars and get knocked flat by them.
+
+The streets are dressed from the same map (`dressing.ts`, laid out from `dressing.json`, which the
+Blender build writes): a sign over every shopfront (lit at night) and striped awnings on about half,
+mast-arm signals on Collins that cycle, green street-name blades, pay stations, newspaper boxes, bike
+racks and scooters, manholes and storm drains, café string lights, palms down the side streets with
+cars parked along them, sunbathers on the beach.
+
+Driving: weight transfer (the nose dips braking and squats accelerating, the body rolls in turns),
+a spring under the body on curbs, grip that runs out (the handbrake breaks the rear loose; wet
+roads, the lawn and the sand grip less), and crashes that trade momentum by mass with a twist from
+where they touched; traffic knocked off its route waits, then rejoins. F while moving brakes to a
+stop and you step out by the door (or wherever is clear). The ground map covers the whole city
+(`height_far.bin`, 50 cm), so you can walk and drive anywhere the streets go.
 
 Four times of day (afternoon, golden hour, blue hour, night under the moon) and three weathers
 (clear, clouds, tropical storm) make twelve looks (`sky.ts`). Each starts from a real sky photo
@@ -680,7 +694,10 @@ How it's made (`blender/oceandrive/`, `./make.sh build` reruns all of it):
   park its coral rock wall and serpentine beachwalk (`ground.py`), 150 procedural coconut palms
   (`palms.py`), café tables, parasols, lamps and dune planting (`props.py`, Poly Haven scans).
 - **Cycles bake** (`bake.py`): sky light and the sun's bounce light into lightmaps (4096² for the
-  block and the street, 2048² beyond); the browser adds the sun itself with cascaded shadows.
+  block and the street, 2048² beyond), islands dilated into the padding so thin strips don't fade
+  to black in the mips; the browser adds the sun itself with cascaded shadows (the far cascades skip
+  small props: three culls shadow casters by the view camera's layers, so `main.ts` draws each
+  cascade with its own mask).
 - **Export** (`export.py`): GLB with GPU instancing (then quantized and meshopt-packed with
   gltf-transform, ~18 MB), a 25 cm walk heightmap ray-cast from the scene, the lightmaps as WebP.
 - **In the browser** (`src/oceandrive/`): scanned PBR surfaces with anti-tiling, weathering and

@@ -20,6 +20,7 @@ import { Ambience } from './audio.ts';
 import { Gulls } from './gulls.ts';
 import { Sky, TIMES, WEATHERS, type TimeOfDay, type Weather } from './sky.ts';
 import { Rain } from './rain.ts';
+import { Dressing, type DressData } from './dressing.ts';
 import { SEA } from './water.ts';
 
 const BASE = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'oceandrive/';
@@ -78,6 +79,7 @@ async function boot() {
   const cars = new Cars(scene, env, ground, world.meta.sw, kit);
   const carsP = cars.load();
   const peds = new Peds(scene, env, kit, ground);
+  peds.cars = { strike: (x, z) => cars.strike(x, z), blocks: (x, z) => cars.blocks(x, z) };
   peds.spawn();
   const gulls = new Gulls(scene);
   const rain = new Rain(scene);
@@ -115,11 +117,66 @@ async function boot() {
   env.prepObject(gulls.root, true, false);
   env.prepObject(nets, true, true);
   await carsP;
+  // the street furniture, signals, signs, palms down the side streets, parked cars along them
+  const dress = new Dressing(scene, env, ground, (await (await fetch(BASE + 'dressing.json')).json()) as DressData, kit, world.root);
+  cars.stopFor = (x, z, yaw) => dress.stopFor(x, z, yaw);
+  {
+    const spots: [number, number, number][] = [];
+    const d = dress.data;
+    const near = (x: number) => d.xs.some(([a, b]) => x > a - 8 && x < b + 8);
+    for (const [y0, y1] of d.ys) {
+      if (Math.abs(y0) > 100) continue;
+      for (let x = -150; x < -16; x += 6.6) {
+        if (near(x)) continue;
+        spots.push([x, -(y0 + 1.25), Math.PI / 2], [x, -(y1 - 1.25), -Math.PI / 2]);
+      }
+    }
+    const collins = d.xs.find((x) => x[2] === 'Collins Avenue');
+    if (collins) for (let y = -60; y < 60; y += 6.6) spots.push([collins[0] + 1.3, -y, 0]);
+    cars.park(spots);
+  }
+  let shadowPasses = 0;
+  // shadow layers: the near cascade draws every caster; the middle one skips the small props (chairs,
+  // AC units, shrubs, people), whose shadows are a pixel at that range; the far one only the buildings
+  {
+    const SMALL = /chair|table|aircon|shrub|bush|lamp|bistro|umbrella|lounger|bike|person/i;
+    const MID = /palm|frond|bark/i;
+    scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.castShadow) return;
+      const tag = `${m.name}|${(m.material as THREE.Material).name}`;
+      if (SMALL.test(tag)) return;
+      let car = false;
+      for (let p: THREE.Object3D | null = m; p; p = p.parent) if (cars.list.some((c) => c.root === p)) car = true;
+      if (car || MID.test(tag) || (m as THREE.InstancedMesh).isInstancedMesh) m.layers.enable(2);
+      else m.layers.enable(1);
+    });
+    // three culls shadow casters by the *view* camera's layers, so draw the cascades one at a time
+    // with the view camera's mask swapped for each
+    const L = env.csm.lights as THREE.Light[];
+    const sm = renderer.shadowMap as THREE.WebGLShadowMap & { render: (l: THREE.Light[], s: THREE.Scene, c: THREE.Camera) => void };
+    const orig = sm.render.bind(sm);
+    const MASK = [0xffffffff, (1 << 1) | (1 << 2), 1 << 1];
+    let frameNo = 0;
+    sm.render = (lights, sc, cam) => {
+      const saved = cam.layers.mask;
+      frameNo++;
+      if (lights.length) shadowPasses++;
+      for (const l of lights) {
+        const i = L.indexOf(l);
+        cam.layers.mask = i >= 0 ? MASK[i] : saved;
+        orig([l], sc, cam);
+      }
+      cam.layers.mask = saved;
+    };
+    void frameNo;
+  }
   player.obstacle = (x, z) => cars.blocks(x, z);
   const post = new Post(renderer, scene, camera);
   post.exposure.value = Number(Q.get('ev')) || 0.74;
   const hud = new Hud(document.body);
   const audio = new Ambience();
+  cars.onCrash = (sp) => audio.crash(sp);
   if (Q.get('hud') === '0') hud.toggle();
   // a fixed camera for stills: ?cam=x,y,z&look=x,y,z (three coords)
   const camQ = Q.get('cam')?.split(',').map(Number);
@@ -208,20 +265,23 @@ async function boot() {
     near.update(camera.position);
     gulls.update(t);
     if (input.hit('KeyF')) {
-      if (driving) {
-        const out = cars.exit();
-        if (out) {
-          player.spawn(out.x, out.z, out.yaw);
-          driving = false;
-          player.hidden = false;
-        }
-      } else {
+      if (driving) cars.requestExit();
+      else {
         const car = cars.nearest(player.pos, 3.2);
         if (car) {
-          cars.enter(car);
+          cars.enter(car, camera);
           driving = true;
           player.hidden = true;
         }
+      }
+    }
+    if (driving) {
+      // out once the car has stopped, by the driver's door (or wherever's clear)
+      const out = cars.takeExit((x, z, y) => player.clearAt(x, z, y));
+      if (out) {
+        player.spawn(out.x, out.z, out.yaw, camera);
+        driving = false;
+        player.hidden = false;
       }
     }
     if (input.hit('KeyH')) hud.toggle();
@@ -236,6 +296,19 @@ async function boot() {
       player.person.root.visible = false;
     } else {
       player.update(dt, input, camera);
+    }
+    // a car that hits you knocks you down
+    if (!driving) {
+      const hit = cars.strike(player.pos.x, player.pos.z);
+      if (hit) player.knock(hit.vx, hit.vz);
+      else {
+        // a car creeping into you nudges you aside rather than driving through you
+        const push = cars.pushOut(player.pos.x, player.pos.z, 0.32);
+        if (push && player.clearAt(player.pos.x + push.x, player.pos.z + push.z, player.pos.y)) {
+          player.pos.x += push.x;
+          player.pos.z += push.z;
+        }
+      }
     }
     cars.setWalkers(peds.positions());
     cars.update(dt, driving ? null : player.pos, camera.position);
@@ -252,6 +325,7 @@ async function boot() {
     (post.air.u('uSunDir').value as THREE.Vector3).copy(env.toSun);
     (post.air.u('uSunScat').value as THREE.Vector3).copy(o.sunScatter);
     rain.update(camera.position, o.rain, o.fogColor);
+    dress.update(dt, o.night, o.lamps);
     for (const m of world.neon) m.color.setScalar(3.2 + 5.8 * o.night);
     for (const m of world.lamps) {
       m.emissive.setRGB(1, 0.72, 0.42);
@@ -272,7 +346,7 @@ async function boot() {
   };
   $('#loading').classList.add('done');
   requestAnimationFrame(frame);
-  (window as unknown as { od: unknown }).od = { THREE, U, sky, renderer, scene, camera, player, cars, peds, env, post, world, ground };
+  (window as unknown as { od: unknown }).od = { THREE, U, sky, dress, get shadowPasses() { return shadowPasses; }, renderer, scene, camera, player, cars, peds, env, post, world, ground };
 }
 
 boot().catch((e) => {

@@ -174,6 +174,33 @@ with open(os.path.join(OUT, 'height.bin'), 'wb') as f:
     f.write(B.tobytes())
 print('heightmap', nx, ny)
 
+# the whole city at 50 cm (streets, sidewalks, every footprint): walking and driving anywhere you can
+# get to by car, beyond the detailed map above
+FX0, FX1, FY0, FY1, FRES = ground.CITY_X0, 300.0, ground.CITY_Y0, ground.CITY_Y1, 0.5
+fnx, fny = int((FX1 - FX0) / FRES), int((FY1 - FY0) / FRES)
+for n in skip:
+    bpy.data.objects[n].hide_viewport = True
+dg = bpy.context.evaluated_depsgraph_get()
+FH = np.full((fny, fnx), ground.SEA - 3, np.float32)
+FB = np.zeros((fny, fnx), np.uint8)
+for j in range(fny):
+    y = FY0 + (j + 0.5) * FRES
+    for i in range(fnx):
+        x = FX0 + (i + 0.5) * FRES
+        hit, loc, nrm, idx, ob, mat = sc.ray_cast(dg, Vector((x, y, 120.0)), Vector((0, 0, -1)), distance=260)
+        if hit:
+            FH[j, i] = loc.z
+            if ob.name in blockers:
+                FB[j, i] = 1
+for n in skip:
+    bpy.data.objects[n].hide_viewport = False
+fq = np.clip(np.round((FH + 10.0) * 100.0), 0, 65535).astype(np.uint16)
+with open(os.path.join(OUT, 'height_far.bin'), 'wb') as f:
+    f.write(struct.pack('<4sIIffff', b'ODH1', fnx, fny, FX0, FY0, FRES, -10.0))
+    f.write(fq.tobytes())
+    f.write(FB.tobytes())
+print('far heightmap', fnx, fny)
+
 # ------------------------------------------------------------------ glTF
 # the scanned props don't need alpha (their opacity maps would be merged into new images, which fails)
 for m in bpy.data.materials:

@@ -111,6 +111,29 @@ export class Ambience {
     }
   }
 
+  /** metal on metal (or on a wall): a thump, a crunch, a little tinkle of glass for the big ones */
+  crash(speed: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const k = Math.min(1, speed / 12);
+    const len = Math.floor(ctx.sampleRate * 0.9);
+    const b = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      const t = i / ctx.sampleRate;
+      const thump = Math.sin(t * 2 * Math.PI * (70 - t * 40)) * Math.exp(-t * 14);
+      const crunch = (Math.random() * 2 - 1) * Math.exp(-t * 9) * (0.5 + 0.5 * Math.sin(t * 190));
+      const glass = k > 0.6 ? Math.sin(t * 2 * Math.PI * (3200 + Math.random() * 900)) * Math.exp(-t * 6) * 0.15 * (Math.random() < 0.3 ? 1 : 0) : 0;
+      d[i] = (thump * 0.9 + crunch * 0.6 * k + glass) * (0.4 + 0.6 * k);
+    }
+    const s = ctx.createBufferSource();
+    s.buffer = b;
+    const g = ctx.createGain();
+    g.gain.value = 0.8;
+    s.connect(g).connect(this.master);
+    s.start();
+  }
+
   /** a roll of thunder: a crack (near) then a long low rumble */
   thunder(loud: number) {
     const ctx = this.ctx;

@@ -18,8 +18,15 @@ tail -1 work/pack.log
 python3 - <<'PY'
 from PIL import Image
 import json, os
+import numpy as np
+from scipy import ndimage
 m = json.load(open('work/lightmaps.json'))
 for n in m:
-    Image.open(f'work/{n}.png').convert('RGB').save(f'../../public/oceandrive/lm/{n}.webp', quality=92, method=6)
+    a = np.asarray(Image.open(f'work/{n}.png').convert('RGB'))
+    # dilate: every empty texel between the islands takes its nearest baked one, so the mip levels
+    # (and the far, grazing views of thin strips like the side streets) don't fade into black
+    empty = a.sum(axis=2) < 4
+    _, (iy, ix) = ndimage.distance_transform_edt(empty, return_indices=True)
+    Image.fromarray(a[iy, ix]).save(f'../../public/oceandrive/lm/{n}.webp', quality=92, method=6)
 print('lightmaps', sorted(os.listdir('../../public/oceandrive/lm')))
 PY

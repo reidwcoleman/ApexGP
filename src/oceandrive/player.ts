@@ -35,10 +35,53 @@ export class Player {
     this.person.root.name = 'player';
   }
 
-  spawn(x: number, z: number, yaw: number) {
-    this.pos.set(x, this.ground.height(x, z), z);
+  /** the camera eases from where it was (the car's chase cam) to the shoulder over half a second */
+  private blendFrom = new THREE.Vector3();
+  private blendT = 1;
+  spawn(x: number, z: number, yaw: number, camera?: THREE.Camera) {
+    const h = this.ground.height(x, z);
+    this.pos.set(x, Number.isNaN(h) ? 0.15 : h, z);
+    this.vy = 0;
+    this.grounded = true;
+    this.speed = 0;
+    this.knockT = 0;
     this.yaw = this.camYaw = yaw;
     this.person.root.position.copy(this.pos);
+    if (camera) {
+      this.blendFrom.copy(camera.position);
+      this.blendT = 0;
+      this.camD = this.camDist;
+    }
+  }
+
+  /** room for you to stand at (x, z), stepping down from a car floor at y */
+  clearAt(x: number, z: number, y: number): boolean {
+    const g = this.ground;
+    const h0 = g.height(x, z);
+    if (Number.isNaN(h0) || Math.abs(h0 - y) > 0.6 || h0 < this.sea - 0.6) return false;
+    for (const [dx, dz] of [[0, 0], [R + 0.05, 0], [-R - 0.05, 0], [0, R + 0.05], [0, -R - 0.05]]) {
+      if (g.blocked(x + dx, z + dz) || this.obstacle(x + dx, z + dz)) return false;
+      if (Math.abs(g.height(x + dx, z + dz) - h0) > STEP) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Hit by a car: thrown along its path, down on the ground for a moment, then back up. (The body
+   * tips over from the feet and slides; you can't move until you're up.)
+   */
+  private knockT = 0;
+  private knockV = new THREE.Vector2();
+  private knockDir = 0;
+  knock(vx: number, vz: number) {
+    if (this.knockT > 0) return;
+    this.knockT = 2.4;
+    const sp = Math.hypot(vx, vz);
+    this.knockV.set(vx, vz).multiplyScalar(Math.min(1.1, 4 / Math.max(sp, 1)) * Math.min(1, sp / 6) * 1.6);
+    this.knockDir = Math.atan2(vx, vz);
+    this.vy = Math.min(4, sp * 0.35);
+    this.grounded = false;
+    this.speed = 0;
   }
 
   private walkable(x: number, z: number, fromY: number): boolean {
@@ -57,6 +100,10 @@ export class Player {
     this.camYaw -= inp.mdx * 0.0026;
     this.camPitch = THREE.MathUtils.clamp(this.camPitch - inp.mdy * 0.0022, -1.1, 0.55);
     this.camDist = THREE.MathUtils.clamp(this.camDist + inp.wheel * 0.45, 1.6, 9);
+    if (this.knockT > 0) {
+      this.knocked(dt, camera);
+      return;
+    }
     const mv = inp.move();
     const want = Math.hypot(mv.x, mv.y);
     const sprint = inp.down('ShiftLeft') || inp.down('ShiftRight');
@@ -119,9 +166,51 @@ export class Player {
       if (act) act.timeScale = THREE.MathUtils.clamp(this.speed / clipSpeed, 0.5, 1.6);
     }
     this.person.root.position.copy(this.pos);
-    this.person.root.rotation.y = this.yaw;
+    this.person.root.rotation.set(0, this.yaw, 0);
     this.person.root.visible = !this.hidden;
     this.person.update(dt);
+    this.placeCamera(camera, dt);
+  }
+
+  /** down: slide to a stop, lie there, get up */
+  private knocked(dt: number, camera: THREE.PerspectiveCamera) {
+    this.knockT -= dt;
+    const t = 2.4 - this.knockT;
+    // slide with friction, stopped by walls like walking
+    const nx = this.pos.x + this.knockV.x * dt, nz = this.pos.z + this.knockV.y * dt;
+    // thrown clear of the car: only the world stops the slide
+    const nh = this.ground.height(nx, nz);
+    if (!Number.isNaN(nh) && !this.ground.blocked(nx, nz) && nh - this.pos.y < STEP + 0.3) {
+      this.pos.x = nx;
+      this.pos.z = nz;
+    } else this.knockV.multiplyScalar(-0.2);
+    this.knockV.multiplyScalar(Math.max(0, 1 - dt * (this.grounded ? 4 : 0.3)));
+    const gh = this.ground.heightSmooth(this.pos.x, this.pos.z);
+    this.vy -= 9.81 * dt;
+    this.pos.y += this.vy * dt;
+    if (this.pos.y <= gh) {
+      this.pos.y = gh;
+      this.vy = 0;
+      this.grounded = true;
+    }
+    // the fall: tip back over ~0.35 s, lie, then up over the last 0.6 s
+    const down = t < 0.35 ? t / 0.35 : this.knockT < 0.6 ? Math.max(0, this.knockT / 0.6) : 1;
+    const e = down * down * (3 - 2 * down);
+    if (this.anim !== 'crouch' && this.knockT < 0.7) {
+      this.person.play('crouch', { fade: 0.3 });
+      this.anim = 'crouch';
+    } else if (this.anim !== 'idle' && this.knockT >= 0.7) {
+      this.person.play('idle', { fade: 0.15 });
+      this.anim = 'idle';
+    }
+    this.person.root.position.set(this.pos.x, this.pos.y + e * 0.12, this.pos.z);
+    this.person.root.rotation.set(-e * 1.45, this.knockDir + Math.PI, 0, 'YXZ');
+    this.person.root.visible = !this.hidden;
+    this.person.update(dt);
+    if (this.knockT <= 0) {
+      this.person.root.rotation.set(0, this.yaw, 0);
+      this.knockT = 0;
+    }
     this.placeCamera(camera, dt);
   }
 
@@ -145,6 +234,11 @@ export class Player {
     }
     this.camD += (d - this.camD) * Math.min(1, dt * (d < this.camD ? 20 : 4));
     camera.position.set(tgt.x + bx * this.camD, tgt.y + by * this.camD, tgt.z + bz * this.camD);
+    if (this.blendT < 1) {
+      this.blendT = Math.min(1, this.blendT + dt / 0.55);
+      const k = this.blendT * this.blendT * (3 - 2 * this.blendT);
+      camera.position.lerpVectors(this.blendFrom, camera.position, k);
+    }
     camera.lookAt(tgt);
   }
 }

@@ -46,6 +46,7 @@ DEFAULT = dict(floors=3, body='#f2efe6', trim='#c8d8de', accent='#6a8fa0', porch
 
 FONT = None   # set by build.py
 STREET = None  # (x, y) -> is there a road: set by build.py
+SHOPS = []     # street-facing shopfronts, for the browser to dress (signs, awnings, light)
 
 
 def window_wall(mb, o, U, N, w, h, openings, mat, col, depth=0.2, frame_col=WHITE, glass='od_glass', sills=True, ac=None, frames=True):
@@ -303,6 +304,8 @@ def build_hotel(mb, foot, number, rng, signs, props):
         sops = []
         # a corner hotel's side wall on a cross street gets shopfronts and a side entrance
         if STREET and STREET((xb + xu) / 2, yy + nrm[1] * 5):
+            SHOPS.append(dict(x=round(o[0], 2), y=round(o[1], 2), ux=UU[0], uy=UU[1], nx=nrm[0], ny=nrm[1], L=round(L, 2), gf=FL0, h=round(Htop - SW, 2),
+                              bays=[[round(a, 2), round(b, 2)] for a, b in bays(L - 1.0, bw=3.4, margin=0.6)], hotel=True))
             for a, b in bays(L - 1.0, bw=3.4, margin=0.6):
                 if rng.random() < 0.8:
                     sops.append((a + 0.15, 0.1, b - 0.15, FL0 - 0.7, 'shop'))
@@ -404,6 +407,8 @@ def city_building(mb, pts, h, rng, props, street=None):
                 if zf + 1 < z0 + h:
                     strip(zf, 0.05, 0.05, 'od_trim', trim)
         if shop_here and L > 6:
+            SHOPS.append(dict(x=round(a[0], 2), y=round(a[1], 2), ux=round(U[0], 4), uy=round(U[1], 4), nx=round(N[0], 4), ny=round(N[1], 4),
+                              L=round(L, 2), gf=gf, h=round(h, 2), bays=[[round(u0, 2), round(u1, 2)] for u0, u1 in bays(L, bw=3.4, margin=0.6)]))
             # a signboard band over the shops
             strip(z0 + gf - 0.35, 0.3, 0.08, 'od_trim', hexcol(rng.choice(CITY_TRIM)))
         # parapet: inner face and coping
