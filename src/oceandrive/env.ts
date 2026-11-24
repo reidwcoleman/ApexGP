@@ -124,6 +124,11 @@ export class Env {
         void main() {
           vec3 d = normalize( vDir );
           vec3 c = photo( d );
+          // Miami's sky is a humid, hazy blue: take the photo's deep zenith down a notch in saturation
+          float lumC = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
+          vec3 hz = 0.25 * ( photo( normalize( vec3( 1.0, 0.2, 0.0 ) ) ) + photo( normalize( vec3( -1.0, 0.2, 0.0 ) ) ) + photo( normalize( vec3( 0.0, 0.2, 1.0 ) ) ) + photo( normalize( vec3( 0.0, 0.2, -1.0 ) ) ) );
+          hz = vec3( dot( hz, vec3( 0.2126, 0.7152, 0.0722 ) ) );
+          c = mix( c, hz * vec3( 0.66, 0.82, 1.08 ), 0.4 * ( 1.0 - uNightSky ) * smoothstep( 0.1, 0.7, d.y ) );
           // night: the photo's last afterglow fades to a deep, slightly blue sky
           c = mix( c, vec3( dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) ) * vec3( 0.55, 0.63, 0.82 ) * 0.62, uNightSky );
           // a city's sky at night: sodium and LED light thrown up into the haze, a dull orange-grey band

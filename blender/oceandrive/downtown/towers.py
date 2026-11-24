@@ -38,6 +38,10 @@ def clean(pts, eps=0.25):
     return out
 
 
+def area(pts):
+    return sum(pts[i][0] * pts[(i + 1) % len(pts)][1] - pts[(i + 1) % len(pts)][0] * pts[i][1] for i in range(len(pts))) / 2
+
+
 def offset_ring(pts, d):
     """miter offset of a ccw ring (outward for d > 0), miters clamped"""
     n = len(pts)
@@ -68,6 +72,9 @@ def style_of(b, rng):
     resid = k in ('residential', 'apartments', 'hotel', 'dormitory') or any(s in nm for s in ('residence', 'condo', 'lofts', 'apartments', 'marquis', 'opera', 'ten museum', 'marinablue', 'quantum', 'vizcayne', 'met ', 'epic', 'icon', 'one thousand', 'paramount', 'aston'))
     if resid and H >= 35:
         return 'condo' if rng.random() < 0.85 else 'curtain'
+    # most of Miami's untagged towers are condos too (Brickell, Edgewater, the Beach)
+    if k == 'yes' and H >= 35 and rng.random() < 0.55:
+        return 'condo'
     if H >= 55:
         return 'curtain' if rng.random() < 0.75 else 'ribbon'
     return 'ribbon' if rng.random() < 0.6 else 'curtain'
@@ -289,8 +296,63 @@ def skyline(mb, b, z_base=0.0, rng=None):
         mat, col = 'od_ribbon', B.conc
     else:
         mat, col = 'od_far', hexcol(B.rng.choice(hotels.CITY_BODY))
-    walls(mb, ring, z0, z1, mat, col)
-    roof(mb, ring, z1)
+    # the tallest step back: the shaft to ~70%, then a narrower top (and a penthouse box on it)
+    ztop = z1
+    if b['h'] > 85 and len(ring) <= 12 and B.rng.random() < 0.55:
+        zs = z0 + (z1 - z0) * B.rng.uniform(0.62, 0.8)
+        inner = offset_ring(ring, -B.rng.uniform(2.0, 3.5))
+        if len(inner) >= 3 and abs(area(inner)) > 0.35 * abs(area(ring)):
+            walls(mb, ring, z0, zs, mat, col)
+            roof(mb, ring, zs)
+            walls(mb, inner, zs, z1, mat, col)
+            roof(mb, inner, z1)
+            ring_top = inner
+        else:
+            walls(mb, ring, z0, z1, mat, col)
+            roof(mb, ring, z1)
+            ring_top = ring
+            zs = None
+    else:
+        walls(mb, ring, z0, z1, mat, col)
+        roof(mb, ring, z1)
+        ring_top = ring
+        zs = None
+    # Miami's condo towers: a balcony slab round every floor (white concrete edge, glass railings read
+    # as the shadow line under each slab). Only the faces you can see: top, front edge, underside.
+    if st == 'condo' and b['h'] > 40 and len(ring) <= 16:
+        FH = 3.05
+        dep = B.rng.uniform(1.4, 2.2)
+        every = 1 if B.rng.random() < 0.75 else 2
+        sc = hexcol(B.rng.choice(['#f4f2ec', '#eeeae2', '#e6e4de', '#f6f6f2']))
+        zb_end = (zs if zs else z1) - 2.0
+        k = 0
+        zz = z0 + 6.0
+        outer = offset_ring(ring, dep)
+        n = len(ring)
+        while zz < zb_end:
+            if k % every == 0:
+                for i in range(n):
+                    a, bq = ring[i], ring[(i + 1) % n]
+                    a2, b2 = outer[i], outer[(i + 1) % n]
+                    t, u = zz + 0.22, zz
+                    mb.face([(a[0], a[1], t), (bq[0], bq[1], t), (b2[0], b2[1], t), (a2[0], a2[1], t)], 'od_trim', sc, n=(0, 0, 1))
+                    mb.face([(a2[0], a2[1], u), (b2[0], b2[1], u), (b2[0], b2[1], t), (a2[0], a2[1], t)], 'od_trim', sc)
+                    mb.face([(a[0], a[1], u), (a2[0], a2[1], u), (b2[0], b2[1], u), (bq[0], bq[1], u)], 'od_trim', sc, n=(0, 0, -1))
+                    # the railing: a band of tinted glass along the slab's edge
+                    mb.face([(a2[0], a2[1], t), (b2[0], b2[1], t), (b2[0], b2[1], t + 1.05), (a2[0], a2[1], t + 1.05)], 'od_rail', WHITE)
+            zz += FH
+            k += 1
+    # a mechanical penthouse on the roof of anything tall
+    if b['h'] > 50 and B.rng.random() < 0.6:
+        xs = [p[0] for p in ring_top]
+        ys = [p[1] for p in ring_top]
+        cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
+        w = min(max(xs) - min(xs), max(ys) - min(ys))
+        hw = w * B.rng.uniform(0.15, 0.28)
+        hd = hw * B.rng.uniform(0.8, 1.6)
+        pz = (z1 if ring_top is ring else z1)
+        mb.box(cx - hw, cy - hd, pz, cx + hw, cy + hd, pz + B.rng.uniform(3.0, 5.5), 'od_trim', B.conc)
+    ring = ring_top
     # Miami's towers wear light at night: an LED band round the roofline (a colour each), and the
     # tallest carry red aircraft lights at the corners
     if b['h'] > 55 and st in ('curtain', 'condo', 'ribbon') and B.rng.random() < 0.6:

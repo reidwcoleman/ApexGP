@@ -22,12 +22,12 @@ class GradeEffect extends Effect {
         c += ( vec3( 1.0, 0.93, 0.82 ) - 1.0 ) * 0.22 * smoothstep( 0.45, 1.0, l );
         c += ( vec3( 0.86, 0.97, 1.02 ) - 1.0 ) * 0.25 * ( 1.0 - smoothstep( 0.0, 0.4, l ) );
         // a little more saturation in the mids (Miami)
-        c = mix( vec3( l ), c, 1.08 );
+        c = mix( vec3( l ), c, 1.02 );
         // contrast around the mid grey
         c = ( c - 0.5 ) * 1.04 + 0.5;
         // grain
         float g = gh( uv * vec2( 1931.0, 1171.0 ) + fract( uTime * 13.7 ) * 97.0 ) - 0.5;
-        c += g * 0.018;
+        c += g * 0.008;
         outputColor = vec4( clamp( c, 0.0, 1.0 ), inputColor.a );
       }`,
       { blendFunction: BlendFunction.NORMAL, uniforms: new Map([['uTime', new THREE.Uniform(0)]]) },
