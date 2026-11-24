@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { Person, type PeopleKit, type Look } from '../people/Humans.ts';
 import type { Env } from './env.ts';
 import type { Ground } from './height.ts';
+import { U } from './materials.ts';
 
 /**
  * The street furniture that makes it a city and not a model of one, laid out from the same map the
@@ -149,6 +150,7 @@ export class Dressing {
     });
     scene.add(this.root);
     this.beach();
+    this.dunes();
   }
 
   /** ground height (three coords) with a fallback */
@@ -567,6 +569,124 @@ export class Dressing {
         this.root.add(im);
       }
     });
+  }
+
+  // ------------------------------------------------------------------ the dunes
+  /** sea oats in thick clumps over the dune (swaying in the wind), and a rope fence on posts along its foot */
+  private dunes() {
+    const r = this.rnd;
+    // one tuft: 14 curved blades and a few taller seed stalks
+    const pos: number[] = [], col: number[] = [];
+    for (let b = 0; b < 16; b++) {
+      const a = r() * Math.PI * 2, lean = 0.25 + r() * 0.55, h = 0.45 + r() * 0.5 + (b > 12 ? 0.5 : 0);
+      const w = b > 12 ? 0.008 : 0.022;
+      const dx = Math.cos(a), dz = Math.sin(a);
+      const ox = (r() - 0.5) * 0.25, oz = (r() - 0.5) * 0.25;
+      let px = ox, py = 0, pz = oz;
+      const N = 3;
+      const g = 0.55 + r() * 0.25, dry = r() < 0.3 || b > 12 ? 1 : 0;
+      const c0 = dry ? [0.55, 0.48, 0.32] : [0.32 * g, 0.42 * g, 0.2 * g];
+      for (let i = 0; i < N; i++) {
+        const t0 = i / N, t1 = (i + 1) / N;
+        const nx = ox + dx * lean * h * t1 * t1, ny = h * t1, nz = oz + dz * lean * h * t1 * t1;
+        const w0 = w * (1 - t0), w1 = w * (1 - t1) + 0.001;
+        const sx = -dz, sz = dx;
+        const q = [
+          [px - sx * w0, py, pz - sz * w0], [px + sx * w0, py, pz + sz * w0], [nx + sx * w1, ny, nz + sz * w1],
+          [px - sx * w0, py, pz - sz * w0], [nx + sx * w1, ny, nz + sz * w1], [nx - sx * w1, ny, nz - sz * w1],
+        ];
+        for (const v of q) {
+          pos.push(v[0], v[1], v[2]);
+          const k = 0.75 + 0.35 * (v[1] / h);
+          col.push(c0[0] * k, c0[1] * k, c0[2] * k);
+        }
+        px = nx; py = ny; pz = nz;
+      }
+      if (b > 12) {
+        // the seed head: a narrow drooping plume
+        for (let i = 0; i < 3; i++) {
+          const y0 = py - 0.06 * i;
+          pos.push(px - 0.02, y0, pz, px + 0.02, y0, pz, px + dx * 0.05, y0 - 0.12, pz + dz * 0.05);
+          col.push(0.62, 0.52, 0.34, 0.62, 0.52, 0.34, 0.55, 0.45, 0.3);
+        }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.computeVertexNormals();
+    const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, side: THREE.DoubleSide, name: 'od_seaoats' });
+    m.onBeforeCompile = (sh) => {
+      sh.uniforms.uTime = U.uTime;
+      sh.uniforms.uWind = U.uWind;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uWind;')
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          vec4 iw = instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 );
+          float sway = ( sin( uTime * 1.7 + iw.x * 0.31 + iw.z * 0.23 ) * 0.6 + sin( uTime * 3.1 + iw.z * 0.7 ) * 0.25 ) * ( 0.25 + uWind );
+          transformed.x += sway * 0.12 * transformed.y * transformed.y;
+          transformed.z += sway * 0.05 * transformed.y * transformed.y;`,
+        );
+    };
+    this.env.prep(m);
+    // where: over the dune (x 100..134), denser on the crest, in clumps; not on the beach-access paths
+    const N = 11000;
+    const im = new THREE.InstancedMesh(g, m, N);
+    const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), P = new THREE.Vector3();
+    let n = 0;
+    for (let tries = 0; n < N && tries < N * 4; tries++) {
+      const x = 100 + r() * 34, z = -440 + r() * 800;
+      const clump = Math.sin(z * 0.09 + Math.sin(z * 0.023) * 3) * 0.5 + Math.sin(x * 0.4 + z * 0.05) * 0.5;
+      const crest = 1 - Math.abs(x - 116) / 17;
+      if (r() > crest * 1.1 + clump * 0.3) continue;
+      // the boardwalk crossings every ~95 m stay clear
+      if (Math.abs(((z + 1000) % 95) - 47) < 3) continue;
+      const y = this.gh(x, z, NaN);
+      if (Number.isNaN(y) || y < 0.25) continue;
+      const k = 1.3 + r() * 1.1;
+      M.compose(P.set(x, y - 0.03, z), Q.setFromAxisAngle(S.set(0, 1, 0), r() * 6.28), S.set(k, k * (0.8 + r() * 0.5), k));
+      im.setMatrixAt(n++, M);
+    }
+    im.count = n;
+    // thousands of thin blades: too many for the shadow cascades, and their shadows would only be a speckle
+    im.castShadow = false;
+    im.receiveShadow = true;
+    this.root.add(im);
+    // the rope fence along the dune's foot (seaward), posts every 3 m
+    const posts: THREE.Vector3[] = [];
+    for (let z = -430; z <= 350; z += 3) {
+      if (Math.abs(((z + 1000) % 95) - 47) < 4) continue;
+      const x = 134 + Math.sin(z * 0.02) * 1.5;
+      const y = this.gh(x, z, NaN);
+      if (!Number.isNaN(y)) posts.push(new THREE.Vector3(x, y, z));
+    }
+    const pg = new THREE.CylinderGeometry(0.045, 0.05, 1.0, 6);
+    pg.translate(0, 0.45, 0);
+    const pm = new THREE.MeshStandardMaterial({ color: 0x8a7a64, roughness: 0.9 });
+    const pi = new THREE.InstancedMesh(pg, pm, posts.length);
+    posts.forEach((p, i) => pi.setMatrixAt(i, M.makeTranslation(p.x, p.y, p.z)));
+    pi.castShadow = true;
+    this.root.add(pi);
+    const rp: number[] = [];
+    for (let i = 0; i < posts.length - 1; i++) {
+      const a = posts[i], b = posts[i + 1];
+      if (b.z - a.z > 3.5) continue;
+      for (const h of [0.55, 0.85]) {
+        // a slight sag between posts
+        for (let k = 0; k < 4; k++) {
+          const t0 = k / 4, t1 = (k + 1) / 4;
+          const s0 = Math.sin(t0 * Math.PI) * 0.06, s1 = Math.sin(t1 * Math.PI) * 0.06;
+          rp.push(a.x + (b.x - a.x) * t0, a.y + (b.y - a.y) * t0 + h - s0, a.z + (b.z - a.z) * t0);
+          rp.push(a.x + (b.x - a.x) * t1, a.y + (b.y - a.y) * t1 + h - s1, a.z + (b.z - a.z) * t1);
+        }
+      }
+    }
+    const rg = new THREE.BufferGeometry();
+    rg.setAttribute('position', new THREE.Float32BufferAttribute(rp, 3));
+    this.root.add(new THREE.LineSegments(rg, new THREE.LineBasicMaterial({ color: 0x6b5e4c })));
+    this.env.prep(pm);
   }
 
   // ------------------------------------------------------------------ sunbathers
