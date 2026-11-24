@@ -24,6 +24,9 @@ export class Env {
   envMap: THREE.Texture | null = null;
   private readonly prepped = new WeakSet<THREE.Material>();
   readonly fog: THREE.FogExp2;
+  /** the backdrop: the sky photo with its highlights rolled off, and a drawn sun */
+  readonly dome: THREE.Mesh;
+  private readonly domeMat: THREE.ShaderMaterial;
 
   constructor(readonly renderer: THREE.WebGLRenderer, readonly scene: THREE.Scene, readonly camera: THREE.PerspectiveCamera) {
     U.uSunDir.value.copy(this.toSun);
@@ -53,6 +56,59 @@ export class Env {
     // haze: the Atlantic air at 5 pm, a little milky
     this.fog = new THREE.FogExp2(0xb9c6d2, 0.0011);
     scene.fog = this.fog;
+    this.domeMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      depthTest: false,
+      fog: false,
+      uniforms: { tSky: { value: null }, uSun: { value: this.toSun }, uK: { value: 1 }, uSunK: { value: 1 } },
+      vertexShader: /* glsl */ `
+        varying vec3 vDir;
+        void main() {
+          vDir = normalize( ( modelMatrix * vec4( position, 0.0 ) ).xyz );
+          vec4 p = projectionMatrix * viewMatrix * vec4( cameraPosition + vDir * 4000.0, 1.0 );
+          gl_Position = p.xyww;
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D tSky;
+        uniform vec3 uSun;
+        uniform float uK;
+        uniform float uSunK;
+        varying vec3 vDir;
+        #include <common>
+        vec3 photo( vec3 d ) {
+          vec2 uv = vec2( atan( d.z, d.x ) * RECIPROCAL_PI2 + 0.5, asin( clamp( d.y, -1.0, 1.0 ) ) * RECIPROCAL_PI + 0.5 );
+          vec3 c = texture2D( tSky, uv ).rgb * uK;
+          float m = max( c.r, max( c.g, c.b ) );
+          if ( m > 2.5 ) c *= ( 2.5 + log( 1.0 + ( m - 2.5 ) ) * 0.6 ) / m;
+          return c;
+        }
+        void main() {
+          vec3 d = normalize( vDir );
+          vec3 c = photo( d );
+          float cs = dot( d, uSun );
+          // the photo's own sun (with its lens starburst) is replaced by the sky from just outside it,
+          // carried inward; a clean disc and glow are drawn over that
+          if ( cs > 0.97 ) {
+            vec3 t1 = normalize( cross( uSun, vec3( 0.0, 1.0, 0.0 ) ) ), t2 = cross( t1, uSun );
+            vec3 avg = vec3( 0.0 );
+            for ( int i = 0; i < 12; i ++ ) {
+              float a = float( i ) * 0.5236;
+              avg += photo( normalize( uSun * 0.978 + ( t1 * cos( a ) + t2 * sin( a ) ) * 0.2085 ) );
+            }
+            c = mix( c, avg / 12.0, smoothstep( 0.975, 0.992, cs ) );
+          }
+          float disc = smoothstep( 0.99996, 0.99998, cs );
+          vec3 sunC = vec3( 1.0, 0.86, 0.66 );
+          c += sunC * ( disc * 40.0 + pow( max( cs, 0.0 ), 3000.0 ) * 4.0 + pow( max( cs, 0.0 ), 400.0 ) * 0.9 + pow( max( cs, 0.0 ), 50.0 ) * 0.3 ) * uSunK;
+          gl_FragColor = vec4( c, 1.0 );
+          #include <colorspace_fragment>
+        }`,
+    });
+    this.dome = new THREE.Mesh(new THREE.SphereGeometry(10, 256, 128), this.domeMat);
+    this.dome.frustumCulled = false;
+    this.dome.renderOrder = -10;
+    scene.add(this.dome);
   }
 
   private skies = new Map<string, { hdr: THREE.DataTexture; env: THREE.Texture }>();
@@ -73,14 +129,17 @@ export class Env {
     }
     if (on !== this.dusk) return;
     this.hdr = s.hdr;
-    this.scene.background = s.hdr;
+    this.scene.background = null;
+    this.domeMat.uniforms.tSky.value = s.hdr;
+    this.domeMat.uniforms.uK.value = on ? 0.13 : 1;
+    this.domeMat.uniforms.uSunK.value = on ? 0 : 1;
     this.scene.environment = s.env;
     // the dusk sky file is brighter than a real blue hour: bring it down to one
     this.scene.backgroundIntensity = on ? 0.13 : 1;
     this.scene.environmentIntensity = on ? 0.09 : 1;
     for (const l of this.csm.lights) l.intensity = on ? 0 : Math.max(...SUN_E);
     U.uNight.value = on ? 1 : 0;
-    U.uLmTint.value.set(...((on ? [0.065, 0.06, 0.095] : [1, 1, 1]) as [number, number, number]));
+    U.uLmTint.value.set(...((on ? [0.24, 0.22, 0.36] : [1.55, 1.52, 1.5]) as [number, number, number]));
     this.fog.color.set(on ? 0x2a2a44 : 0xb9c6d2);
   }
 
@@ -92,11 +151,43 @@ export class Env {
     // the IBL without the sun disc (the directional light carries it)
     this.envMap = pm.fromEquirectangular(clampSun(hdr, 20)).texture;
     pm.dispose();
-    this.scene.background = hdr;
+    this.scene.background = null;
+    this.domeMat.uniforms.tSky.value = hdr;
     this.scene.environment = this.envMap;
     this.skies.set(file, { hdr, env: this.envMap });
     this.scene.backgroundIntensity = 1;
     this.scene.environmentIntensity = 1;
+  }
+
+  /** reflection probes: the street as seen from a few points, filtered for glossy reflections */
+  readonly probes: { pos: THREE.Vector3; tex: THREE.Texture }[] = [];
+  bakeProbes(points: THREE.Vector3[], hide: THREE.Object3D[]) {
+    const pm = new THREE.PMREMGenerator(this.renderer);
+    const rt = new THREE.WebGLCubeRenderTarget(256, { type: THREE.HalfFloatType });
+    const cam = new THREE.CubeCamera(0.3, 2500, rt);
+    const vis = hide.map((o) => o.visible);
+    hide.forEach((o) => (o.visible = false));
+    for (const p of points) {
+      cam.position.copy(p);
+      cam.update(this.renderer, this.scene);
+      this.probes.push({ pos: p.clone(), tex: pm.fromCubemap(rt.texture).texture });
+    }
+    hide.forEach((o, i) => (o.visible = vis[i]));
+    rt.dispose();
+    pm.dispose();
+  }
+
+  /** the probe nearest a point */
+  probeAt(x: number, z: number): THREE.Texture | null {
+    let best: THREE.Texture | null = null, bd = Infinity;
+    for (const p of this.probes) {
+      const d = (p.pos.x - x) ** 2 + (p.pos.z - z) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = p.tex;
+      }
+    }
+    return best;
   }
 
   /** register a material with the shadow cascades (keeps its own onBeforeCompile) */

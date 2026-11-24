@@ -8,10 +8,10 @@ import { Input } from './input.ts';
 import { Player } from './player.ts';
 import { Post } from './post.ts';
 import { U } from './materials.ts';
-import { seaTick } from './water.ts';
+import { seaTick, makeSea, NearSea } from './water.ts';
 import { loadPeople, setPeopleCore, setPeopleRest, type Look } from '../people/Humans.ts';
 import { Cars } from './cars.ts';
-import { Peds, PEOPLE } from './peds.ts';
+import { Peds, PEOPLE, fill } from './peds.ts';
 import '@fontsource/barlow-condensed/600.css';
 import '@fontsource/barlow-condensed/700.css';
 import '@fontsource/barlow-condensed/800-italic.css';
@@ -51,6 +51,8 @@ async function boot() {
   const peopleP = loadPeople();
   const [world, ground] = await Promise.all([loadWorld(env, renderer, (f, label) => step(label, 0.15 + f * 0.7)), Ground.load(BASE + 'height.bin')]);
   scene.add(world.root);
+  const near = new NearSea(makeSea(world.meta.water_x, world.meta.sea, env.hdr!, world.sea.uniforms.uSunCol.value, true), world.sea, world.meta.water_x);
+  scene.add(near.mesh);
   U.uSea.value = world.meta.sea;
   step('Waking up South Beach', 0.88);
   const kit = await peopleP;
@@ -62,13 +64,32 @@ async function boot() {
   const player = new Player(kit, ground, look, world.meta.sea);
   scene.add(player.person.root);
   env.prepObject(player.person.root, true, true);
+  fill(player.person.root);
   // on the west sidewalk outside the Colony's porch, looking up the street
   player.spawn(-7.3, -6, Math.PI);
-  const cars = new Cars(scene, env, ground, world.meta.sw);
+  const cars = new Cars(scene, env, ground, world.meta.sw, kit);
   const carsP = cars.load();
   const peds = new Peds(scene, env, kit, ground);
   peds.spawn();
   const gulls = new Gulls(scene);
+  // the beach rental's umbrella poles (too thin to survive the export's decimation)
+  {
+    const spots: [number, number][] = [];
+    for (let y = -86; y < 90; y += 7) if (Math.abs(y) >= 4) for (const x of [196, 205]) spots.push([x, -y]);
+    const geo = new THREE.CylinderGeometry(0.03, 0.03, 1, 8);
+    geo.translate(0, 0.5, 0);
+    const im = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0xe9e6df, metalness: 0.6, roughness: 0.35 }), spots.length);
+    const m = new THREE.Matrix4();
+    spots.forEach(([x, z], i) => {
+      const g = ground.height(x, z);
+      const y0 = Number.isNaN(g) ? 0 : g - 0.1;
+      m.makeScale(1, 1.66 + 0.4 - y0, 1).setPosition(x, y0, z);
+      im.setMatrixAt(i, m);
+    });
+    im.castShadow = true;
+    env.prepObject(im, true, true);
+    scene.add(im);
+  }
   env.prepObject(gulls.root, true, false);
   await carsP;
   player.obstacle = (x, z) => cars.blocks(x, z);
@@ -96,6 +117,14 @@ async function boot() {
   // compile everything once behind the loader
   step('Opening the cafes', 0.95);
   env.update();
+  // reflection probes down the street and on the sand (without the people and cars in them)
+  step('Polishing the paint', 0.97);
+  env.bakeProbes(
+    [new THREE.Vector3(0, 1.6, 50), new THREE.Vector3(0, 1.6, 0), new THREE.Vector3(0, 1.6, -50), new THREE.Vector3(-60, 1.6, 0), new THREE.Vector3(150, 1.8, 0)],
+    [player.person.root, ...cars.list.map((c) => c.root), ...peds.list.map((p) => p.p.root), near.mesh, gulls.root],
+  );
+  cars.applyProbes();
+  world.windows(env.probeAt(0, 0));
   renderer.compile(scene, camera);
   await new Promise((r) => setTimeout(r, 30));
 
@@ -104,12 +133,15 @@ async function boot() {
     dusk = on;
     void env.setDusk(on).then(() => {
       for (const m of world.neon) m.color.setScalar(on ? 9 : 3.2);
+      cars.setNight(on ? 1 : 0);
+      world.windows(env.probeAt(0, 0), on ? 0.1 : 1);
       for (const m of world.lamps) {
         m.emissive.setRGB(1, 0.72, 0.42);
         m.emissiveIntensity = on ? (m.name.includes('bulb') ? 40 : 6) : 0;
       }
       post.exposure.value = (Number(Q.get('ev')) || 0.74) * (on ? 2.6 : 1);
       world.sea.uniforms.tSky.value = env.hdr;
+      near.mat.uniforms.tSky.value = env.hdr;
       post.reset();
     });
   };
@@ -144,6 +176,7 @@ async function boot() {
     last = now;
     t += dt;
     seaTick(t);
+    near.update(camera.position);
     gulls.update(t);
     if (input.hit('KeyF')) {
       if (driving) {
@@ -174,8 +207,9 @@ async function boot() {
     } else {
       player.update(dt, input, camera);
     }
-    cars.update(dt, driving ? null : player.pos);
-    peds.update(dt, driving ? cars.playerPos() : player.pos);
+    cars.setWalkers(peds.positions());
+    cars.update(dt, driving ? null : player.pos, camera.position);
+    peds.update(dt, driving ? cars.playerPos() : player.pos, camera.position);
     hud.update(driving, cars.near(player.pos, 3.2) && !driving, cars.speedKmh());
     audio.update(t, driving ? cars.playerPos().x : player.pos.x, U.uSwash.value, driving ? cars.speedKmh() : -1);
     env.update();
@@ -186,7 +220,7 @@ async function boot() {
   };
   $('#loading').classList.add('done');
   requestAnimationFrame(frame);
-  (window as unknown as { od: unknown }).od = { renderer, scene, camera, player, cars, peds, env, post, world, ground };
+  (window as unknown as { od: unknown }).od = { THREE, renderer, scene, camera, player, cars, peds, env, post, world, ground };
 }
 
 boot().catch((e) => {

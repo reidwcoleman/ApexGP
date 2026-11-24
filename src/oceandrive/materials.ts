@@ -47,7 +47,7 @@ export const U = {
   uSwash: { value: 0 },
   uNight: { value: 0 },
   /** the baked light's colour and level (1 by day; dimmed and blued at dusk) */
-  uLmTint: { value: new THREE.Vector3(1, 1, 1) },
+  uLmTint: { value: new THREE.Vector3(1.55, 1.52, 1.5) },
   uSunDir: { value: new THREE.Vector3(0.6, 0.33, 0.45).normalize() },
 };
 
@@ -162,6 +162,8 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
         vOdNormalW = normalize( mat3( modelMatrix ) * objectNormal );`,
       );
     let f = sh.fragmentShader;
+    // three expands #include chunks only after this hook: expand the ones patched below
+    for (const c of ['map_fragment', 'normal_fragment_maps', 'roughnessmap_fragment'] as const) f = f.replace(`#include <${c}>`, THREE.ShaderChunk[c]);
     f = f.replace('#include <common>', '#include <common>\n' + COMMON + '\nuniform float uGrime;');
     f = f.replace('vec4 sampledDiffuseColor = texture2D( map, vMapUv );', 'vec4 sampledDiffuseColor = odTex( map, vMapUv );');
     f = f.replace('vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;', 'vec3 mapN = odTex( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;');
@@ -199,7 +201,8 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
         diffuseColor.rgb *= mix( 0.9, 1.08, v );
         // wet sand: below the swash line, darker and glossy
         float wl = uSea + 0.06 + uSwash + 0.05 * odNoise( vOdWorld.xz * 0.3 );
-        float wet = 1.0 - smoothstep( wl - 0.02, wl + 0.16, vOdWorld.y );
+        float wet = 1.0 - smoothstep( wl - 0.04, wl + 0.32, vOdWorld.y );
+        wet *= wet;
         diffuseColor.rgb *= mix( 1.0, 0.58, wet );
         vOdWet = wet;
       }`;
@@ -233,6 +236,8 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
       );
     }
     if (lm) {
+      // three expands its #include chunks after this hook: expand this one here so it can be patched
+      f = f.replace('#include <lights_fragment_maps>', '//OD_MAPS\n' + THREE.ShaderChunk.lights_fragment_maps);
       // decode the gamma-stored map; keep the sky's diffuse out (the map holds it); grime where light is scarce
       f = f.replace(
         'vec3 lightMapIrradiance = lightMapTexel.rgb * lightMapIntensity;',
@@ -245,14 +250,13 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
       // specular occlusion from the map: compare with an open-sky value
       f = f.replace('radiance += iblRadiance;', 'radiance += iblRadiance * odSpecOcc;');
       f = f.replace(
-        '#include <lights_fragment_maps>',
+        '//OD_MAPS',
         `float odSpecOcc = 1.0;
         {
           vec3 lmT = pow( texture2D( lightMap, vLightMapUv ).rgb, vec3( ${lm.info.gamma.toFixed(2)} ) ) * ${lm.info.scale.toFixed(3)};
           float l = dot( lmT, vec3( 0.2126, 0.7152, 0.0722 ) );
           odSpecOcc = smoothstep( 0.04, 0.42, l );
-        }
-        #include <lights_fragment_maps>`,
+        }`,
       );
       if (grime > 0) {
         f = f.replace(
@@ -390,10 +394,10 @@ export const TABLE: Record<string, OdOpts> = {
   od_sidewalk: { name: 'od_sidewalk', diff: 'concrete_pavement_diff.webp', nor: 'concrete_pavement_nor.webp', rough: 'concrete_pavement_rough.webp', tile: 3.0, kind: 'ground', grime: 1, vertexColors: false },
   od_curb: { name: 'od_curb', diff: 'concrete_floor_01_diff.webp', nor: 'concrete_floor_01_nor.webp', rough: 'concrete_floor_01_rough.webp', tile: 1.5, kind: 'ground', grime: 1, vertexColors: false },
   od_roof: { name: 'od_roof', diff: 'concrete_floor_01_diff.webp', nor: 'concrete_floor_01_nor.webp', rough: 'concrete_floor_01_rough.webp', tile: 3, kind: 'ground', grime: 1, vertexColors: false },
-  od_asphalt: { name: 'od_asphalt', diff: 'asphalt_02_diff.webp', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.6, vertexColors: false, color: 0xb8b8b8 },
+  od_asphalt: { name: 'od_asphalt', diff: 'asphalt_02_diff.webp', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.6, vertexColors: false, color: 0xd2d2d2 },
   od_paint: { name: 'od_paint', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.4, vertexColors: true, color: 0xd8d6cf, roughness: 1 },
   od_paintyel: { name: 'od_paintyel', nor: 'asphalt_02_nor.webp', tile: 3.5, kind: 'ground', color: 0xd9a21b, roughness: 0.6 },
-  od_bikelane: { name: 'od_bikelane', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.8, color: 0x2f7a46, vertexColors: false },
+  od_bikelane: { name: 'od_bikelane', diff: 'asphalt_02_diff.webp', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.9, color: 0x6fae7c, vertexColors: false },
   od_grass: { name: 'od_grass', diff: 'leafy_grass_diff.webp', nor: 'leafy_grass_nor.webp', rough: 'leafy_grass_rough.webp', tile: 2.2, kind: 'ground', vertexColors: false, color: 0xe6f0d6 },
   od_sand: { name: 'od_sand', diff: 'coast_sand_01_diff.webp', nor: 'coast_sand_01_nor.webp', rough: 'coast_sand_01_rough.webp', tile: 3.6, kind: 'sand', vertexColors: false, color: 0xfff4e4 },
   od_coral: { name: 'od_coral', diff: 'coral_stone_wall_diff.webp', nor: 'coral_stone_wall_nor.webp', rough: 'coral_stone_wall_rough.webp', tile: 1.6, kind: 'wall', grime: 0.5, vertexColors: false },

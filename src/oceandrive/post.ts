@@ -76,7 +76,7 @@ export class Post {
     ao.configuration.transparencyAware = false;
     c.addPass(ao);
     c.addPass((this.taa = new TAAPass()));
-    this.bloom = new BloomEffect({ mipmapBlur: true, levels: 6, luminanceThreshold: 1.6, luminanceSmoothing: 0.4, intensity: 0.55, radius: 0.75 });
+    this.bloom = new BloomEffect({ mipmapBlur: true, levels: 6, luminanceThreshold: 4.5, luminanceSmoothing: 0.8, intensity: 0.3, radius: 0.55 });
     const tm = new URLSearchParams(location.search).get('tm');
     this.tone = new ToneMappingEffect({ mode: tm === 'agx' ? ToneMappingMode.AGX : tm === 'aces' ? ToneMappingMode.ACES_FILMIC : ToneMappingMode.NEUTRAL });
     c.addPass(new EffectPass(camera, this.exposure, this.bloom, this.tone, this.grade, new VignetteEffect({ darkness: 0.32, offset: 0.32 })));

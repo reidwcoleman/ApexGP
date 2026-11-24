@@ -22,6 +22,8 @@ export interface World {
   sea: THREE.ShaderMaterial;
   /** the street lamps' bulbs and glass (lit at dusk) */
   lamps: THREE.MeshStandardMaterial[];
+  /** give the window glass a reflection of the street */
+  windows: (probe: THREE.Texture | null, k?: number) => void;
 }
 
 /** foliage: alpha-tested cards, two-sided, lit through from behind when the sun is beyond them */
@@ -148,7 +150,15 @@ export async function loadWorld(env: Env, renderer: THREE.WebGLRenderer, progres
   for (const m of [frondMat, dryMat, bushMat]) env.prep(m);
   instanceRepeats(root);
   if (!sea) throw new Error('no sea in the block');
-  return { root, meta, neon, sea, lamps };
+  const windows = (probe: THREE.Texture | null, k = 1) => {
+    if (!probe) return;
+    for (const g of [glass, shop]) {
+      g.envMap = probe;
+      g.envMapIntensity = k;
+      g.needsUpdate = true;
+    }
+  };
+  return { root, meta, neon, sea, lamps, windows };
 }
 
 /** awning canvas: wide stripes, white and the awning's own colour (vertex colour multiplies) */
