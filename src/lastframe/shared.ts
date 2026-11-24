@@ -228,7 +228,10 @@ export type Ev =
   | { t: 'pane'; i: number; at?: [number, number, number] }
   | { t: 'nade'; s: number; kind: NadeKind; o: [number, number, number]; v: [number, number, number]; fuse: number; id: number }
   | { t: 'boom'; id: number; kind: NadeKind; p: [number, number, number] }
-  | { t: 'phase'; phase: Phase; round: number; clock: number; score: [number, number]; msg?: string; winner?: number; hold?: number; atk?: number; obj?: number[]; objName?: string }
+  /** when a round has just ended (`between`, or `over` after the last of them) it also says who stood out (`mvp`, a slot)
+   *  and for what (`tag`: 'ace' all of them, 'clutch' the last one up against `tagN`, 'flawless' nobody lost), what each
+   *  player did in it (`rs`: slot, put down, damage, got up), and the last one to fall (`last`: by, who, weapon, zone, metres) */
+  | { t: 'phase'; phase: Phase; round: number; clock: number; score: [number, number]; msg?: string; winner?: number; hold?: number; atk?: number; obj?: number[]; objName?: string; mvp?: number; tag?: string; tagN?: number; rs?: number[][]; last?: number[] }
   /** a barricade: which boards of doorway i are up (a bit each, the lowest first); by: who built it or broke the last one */
   | { t: 'bar'; i: number; boards: number; by?: number; blast?: boolean }
   /** a breaching charge set on barricade i, from this side of it, going off in fuse seconds */
@@ -304,5 +307,10 @@ export const REINF_T = 2.4, WALL_CHARGE_T = 1.6;
 /** what each kit changes */
 export const kitCharges = (k?: KitId) => (k === 'breacher' ? 4 : SIEGE.charges);
 export const kitSheets = (k?: KitId) => (k === 'fortifier' ? 4 : SIEGE.sheets);
+
+/** seconds between one round and the next: long enough to read how it went */
+export const BETWEEN = 8;
+/** how far an attacker may walk from where they were put while the room is being got ready, metres */
+export const STAGE_LEASH = 7;
 
 export const fmtClock = (s: number) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;

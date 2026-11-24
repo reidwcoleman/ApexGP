@@ -3,7 +3,7 @@ import type { Door, MapData, Pane } from './world.ts';
 import { Nav, type Node } from './nav.ts';
 import { Bot, botName } from './bots.ts';
 import { trace, type Tracer } from './ballistics.ts';
-import { BOARDS, BOARDS_ALL, CHARGE_FUSE, F, GUN_LADDER, PRIMARIES, SIEGE, W_BOOT, WEAPONS, WEAPON_LIST, ZONE, hitDamage, oneLife, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow , ATK_KITS, DEF_KITS, isUp, kitCharges, kitSheets, type KitId } from './shared.ts';
+import { BETWEEN, BOARDS, BOARDS_ALL, CHARGE_FUSE, F, GUN_LADDER, PRIMARIES, SIEGE, W_BOOT, WEAPONS, WEAPON_LIST, ZONE, hitDamage, oneLife, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow , ATK_KITS, DEF_KITS, isUp, kitCharges, kitSheets, type KitId } from './shared.ts';
 import { siteArr, siteMid, siteOf, siteOut, siteValid, sitesTouch, type Site } from './walls.ts';
 import { barPassable, openingsOf, type Opening } from './fort.ts';
 import { Tactics } from './tactics.ts';
@@ -83,6 +83,51 @@ export class Match {
   private tripsLeft = new Map<number, number>();
   private tripSeen = new Set<number>();
 
+  // ---- how the round went, for the report at the end of it
+  /** per slot: put down or killed, damage done, got someone up */
+  private rs = new Map<number, [number, number, number]>();
+  /** the last one to fall: by, who, weapon, zone, metres */
+  private lastOut: number[] | null = null;
+  /** per side: how many were against its last one standing, when it came down to one */
+  private alone = [0, 0];
+  private rsAdd(slot: number, k: 0 | 1 | 2, v: number) {
+    let r = this.rs.get(slot);
+    if (!r) this.rs.set(slot, (r = [0, 0, 0]));
+    r[k] += v;
+  }
+  private aloneCheck() {
+    for (let t = 0; t < 2; t++) {
+      if (this.alone[t]) continue;
+      const up = this.players.filter((q) => q.team === t && isUp(q)).length;
+      if (up === 1) this.alone[t] = this.players.filter((q) => q.team === 1 - t && isUp(q)).length;
+    }
+  }
+  /** who stood out in the round just ended, and what everyone did in it */
+  private roundReport(winner: number) {
+    const list = this.players.filter((p) => p.team < 2);
+    const of = (s: number) => this.rs.get(s) ?? [0, 0, 0];
+    const val = (s: number) => of(s)[0] * 100 + of(s)[1] + of(s)[2] * 60;
+    const side = winner >= 0 ? list.filter((p) => p.team === winner) : list;
+    let best = side[0];
+    for (const p of side) if (val(p.slot) > val(best.slot)) best = p;
+    let mvp = best && val(best.slot) > 0 ? best.slot : -1, tag = '', tagN = 0;
+    if (winner >= 0) {
+      const foes = list.filter((p) => p.team !== winner).length;
+      const ace = side.find((p) => foes >= 3 && of(p.slot)[0] >= foes);
+      const up = side.filter(isUp);
+      if (ace) {
+        mvp = ace.slot;
+        tag = 'ace';
+        tagN = foes;
+      } else if (up.length === 1 && side.length > 1 && this.alone[winner] >= 2) {
+        mvp = up[0].slot;
+        tag = 'clutch';
+        tagN = this.alone[winner];
+      } else if (side.length > 1 && side.every(isUp)) tag = 'flawless';
+    }
+    return { mvp, tag, tagN, rs: list.map((p) => [p.slot, of(p.slot)[0], Math.round(of(p.slot)[1]), of(p.slot)[2]]), last: this.lastOut ?? undefined };
+  }
+
   /** what this one carries this round */
   kitOf(slot: number): KitId {
     const p = this.players.find((q) => q.slot === slot);
@@ -117,6 +162,7 @@ export class Match {
     this.bodies[to].down = false;
     this.bots.get(to)?.gotUp();
     this.emit({ t: 'up', s: to, by, hp: p.hp });
+    this.rsAdd(by, 2, 1);
     this.say(to, pick(["I'm up.", 'Back in it.', 'Thanks. Moving.']), 0.8);
     return true;
   }
@@ -691,8 +737,12 @@ export class Match {
   private newRound(first: boolean) {
     const rounds = oneLife(this.cfg.mode);
     this.phase = 'warmup';
-    this.clock = first ? 5 : 4;
+    // (with no preparation to follow it, the wait is long enough to read what the round is and then be counted in)
+    this.clock = this.cfg.mode === 'rounds' ? 7 : this.cfg.mode === 'siege' ? 6.5 : first ? 5 : 4;
     this.respawn.clear();
+    this.rs.clear();
+    this.lastOut = null;
+    this.alone = [0, 0];
     for (const d of this.doors) this.setDoor(d.id, 0, 1);
     if (this.cfg.mode === 'siege') {
       // sides change every round; the room changes too
@@ -921,16 +971,18 @@ export class Match {
       this.emit({ t: 'roster', players: this.players });
     }
     if (winner >= 0) this.score[winner]++;
-    if (this.score[0] >= this.cfg.limit || this.score[1] >= this.cfg.limit) return this.finish(winner);
+    const rep = { msg: why, ...this.roundReport(winner), ...this.siegeInfo() };
+    if (this.score[0] >= this.cfg.limit || this.score[1] >= this.cfg.limit) return this.finish(winner, rep);
     this.phase = 'between';
-    this.clock = 5;
-    this.emit({ t: 'phase', phase: 'between', round: this.round, clock: 5, score: this.score, msg: why, winner, ...this.siegeInfo() });
+    this.clock = BETWEEN;
+    this.emit({ t: 'phase', phase: 'between', round: this.round, clock: BETWEEN, score: this.score, winner, ...rep });
   }
 
-  finish(winner: number) {
+  /** `rep`: how the last round of it went, when it ended on a round */
+  finish(winner: number, rep: Partial<Extract<Ev, { t: 'phase' }>> = {}) {
     this.phase = 'over';
     this.clock = 14;
-    this.emit({ t: 'phase', phase: 'over', round: this.round, clock: 14, score: this.score, winner });
+    this.emit({ ...rep, t: 'phase', phase: 'over', round: this.round, clock: 14, score: this.score, winner });
     this.emit({ t: 'roster', players: this.players });
   }
 
@@ -1431,6 +1483,7 @@ export class Match {
     if (!p?.alive || this.phase === 'over' || this.phase === 'between') return;
     // nobody is hurt by anybody else while the room is being got ready
     if (this.phase === 'prep' && by !== to) return;
+    if (by !== to && this.foes(by, to) && !p.down) this.rsAdd(by, 1, Math.min(dmg, p.hp));
     p.hp = Math.max(0, p.hp - dmg);
     if (p.hp > 0 && dmg >= 18 && zone !== ZONE.blast && this.cfg.mode !== 'siege') this.bleed.set(to, Math.min(3, (this.bleed.get(to) ?? 0) + 1));
     const n = Math.hypot(dir[0], dir[1], dir[2]) || 1;
@@ -1453,10 +1506,18 @@ export class Match {
       const kd = this.players.find((q) => q.slot === by);
       if (kd && kd !== p) kd.score += 50;
       this.emit({ t: 'down', s: to, by, zone, w, dir: d, secs: SIEGE.bleedOut });
+      this.rsAdd(by, 0, 1);
+      this.lastOut = [by, to, w, zone, Math.round(dist)];
+      this.aloneCheck();
       const w4 = this.witness(p.team, this.bodies[to], to);
       if (w4 >= 0) this.say(w4, pick([`${p.name} is down! Get to him!`, 'Man down, still breathing!', `${p.name} needs picking up!`]), 0.8);
       this.sideCheck();
       return;
+    }
+    // someone already on the floor was put there by whoever is credited with it: finishing them is not a second one
+    if (!p.down && by !== to && this.foes(by, to)) {
+      this.rsAdd(by, 0, 1);
+      this.lastOut = [by, to, w, zone, Math.round(dist)];
     }
     p.alive = false;
     p.down = false;
@@ -1501,8 +1562,10 @@ export class Match {
     if (solo(mode) && killer && killer.kills >= this.cfg.limit) this.finish(killer.slot);
     // nobody goes looking for the dead
     for (const k of this.intel) k.delete(to);
-    if (oneLife(mode)) this.sideCheck();
-    else this.respawn.set(to, performance.now() / 1000 + (p.bot ? 5 : 7.4));
+    if (oneLife(mode)) {
+      this.aloneCheck();
+      this.sideCheck();
+    } else this.respawn.set(to, performance.now() / 1000 + (p.bot ? 5 : 7.4));
     this.emit({ t: 'roster', players: this.players });
   }
 }

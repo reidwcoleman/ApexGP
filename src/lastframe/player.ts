@@ -203,6 +203,8 @@ export class LocalPlayer {
   cur = 0;
   ammo = new Map<WeaponId, { mag: number; res: number }>();
   nades: Record<NadeKind, number> = { frag: 1, flash: 1 };
+  /** waiting for the word: the gun is up, and nothing leaves it or the hands */
+  safe = false;
   private cool = 0;
   reloadT = 0;
   private hA = new THREE.Vector3();
@@ -981,8 +983,8 @@ export class LocalPlayer {
       this.light = !this.light;
       c.sound.clack(null, 'shell');
     }
-    if (i.take('KeyG') && this.nades.frag > 0) this.throwNade('frag', c, cam);
-    if (i.take('KeyV') && this.nades.flash > 0) this.throwNade('flash', c, cam);
+    if (!this.safe && i.take('KeyG') && this.nades.frag > 0) this.throwNade('frag', c, cam);
+    if (!this.safe && i.take('KeyV') && this.nades.flash > 0) this.throwNade('flash', c, cam);
     // ---- a bandage: both hands, and you can walk but not much else
     const hurtNow = this.hp < 100 || this.bleed > 0 || this.limp > 0.05 || this.arm > 0.05;
     if (i.keys.has('KeyH') && this.wraps > 0 && hurtNow && !this.busy && this.kickT <= 0) {
@@ -1114,7 +1116,7 @@ export class LocalPlayer {
       this.boot(c, near, fw);
     }
     // ---- the trigger
-    if (this.busy || this.sprintK > 0.35 || this.retract > 0.72 || this.mantle || this.slideT > 0.5 || this.healT > 0 || this.kickT > 0 || this.workT > 0) return;
+    if (this.safe || this.busy || this.sprintK > 0.35 || this.retract > 0.72 || this.mantle || this.slideT > 0.5 || this.healT > 0 || this.kickT > 0 || this.workT > 0) return;
     const trig = spec.auto ? i.fire : i.firePressed;
     if (!trig || this.cool > 0 || this.cycleT > 0) return;
     if (am.mag <= 0) {

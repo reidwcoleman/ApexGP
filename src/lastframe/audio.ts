@@ -851,6 +851,32 @@ export class Sound {
     this.burst(d, 0.12, 0.3, 1500, 6000, 0.05);
   }
 
+  /** the clock running down: a dry tick in the earpiece, harder for the last few */
+  tick(hard = false) {
+    if (!this.ctx) return;
+    const d = this.src(null, hard ? 0.07 : 0.045, false);
+    this.thump(d, hard ? 1480 : 1100, hard ? 1480 : 1100, 0.045, 0.6, 0, 'triangle');
+    this.burst(d, 0.012, 0.5, 2400, 7000);
+  }
+
+  /** how a round ended, over the handset: the squelch, then two notes, up for a win and down for a loss */
+  roundEnd(won: boolean | null) {
+    if (!this.ctx) return;
+    const d = this.src(null, 0.085, false);
+    this.burst(d, 0.05, 0.5, 1700, 3400);
+    const [a, b] = won === null ? [622, 622] : won ? [587, 880] : [523, 349];
+    this.thump(d, a, a, 0.24, 0.55, 0.1, 'triangle');
+    this.thump(d, b, b, 0.6, 0.55, 0.32, 'triangle');
+  }
+
+  /** down to the last one: a low note under everything */
+  alone() {
+    if (!this.ctx) return;
+    const d = this.src(null, 0.5, false);
+    this.thump(d, 64, 38, 0.9, 0.9);
+    this.thump(d, 128, 78, 0.5, 0.22, 0.02);
+  }
+
   beep(hi = true) {
     if (!this.ctx) return;
     this.thump(this.src(null, 0.09, false), hi ? 1320 : 880, hi ? 1320 : 880, 0.08, 0.5, 0, 'sine');

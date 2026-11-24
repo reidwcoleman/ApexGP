@@ -2,7 +2,7 @@ import './ui.css';
 import { TacMap } from './tacmap.ts';
 import type { Game } from './game.ts';
 import { Guest_, Host, makeCode, type Down } from './net.ts';
-import { MAX_PEOPLE, PRIMARIES, TEAM_NAME, WEAPONS, ZONE_NAME, fmtClock, solo, type Ev, type MatchConfig, type Mode, type PlayerInfo, type Req, type WeaponId , ATK_KITS, DEF_KITS, KITS, type KitId , SIEGE } from './shared.ts';
+import { MAX_PEOPLE, PRIMARIES, TEAM_NAME, WEAPONS, ZONE_NAME, fmtClock, solo, type Ev, type MatchConfig, type Mode, type PlayerInfo, type Req, type WeaponId , ATK_KITS, DEF_KITS, KITS, type KitId , SIEGE, oneLife } from './shared.ts';
 import type * as THREE from 'three';
 import { BASE, DEFAULT_MAP, MAP_ID } from './world.ts';
 
@@ -63,6 +63,22 @@ export class Hud {
   private hudEl = el('div', 'hud');
   private feedEl = el('div', 'feed');
   private center = el('div', 'center');
+  /** the round, on a card: what it is before it starts, how it went when it is over */
+  private cardEl = el('div', 'rcard');
+  private cardT = 0;
+  /** the last three seconds before the word */
+  private countEl = el('div', 'count');
+  private countN = 0;
+  /** something that has just changed in the round: down to one, a minute left, overtime */
+  private callEl = el('div', 'call');
+  private callT = 0;
+  /** what has been called already this round */
+  private said = new Set<string>();
+  /** one clip ends and the next begins */
+  private cutEl = el('div', 'cut');
+  /** every round so far: who took it, how, and who was attacking */
+  private rlog: { n: number; w: number; why: string; atk: number }[] = [];
+  private lastSec = -1;
   private promptEl = el('div', 'prompt', '<div class="acts"></div><div class="bar"><i></i></div>');
   private promptActs = this.promptEl.firstChild as HTMLElement;
   private promptBar = this.promptEl.lastChild!.firstChild as HTMLElement;
@@ -141,11 +157,12 @@ export class Hud {
     const ka = store.get('kitA', 'breacher') as KitId, kd = store.get('kitD', 'fortifier') as KitId;
     g.kits = [ATK_KITS.includes(ka) ? ka : 'breacher', DEF_KITS.includes(kd) ? kd : 'fortifier'];
     this.vitals.append(this.wounds, this.hp);
-    this.hudEl.append(this.lensFx, this.downEl, this.tagBox, this.spotBox, this.fallBox, this.objEl, this.secEl, this.lensEl, this.kitEl, this.stamp, this.top, this.feedEl, this.center, this.promptEl, this.healBar, this.ammo, this.vitals, this.tick, this.dmgEl, this.scope, this.hint);
-    this.hudEl.append(this.tmap.el);
+    this.hudEl.append(this.lensFx, this.downEl, this.tagBox, this.spotBox, this.fallBox, this.objEl, this.secEl, this.lensEl, this.kitEl, this.stamp, this.top, this.feedEl, this.center, this.countEl, this.promptEl, this.healBar, this.ammo, this.vitals, this.tick, this.dmgEl, this.scope, this.hint);
+    this.hudEl.append(this.tmap.el, this.cutEl);
     this.sheet.append(this.shTop, this.report, this.tables, this.shActs);
     this.boardEl.append(this.sheet);
-    this.root.append(this.hudEl, this.boardEl, this.lostEl, this.pauseEl, this.menu, this.toastEl);
+    // (the round's card and its calls sit over a lost feed: whoever is out of a round still has to be told how it went)
+    this.root.append(this.hudEl, this.lostEl, this.callEl, this.cardEl, this.boardEl, this.pauseEl, this.menu, this.toastEl);
     this.hudEl.style.display = 'none';
     addEventListener('keydown', (e) => {
       if (e.code === 'Escape' && g.inMatch && !document.pointerLockElement && !g.autoInput) this.resume();
@@ -621,10 +638,17 @@ export class Hud {
     this.startedAt = performance.now();
     this.marks = [];
     this.heads = this.far = 0;
+    this.rlog = [];
+    this.said.clear();
+    this.cardEl.className = 'rcard';
+    this.callEl.className = 'call';
+    this.countEl.className = 'count';
   }
 
   leave() {
     this.hudEl.style.display = 'none';
+    this.cardEl.className = 'rcard';
+    this.callEl.className = 'call';
     this.boardEl.classList.remove('on', 'final');
     this.lostEl.className = 'lost';
     this.pauseEl.classList.remove('on');
@@ -764,41 +788,199 @@ export class Hud {
     this.lostEl.innerHTML = `<div class="l-in"><small>WATCHING</small><p>${esc(name)}</p><em>Click for the next camera</em></div>`;
   }
 
+  /** the three kits of the side I am on this round, the one I have marked, and what it is */
+  private kitBlock() {
+    const g = this.g, cur = g.myKit();
+    return `<div class="rc-kits">${(g.attacking() ? ATK_KITS : DEF_KITS).map((k, i) => `<span class="${k === cur ? 'on' : ''}"><kbd>${i + 1}</kbd>${esc(KITS[k].name)}</span>`).join('')}</div><p class="rc-kit">${esc(KITS[cur].note)}</p>`;
+  }
+
+  /** another kit chosen at the briefing: the card says so, and it is remembered for next time */
+  kitPicked() {
+    const box = this.cardEl.querySelector('.rc-kitbox');
+    if (box) box.innerHTML = this.kitBlock();
+    store.set('kitA', this.g.kits[0]);
+    store.set('kitD', this.g.kits[1]);
+  }
+
+  /** the card in the middle of the screen: `sec` seconds of it, or none to take it away */
+  private card(html: string, cls: string, sec: number) {
+    if (sec <= 0) {
+      this.cardEl.classList.remove('on');
+      this.cardT = 0;
+      return;
+    }
+    this.cardEl.innerHTML = html;
+    this.cardEl.className = 'rcard ' + cls;
+    // (a frame with it laid out but not yet shown, so it comes in rather than appears)
+    void this.cardEl.offsetWidth;
+    this.cardEl.classList.add('on');
+    this.cardT = sec;
+  }
+
+  /** both sides' rounds as marks, mine named in full; `fresh` is the side whose newest one has just been won */
+  private scoreRow(score: number[], myTeam: number, fresh: number) {
+    const lim = Math.min(8, this.g.cfg?.limit ?? 4);
+    const row = (t: number) => `<em class="rp t${t}${lim > 5 ? ' many' : ''}">${Array.from({ length: lim }, (_, k) => `<i class="${k < score[t] ? 'w' : ''}${k === score[t] - 1 && t === fresh ? ' new' : ''}"></i>`).join('')}</em>`;
+    const name = (t: number) => `<u class="t${t}${t === myTeam ? ' me' : ''}">${TEAM_NAME[t]}${t === myTeam ? '<small>you</small>' : ''}</u>`;
+    return `<div class="rc-score">${name(0)}${row(0)}<b>${score[0]}<s>:</s>${score[1]}</b>${row(1)}${name(1)}</div>`;
+  }
+
+  /** a line across the top for something that has just changed */
+  private call(key: string, title: string, sub = '', cls = '', sec = 3.2) {
+    if (this.said.has(key)) return false;
+    this.said.add(key);
+    this.callEl.innerHTML = `<b>${title}</b>${sub ? `<span>${sub}</span>` : ''}`;
+    this.callEl.className = 'call ' + cls;
+    void this.callEl.offsetWidth;
+    this.callEl.classList.add('on');
+    this.callT = sec;
+    return true;
+  }
+
+  /** a round has ended: who took it and how, who stood out, what I did, and what comes next */
+  private roundOver(e: Extract<Ev, { t: 'phase' }>, myTeam: number) {
+    const g = this.g, siege = g.cfg?.mode === 'siege';
+    const w = e.winner ?? -1, win = w === myTeam, lim = g.cfg?.limit ?? 4;
+    this.rlog.push({ n: e.round, w, why: e.msg ?? '', atk: e.atk ?? -1 });
+    const name = (s: number) => {
+      const p = g.player(s);
+      return p ? `<b class="t${p.team}">${esc(p.name)}</b>` : '<b>?</b>';
+    };
+    const did = (r?: number[]) => {
+      if (!r) return 'nothing on the record';
+      const parts: string[] = [];
+      if (r[1]) parts.push(`${r[1]} down`);
+      if (r[2]) parts.push(`${r[2]} damage`);
+      if (r[3]) parts.push(`${r[3]} picked up`);
+      return parts.join(', ') || 'no shots landed';
+    };
+    const rows: string[] = [];
+    const mvp = e.rs?.find((r) => r[0] === e.mvp);
+    if (mvp) rows.push(`<div><i>${e.tag === 'ace' ? 'ACE' : e.tag === 'clutch' ? 'CLUTCH' : 'BEST'}</i>${name(mvp[0])}<span>${e.tag === 'clutch' ? `the last one up, against ${e.tagN}. ` : ''}${did(mvp)}</span></div>`);
+    if (e.mvp !== g.mySlot) rows.push(`<div><i>YOU</i>${name(g.mySlot)}<span>${did(e.rs?.find((r) => r[0] === g.mySlot))}</span></div>`);
+    if (e.last && /eliminated/i.test(e.msg ?? '')) {
+      const [by, to, wp, zone, dist] = e.last;
+      rows.push(`<div><i>LAST</i>${name(by)}<span>put down</span>${name(to)}<span>${zone === 3 ? 'blast' : `${g.weaponName(wp).toLowerCase()}${zone === 0 ? ', head' : ''}`}, ${dist} m</span></div>`);
+    }
+    const mine = e.score[myTeam] ?? 0, theirs = e.score[1 - myTeam] ?? 0;
+    const stake = mine === lim - 1 && theirs === lim - 1 ? 'One round decides it.' : mine === lim - 1 ? 'Match point.' : theirs === lim - 1 ? 'Their match point.' : '';
+    // (the sides change every round: whoever attacked this one defends the next)
+    const next = siege && e.atk !== undefined ? `Next round you ${e.atk === myTeam ? 'defend' : 'attack'}.` : 'Next round coming up.';
+    this.card(`<div class="rc-top"><span>ROUND ${e.round}</span><span>${esc(e.msg ?? '')}</span>${e.tag === 'flawless' ? `<span>${win ? 'NOBODY LOST' : 'THEY LOST NOBODY'}</span>` : ''}</div>
+      <h2>${w < 0 ? 'Draw' : win ? 'Round won' : 'Round lost'}</h2>${this.scoreRow(e.score, myTeam, w)}
+      <div class="rc-rows">${rows.join('')}</div><p class="rc-next">${stake ? `<b>${stake}</b> ` : ''}${next}</p>`, 'end ' + (w < 0 ? '' : win ? 'good' : 'bad'), 7.3);
+    this.center.classList.remove('on');
+    this.callEl.className = 'call';
+    this.countEl.className = 'count';
+    g.sound.roundEnd(w < 0 ? null : win);
+  }
+
+  /** what the round itself has to say while it runs: the count before the word, the clock near its end, a side down to one */
+  private roundWatch() {
+    const g = this.g, mode = g.cfg?.mode;
+    if (!oneLife(mode)) return;
+    const t = g.timer(), sec = Math.ceil(t);
+    const counting = (g.phase === 'prep' || (g.phase === 'warmup' && mode === 'rounds')) && t > 0 && t <= 3.02;
+    if (counting && sec !== this.countN) {
+      this.countN = sec;
+      this.countEl.textContent = String(sec);
+      this.countEl.className = 'count';
+      void this.countEl.offsetWidth;
+      this.countEl.className = 'count on';
+      this.center.classList.remove('on');
+      // (the count is never read through the card: whatever the clocks did, it has the middle of the picture to itself)
+      if (this.cardT > 0) this.card('', '', 0);
+      g.sound.tick(true);
+    } else if (!counting && this.countN) {
+      this.countN = 0;
+      this.countEl.className = 'count';
+    }
+    if (g.phase !== 'live') return;
+    // the clock
+    if (sec !== this.lastSec) {
+      this.lastSec = sec;
+      if (sec === 60) this.call('t60', 'One minute');
+      else if (sec === 30) this.call('t30', '30 seconds', '', 'warn');
+      else if (sec <= 10 && sec > 0) {
+        this.call('t10', '10 seconds', mode === 'siege' ? (g.attacking() ? 'Get in the room' : 'Hold them off') : '', 'warn');
+        g.sound.tick(sec <= 3);
+      }
+    }
+    if (mode === 'siege' && t <= 0 && this.call('ot', 'Overtime', g.attacking() ? 'Stay in the room' : 'Get them out of the room', 'warn', 4)) g.sound.beep(false);
+    // the numbers
+    const [mine, theirs] = g.pips();
+    const up = (l: number[]) => l.filter((v) => v === 2).length;
+    const a = up(mine), b = up(theirs), meUp = g.me.alive && !g.me.down;
+    if (mine.length < 2 || theirs.length < 2) return;
+    if (a === 1 && b === 1) {
+      if (this.call('1v1', 'One on one', meUp ? 'It is down to you' : '', 'warn')) g.sound.alone();
+    } else if (a === 1 && b > 1) {
+      if (this.call('alone', meUp ? 'Last one standing' : 'One of yours left', `1 v ${b}`, 'warn', 4) && meUp) g.sound.alone();
+    } else if (b === 1 && a > 1) this.call('one', 'One left', `${a} v 1`);
+  }
+
   phase(e: Extract<Ev, { t: 'phase' }>) {
     const g = this.g;
     const myTeam = g.player(g.mySlot)?.team ?? 0;
     if (e.phase === 'warmup') {
       const m = MODES.find((x) => x.id === g.cfg?.mode);
-      if (g.cfg?.mode === 'siege') {
-        const atk = myTeam === e.atk;
-        this.say(`Round ${e.round}: ${atk ? 'Attack' : 'Defend'}<small>CASE ${this.caseId} &nbsp;${atk ? `Break into the ${esc(e.objName ?? 'room')} and hold it, or leave nobody to stop you.` : `Keep them out of the ${esc(e.objName ?? 'room')} until the clock runs out.`}<br>${esc(KITS[g.myKit()].name)}: ${esc(KITS[g.myKit()].note)}</small>`, 4.6);
+      this.said.clear();
+      this.callT = 0;
+      this.countN = 0;
+      if (oneLife(g.cfg?.mode)) {
+        const siege = g.cfg?.mode === 'siege', atk = myTeam === e.atk, room = esc(e.objName ?? 'room');
+        const lim = g.cfg?.limit ?? 4, mine = e.score[myTeam] ?? 0, theirs = e.score[1 - myTeam] ?? 0;
+        // what rides on it
+        const stake = mine === lim - 1 && theirs === lim - 1 ? 'Last round. Whoever takes it takes the match.' : mine === lim - 1 ? 'Match point. Take this one and it is over.' : theirs === lim - 1 ? 'Their match point. Lose this one and it is over.' : '';
+        const head = siege ? (atk ? 'Attack' : 'Defend') : 'Last team standing';
+        const task = siege
+          ? atk ? `Break into the <b>${room}</b> and hold it, or leave nobody to stop you.` : `Keep them out of the <b>${room}</b> until the clock runs out.`
+          : 'One life. The side with anyone left on their feet takes the round.';
+        const kit = siege ? `<div class="rc-kitbox">${this.kitBlock()}</div>` : e.round <= 1 ? '<div class="rc-kitbox"><p class="rc-kit">In the dark your light is what they see. T turns it off. Lamps can be shot out.</p></div>' : '';
+        this.card(`<div class="rc-top"><span>CASE ${this.caseId}</span><span>FIRST TO ${lim}</span></div>
+          <h2><small>Round ${e.round}</small>${head}</h2><p class="rc-task">${task}</p>${this.scoreRow(e.score, myTeam, -1)}
+          ${stake ? `<p class="rc-stake">${stake}</p>` : ''}${kit}`, 'intro' + (stake ? ' hot' : ''), siege ? Math.max(4, e.clock - 0.15) : Math.max(2.4, e.clock - 3.2));
+        this.center.classList.remove('on');
         this.boardEl.classList.remove('on', 'final');
+        // every round after the first opens on a cut: the camera was somewhere else a moment ago
+        if (e.round > 1) {
+          this.cutEl.classList.remove('on');
+          void this.cutEl.offsetWidth;
+          this.cutEl.classList.add('on');
+          g.sound.cut();
+        }
         return;
       }
-      this.say(`${g.cfg?.mode === 'rounds' ? `Round ${e.round}` : m?.name ?? ''}<small>CASE ${this.caseId} &nbsp;${m?.note ?? ''}${e.round <= 1 ? '<br>In the dark your light is what they see. T turns it off. Lamps can be shot out.' : ''}</small>`, e.round <= 1 ? 5.5 : 3.8);
+      this.say(`${m?.name ?? ''}<small>CASE ${this.caseId} &nbsp;${m?.note ?? ''}${e.round <= 1 ? '<br>In the dark your light is what they see. T turns it off. Lamps can be shot out.' : ''}</small>`, e.round <= 1 ? 5.5 : 3.8);
       this.boardEl.classList.remove('on', 'final');
     } else if (e.phase === 'prep') {
       const atk = myTeam === e.atk;
-      this.say(`${atk ? 'Stand by' : 'Board it up'}<small>${atk ? 'You go when the clock does. Study the plan.' : 'Hold F in a doorway for boards, on a thin wall for steel. B for the cameras, M for the plan.'}</small>`, 5);
+      this.card('', '', 0);
+      this.say(`${atk ? 'Stand by' : 'Board it up'}<small>${atk ? 'You go when the clock does. Study the plan, and get where you want to start from.' : 'Hold F in a doorway for boards, on a thin wall for steel. B for the cameras, M for the plan.'}</small>`, 5);
       g.sound.beep(false);
     } else if (e.phase === 'live') {
-      this.say(g.cfg?.mode === 'siege' ? (myTeam === e.atk ? 'Go' : 'They are coming') : 'Recording', g.cfg?.mode === 'siege' ? 1.4 : 0.8, 'go');
+      this.card('', '', 0);
+      this.countEl.className = 'count';
+      this.say(g.cfg?.mode === 'siege' ? (myTeam === e.atk ? 'Go' : 'They are coming') : g.cfg?.mode === 'rounds' ? 'Go' : 'Recording', oneLife(g.cfg?.mode) ? 1.4 : 0.8, 'go');
       g.sound.beep(true);
     } else if (e.phase === 'between') {
-      const win = e.winner === myTeam;
-      this.say(`${e.winner === -1 ? 'Draw' : win ? 'Round won' : 'Round lost'}<small>${e.msg ?? ''}. ${TEAM_NAME[0]} ${e.score[0]}, ${TEAM_NAME[1]} ${e.score[1]}</small>`, 4.6);
+      this.roundOver(e, myTeam);
     } else if (e.phase === 'over') {
       const ffa = solo(g.cfg?.mode);
       const won = ffa ? e.winner === g.mySlot : e.winner === myTeam;
       const who = ffa ? (g.player(e.winner ?? -1)?.name ?? 'Nobody') : e.winner === -1 ? 'Draw' : TEAM_NAME[e.winner ?? 0];
       const me = g.player(g.mySlot);
       const len = (performance.now() - this.startedAt) / 1000;
+      if (oneLife(g.cfg?.mode) && e.msg) this.rlog.push({ n: e.round, w: e.winner ?? -1, why: e.msg, atk: e.atk ?? -1 });
+      this.card('', '', 0);
+      this.callEl.className = 'call';
       const title = e.winner === -1 ? 'Draw' : won ? 'Case closed. You won.' : `${esc(who)} won`;
       const line = ffa ? `${esc(who)} first to ${g.cfg?.limit}` : `${TEAM_NAME[0]} ${g.score[0]}, ${TEAM_NAME[1]} ${g.score[1]}`;
       const parts = [`${me?.kills ?? 0} down`, `${me?.deaths ?? 0} lost`];
       if (this.heads) parts.push(`${this.heads} to the head`);
       if (this.far >= 1) parts.push(`longest ${Math.round(this.far)} m`);
       this.report.innerHTML = `<h2>${title}</h2><p>${line}. ${parts.join(', ')}.</p>
+        ${this.rlog.length ? `<div class="rounds">${this.rlog.map((r) => `<div class="${r.w < 0 ? '' : 't' + r.w}${r.w === myTeam ? ' mine' : ''}"><b>${r.n}</b><span>${r.w < 0 ? 'Draw' : TEAM_NAME[r.w]}</span><i title="${esc(r.why)}">${/secured/i.test(r.why) ? 'Room taken' : /eliminated/i.test(r.why) ? 'Wiped out' : esc(r.why)}</i></div>`).join('')}</div>` : ''}
         <div class="tl">${scrub(this.marks, len)}<div class="legend"><span>0:00</span><span>Up: your kills. Down, red: your deaths.</span><span>${fmtClock(len)}</span></div></div>`;
       this.renderBoard();
       this.boardEl.classList.add('on', 'final');
@@ -842,6 +1024,9 @@ export class Hud {
     if (!g.inMatch) return;
     this.msgT -= dt;
     if (this.msgT <= 0 && this.center.classList.contains('on')) this.center.classList.remove('on');
+    if (this.cardT > 0 && (this.cardT -= dt) <= 0) this.cardEl.classList.remove('on');
+    if (this.callT > 0 && (this.callT -= dt) <= 0) this.callEl.classList.remove('on');
+    this.roundWatch();
     this.tickT -= dt;
     if (this.tickT <= 0) this.tick.className = 'tick';
     this.dmgT -= dt;
@@ -860,7 +1045,9 @@ export class Hud {
     const info = g.player(g.mySlot);
     const mode = g.cfg?.mode;
     const score = solo(mode) ? `${info?.kills ?? 0}/${g.cfg?.limit}` : `${g.score[0]} : ${g.score[1]}`;
-    const clock = g.phase === 'live' || g.phase === 'warmup' || g.phase === 'prep' ? fmtClock(Math.max(0, g.timer())) : '';
+    const over = mode === 'siege' && g.phase === 'live' && g.timer() <= 0;
+    const clock = over ? 'OVERTIME' : g.phase === 'live' || g.phase === 'warmup' || g.phase === 'prep' ? fmtClock(Math.max(0, g.timer())) : '';
+    const hot = g.phase === 'live' && oneLife(mode) && g.timer() <= 10;
     let extra = mode === 'hold' && this.holdInfo ? `<span>${esc(this.holdInfo)}</span>` : '';
     let pre = '', post = '';
     if (mode === 'siege') {
@@ -871,7 +1058,7 @@ export class Hud {
       post = row(theirs, `t${1 - (info?.team ?? 0)}`);
       extra = `<span>${g.phase === 'prep' ? 'PREP' : g.attacking() ? 'ATTACK' : 'DEFEND'} &nbsp;${esc(g.objName)}</span>`;
     }
-    const line = `${pre}<b>${score}</b>${clock ? `<span>${clock}</span>` : ''}${extra}${post}`;
+    const line = `${pre}<b>${score}</b>${clock ? `<span${hot ? ' class="hot"' : ''}>${clock}</span>` : ''}${extra}${post}`;
     if (this.top.dataset.s !== line) {
       this.top.dataset.s = line;
       this.top.innerHTML = line;

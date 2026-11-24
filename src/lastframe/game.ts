@@ -17,7 +17,7 @@ import { Input, LocalPlayer, type PlayerCtx } from './player.ts';
 import { Soldier, angleDiff, loadArms, loadGear, loadGuns, preparePeople } from './soldier.ts';
 import { stepNade, type NadeSim } from './nade.ts';
 import { Rats } from './vermin.ts';
-import { F, MAX_PEOPLE, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow , BOARDS, SIEGE , oneLife , DEFAULT_KITS, KITS, kitCharges, kitSheets, type KitId } from './shared.ts';
+import { F, MAX_PEOPLE, STRIDE, WEAPONS, WEAPON_LIST, W_BOOT, ZONE, ZONE_NAME, solo, type Ev, type MatchConfig, type NadeKind, type Phase, type PlayerInfo, type Req, type WeaponId, flaresAt, type FlareNow , BOARDS, SIEGE , STAGE_LEASH, oneLife , ATK_KITS, DEF_KITS, DEFAULT_KITS, KITS, kitCharges, kitSheets, type KitId } from './shared.ts';
 import { Walls, chargeMesh, chargeModel, siteAt, siteMid, siteOf, siteArr, sitesTouch, type Site } from './walls.ts';
 import { Gear } from './gear.ts';
 import { EnvCube } from './envcube.ts';
@@ -25,6 +25,8 @@ import { Barricade, openingsOf } from './fort.ts';
 
 /** how far from the room its defenders may go before the round is on, metres */
 const PREP_LEASH = 20;
+/** the last one of a round falls slowly: how long the picture runs slow for, seconds, and how slow */
+const SLOW_T = 1.5, SLOW_K = 0.38;
 import { Guest_, Host, type Down } from './net.ts';
 import { Hud } from './ui.ts';
 import { Shafts } from './shafts.ts';
@@ -1026,6 +1028,7 @@ export class Game {
         if (e.s === this.mySlot) {
           this.me.slot = e.s;
           this.me.spawn(e.p[0], e.p[1], e.p[2], e.yaw, e.primary);
+          this.applyKit();
           if (this.L.map.night && !this.L.map.weather?.day) this.me.light = true;
           this.lensBlood = 0;
           this.dead = -1;
@@ -1224,6 +1227,10 @@ export class Game {
           this.obj = e.obj;
           this.objName = e.objName ?? '';
         }
+        // the attackers wait where they were put: a few steps either way, no further, until the clock goes
+        if (e.phase === 'prep') this.stageAt.set(this.me.m.x, 0, this.me.m.z);
+        // a round that ends with someone falling ends slowly
+        if ((e.phase === 'between' || e.phase === 'over') && e.last && oneLife(this.cfg?.mode) && /eliminated/i.test(e.msg ?? '')) this.slowT = SLOW_T;
         if (e.phase === 'warmup') {
           this.secureProg = 0;
           this.walls.reset();
@@ -1235,12 +1242,7 @@ export class Game {
           this.me.down = false;
           for (const a of this.actors.values()) a.info.down = false;
           this.r.shadowMap.needsUpdate = true;
-          if (e.atk !== undefined) {
-            const kit = this.myKit();
-            this.myCharges = kitCharges(kit);
-            this.mySheets = kitSheets(kit);
-            this.myTrips = kit === 'trapper' ? SIEGE.trips : 0;
-          }
+          if (e.atk !== undefined) this.applyKit();
         }
         this.hud.phase(e);
         break;
@@ -1871,6 +1873,9 @@ export class Game {
   // ------------------------------------------------------------------ the frame
   /** bench tools stop the loop and call tick themselves */
   halt = false;
+  /** seconds of slow picture left */
+  slowT = 0;
+  private stageAt = new THREE.Vector3();
   // ---- the attack-and-defend game, as this screen knows it
   walls!: Walls;
   gear!: Gear;
@@ -1927,6 +1932,28 @@ export class Game {
     }
     return out;
   }
+  /** what my kit puts in my hands for this round: charges, steel, wire, and the grenades it says it brings */
+  private applyKit() {
+    if (this.cfg?.mode !== 'siege') return;
+    const kit = this.myKit();
+    this.myCharges = kitCharges(kit);
+    this.mySheets = kitSheets(kit);
+    this.myTrips = kit === 'trapper' ? SIEGE.trips : 0;
+    this.me.nades = { frag: kit === 'point' ? 2 : 1, flash: kit === 'scout' ? 3 : 1 };
+  }
+
+  /** before a round starts: another kit for the side I am on in it (the first, second or third of that side's three) */
+  pickKit(n: number) {
+    if (this.cfg?.mode !== 'siege' || this.phase !== 'warmup') return false;
+    const atk = this.attacking(), k = (atk ? ATK_KITS : DEF_KITS)[n];
+    if (!k || k === this.myKit()) return false;
+    this.kits = atk ? [k, this.kits[1]] : [this.kits[0], k];
+    this.req({ t: 'kits', kits: this.kits });
+    this.applyKit();
+    this.sound.cloth();
+    return true;
+  }
+
   myKit(): KitId {
     return this.kits[this.attacking() ? 0 : 1];
   }
@@ -2074,7 +2101,16 @@ export class Game {
     if (this.halt) return;
     const n = performance.now();
     const raw = (n - this.last) / 1000;
-    const dt = Math.min(0.05, raw);
+    let dt = Math.min(0.05, raw);
+    if (this.slowT > 0) {
+      // the match itself keeps the wall clock; what is seen of it runs slow, and comes back up to speed at the end
+      this.slowT -= raw;
+      const back = Math.min(1, Math.max(0, this.slowT) / 0.5), into = Math.min(1, (SLOW_T - this.slowT) / 0.12);
+      const full = dt;
+      dt *= 1 - (1 - SLOW_K) * back * into;
+      // (what every machine works out from the match's own clock, the star shells, is not held back with the picture)
+      if (this.inMatch) this.matchT += full - dt;
+    }
     this.last = n;
     this.rafAt = n;
     this.time += dt;
@@ -2219,12 +2255,29 @@ export class Game {
     if (this.inMatch && mine) {
       if (me.alive) {
         const sol = this.body(mine);
-        const freeze = this.phase === 'warmup' && oneLife(this.cfg?.mode) || this.phase === 'over' || (this.phase === 'prep' && this.attacking());
+        const freeze = this.phase === 'warmup' && oneLife(this.cfg?.mode) || this.phase === 'over';
+        const staging = this.phase === 'prep' && this.cfg?.mode === 'siege' && this.attacking();
+        // the briefing is where the kit for the round is chosen
+        if (this.phase === 'warmup') for (let k = 0; k < 3; k++) if (this.input.take(`Digit${k + 1}`) && this.pickKit(k)) this.hud.kitPicked();
         // damage sticks in the attack-and-defend game: nothing to bandage with
         if (this.cfg?.mode === 'siege' && this.myKit() !== 'medic') me.wraps = 0;
         this.lenses(me);
         const viewing = this.camView >= 0 || this.scopeView >= 0;
+        me.safe = staging;
         me.update(dt, this.input, this.ctx, this.cam, sol, freeze || viewing);
+        if (staging) {
+          const dx = me.m.x - this.stageAt.x, dz = me.m.z - this.stageAt.z, d = Math.hypot(dx, dz);
+          if (d > STAGE_LEASH) {
+            me.m.x = this.stageAt.x + (dx / d) * STAGE_LEASH;
+            me.m.z = this.stageAt.z + (dz / d) * STAGE_LEASH;
+            const out = (me.m.vx * dx + me.m.vz * dz) / d;
+            if (out > 0) {
+              me.m.vx -= (dx / d) * out;
+              me.m.vz -= (dz / d) * out;
+            }
+            this.hud.prompt('Hold here until the clock goes');
+          }
+        }
         if (viewing) {
           this.lensCam();
           this.hud.prompt('');
