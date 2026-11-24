@@ -34,8 +34,26 @@ class Layer {
   }
 }
 
-/** the whole city at 50 cm (height_far.bin): what's underfoot beyond the detailed map */
-let FAR: Layer | null = null;
+/** the whole city at 50 cm (height_far.bin), then downtown and the bridge: what's underfoot beyond the detailed map */
+const LAYERS: Layer[] = [];
+function far(x: number, z: number): [Layer, number] | null {
+  for (const L of LAYERS) {
+    const k = L.idx(x, z);
+    if (k >= 0) return [L, k];
+  }
+  return null;
+}
+
+async function fetchLayer(url: string): Promise<ArrayBuffer | null> {
+  const r = await fetch(url).catch(() => null);
+  if (!r || !r.ok) return null;
+  if (!url.endsWith('.gz')) return r.arrayBuffer();
+  const raw = await r.arrayBuffer();
+  // a dev server may already have inflated it (Content-Encoding): the magic says which
+  const head = new Uint8Array(raw, 0, 2);
+  if (head[0] !== 0x1f || head[1] !== 0x8b) return raw;
+  return new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+}
 
 export class Ground {
   readonly nx: number;
@@ -62,9 +80,9 @@ export class Ground {
     this.b = new Uint8Array(buf, 28 + n * 2, n);
   }
 
-  static async load(url: string): Promise<Ground> {
-    const [a, b] = await Promise.all([fetch(url).then((r) => r.arrayBuffer()), fetch(url.replace('height.bin', 'height_far.bin')).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null)]);
-    if (b) FAR = new Layer(b);
+  static async load(url: string, extra: string[] = []): Promise<Ground> {
+    const [a, ...more] = await Promise.all([fetch(url).then((r) => r.arrayBuffer()), fetchLayer(url.replace('height.bin', 'height_far.bin')), ...extra.map((u) => fetchLayer(u))]);
+    for (const b of more) if (b) LAYERS.push(new Layer(b));
     return new Ground(a);
   }
 
@@ -77,17 +95,15 @@ export class Ground {
   }
 
   inside(x: number, z: number): boolean {
-    return this.idx(x, z) >= 0 || (!!FAR && FAR.idx(x, z) >= 0);
+    return this.idx(x, z) >= 0 || !!far(x, z);
   }
 
   /** height of the surface at a point (three coords): the detailed map, else the city map; NaN off both */
   height(x: number, z: number): number {
     const k = this.idx(x, z);
     if (k >= 0) return this.h[k] / 100 + this.off;
-    if (FAR) {
-      const f = FAR.idx(x, z);
-      if (f >= 0) return FAR.h[f] / 100 + FAR.off;
-    }
+    const f = far(x, z);
+    if (f) return f[0].h[f[1]] / 100 + f[0].off;
     return NaN;
   }
 
@@ -112,10 +128,8 @@ export class Ground {
   blocked(x: number, z: number): boolean {
     const k = this.idx(x, z);
     if (k >= 0) return this.b[k] === 1;
-    if (FAR) {
-      const f = FAR.idx(x, z);
-      if (f >= 0) return FAR.b[f] === 1;
-    }
+    const f = far(x, z);
+    if (f) return f[0].b[f[1]] === 1;
     return true;
   }
 }

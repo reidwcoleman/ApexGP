@@ -20,23 +20,26 @@ import type { Car } from './cars.ts';
 
 const WORLD_GRP = (1 << 16) | 0xffff;
 
-export async function makePhys(ground: Ground): Promise<Phys> {
+/** a region of ground for the ragdolls: Blender x0, x1, y0, y1 and the cell size */
+export type PhysRegion = [number, number, number, number, number];
+export async function makePhys(ground: Ground, regions: PhysRegion[] = [[-262, 300, -330, 420, 0.5]]): Promise<Phys> {
   const phys = await Phys.create();
   const w = phys.world;
   const fixed = w.createRigidBody(RAPIER.RigidBodyDesc.fixed());
-  // the city at 50 cm (Blender x / y; three z = -y)
-  const x0 = -262, x1 = 300, y0 = -330, y1 = 420, st = 0.5;
-  const nx = Math.floor((x1 - x0) / st), ny = Math.floor((y1 - y0) / st);
-  const hs = new Float32Array((nx + 1) * (ny + 1));
-  for (let c = 0; c <= nx; c++)
-    for (let r = 0; r <= ny; r++) {
-      const x = x0 + c * st, y = y1 - r * st;
-      const h = ground.height(x, -y);
-      hs[c * (ny + 1) + r] = Number.isNaN(h) ? -4 : h;
-    }
-  const d = RAPIER.ColliderDesc.heightfield(ny, nx, hs, { x: nx * st, y: 1, z: ny * st });
-  d.setTranslation(x0 + (nx * st) / 2, 0, -(y1 + y0) / 2).setFriction(0.8).setCollisionGroups(WORLD_GRP);
-  w.createCollider(d, fixed);
+  // the city at 50 cm, downtown at 1 m (Blender x / y; three z = -y)
+  for (const [x0, x1, y0, y1, st] of regions) {
+    const nx = Math.floor((x1 - x0) / st), ny = Math.floor((y1 - y0) / st);
+    const hs = new Float32Array((nx + 1) * (ny + 1));
+    for (let c = 0; c <= nx; c++)
+      for (let r = 0; r <= ny; r++) {
+        const x = x0 + c * st, y = y1 - r * st;
+        const h = ground.height(x, -y);
+        hs[c * (ny + 1) + r] = Number.isNaN(h) ? -4 : h;
+      }
+    const d = RAPIER.ColliderDesc.heightfield(ny, nx, hs, { x: nx * st, y: 1, z: ny * st });
+    d.setTranslation(x0 + (nx * st) / 2, 0, -(y1 + y0) / 2).setFriction(0.8).setCollisionGroups(WORLD_GRP);
+    w.createCollider(d, fixed);
+  }
   return phys;
 }
 

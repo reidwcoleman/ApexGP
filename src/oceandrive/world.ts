@@ -82,19 +82,7 @@ export async function loadWorld(env: Env, renderer: THREE.WebGLRenderer, progres
   const meta: SceneMeta = await (await fetch(BASE + 'scene.json')).json();
   const tl = new THREE.TextureLoader();
   // lightmaps
-  const lms = new Map<string, { tex: THREE.Texture; info: LightmapInfo }>();
-  await Promise.all(
-    Object.entries(meta.lightmaps).map(async ([name, info]) => {
-      const t = await tl.loadAsync(BASE + 'lm/' + name + '.webp');
-      t.channel = 1;
-      t.colorSpace = THREE.NoColorSpace;
-      t.flipY = false;
-      t.generateMipmaps = true;
-      t.minFilter = THREE.LinearMipmapLinearFilter;
-      t.anisotropy = 4;
-      lms.set(name, { tex: t, info });
-    }),
-  );
+  const lms = await loadLightmaps(meta.lightmaps, tl);
   progress(0.35, 'Laying out Ocean Drive');
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
@@ -103,9 +91,42 @@ export async function loadWorld(env: Env, renderer: THREE.WebGLRenderer, progres
   });
   progress(0.82, 'Planting palms');
   const root = gltf.scene;
-  const cache = new Map<string, THREE.Material>();
-  const glass = glassMaterial(false);
-  const shop = glassMaterial(true);
+  const S = shared(tl);
+  let sea: THREE.ShaderMaterial | null = null;
+  skin(root, lms, env, S, (name, mesh) => {
+    if (name !== 'od_water') return null;
+    sea = makeSea(meta.water_x, meta.sea, env.hdr!, new THREE.Color(9.18 / 9.18, 7.38 / 9.18, 5.23 / 9.18).multiplyScalar(9.18));
+    mesh.renderOrder = 2;
+    return sea;
+  });
+  if (!sea) throw new Error('no sea in the block');
+  const windows = (probe: THREE.Texture | null, k = 1) => {
+    if (!probe) return;
+    for (const g of [S.glass, S.shop]) {
+      g.envMap = probe;
+      g.envMapIntensity = k;
+      g.needsUpdate = true;
+    }
+  };
+  return { root, meta, neon: S.neon, sea, lamps: S.lamps, windows };
+}
+
+/** what both scenes share: the window glass, the palms' leaves, the neon, the awnings, the scanned materials */
+export interface Shared {
+  glass: THREE.MeshPhysicalMaterial;
+  shop: THREE.MeshPhysicalMaterial;
+  frondMat: THREE.MeshStandardMaterial;
+  dryMat: THREE.MeshStandardMaterial;
+  bushMat: THREE.MeshStandardMaterial;
+  neonMat: THREE.MeshBasicMaterial;
+  neon: THREE.MeshBasicMaterial[];
+  lamps: THREE.MeshStandardMaterial[];
+  awningTex: THREE.Texture;
+  cache: Map<string, THREE.Material>;
+}
+let SHARED: Shared | null = null;
+export function shared(tl = new THREE.TextureLoader()): Shared {
+  if (SHARED) return SHARED;
   const frond = tl.load(BASE + 'tex/palm_frond.webp');
   frond.colorSpace = THREE.SRGBColorSpace;
   frond.anisotropy = 8;
@@ -114,20 +135,31 @@ export async function loadWorld(env: Env, renderer: THREE.WebGLRenderer, progres
   dry.colorSpace = THREE.SRGBColorSpace;
   const grape = tl.load(BASE + 'tex/seagrape.webp');
   grape.colorSpace = THREE.SRGBColorSpace;
-  const frondMat = foliage('od_frond', frond, frondN, 0xffffff);
-  const dryMat = foliage('od_frond_dry', dry, null, 0xffffff);
-  const bushMat = foliage('od_bush', grape, null, 0xffffff);
-  const neon: THREE.MeshBasicMaterial[] = [];
   const neonMat = new THREE.MeshBasicMaterial({ name: 'od_neon', vertexColors: true, color: new THREE.Color(3.2, 3.2, 3.2), fog: true });
-  neon.push(neonMat);
-  const awningTex = makeStripes();
-  let sea: THREE.ShaderMaterial | null = null;
-  const lamps: THREE.MeshStandardMaterial[] = [];
+  SHARED = {
+    glass: glassMaterial(false),
+    shop: glassMaterial(true),
+    frondMat: foliage('od_frond', frond, frondN, 0xffffff),
+    dryMat: foliage('od_frond_dry', dry, null, 0xffffff),
+    bushMat: foliage('od_bush', grape, null, 0xffffff),
+    neonMat,
+    neon: [neonMat],
+    lamps: [],
+    awningTex: makeStripes(),
+    cache: new Map(),
+  };
+  return SHARED;
+}
 
+export type LmMap = Map<string, { tex: THREE.Texture; info: LightmapInfo }>;
+
+/** swap the GLB's flat od_* placeholders for the real materials (lightmapped where baked) */
+export function skin(root: THREE.Object3D, lms: LmMap, env: Env, S: Shared, special: (name: string, mesh: THREE.Mesh, lm: { tex: THREE.Texture; info: LightmapInfo } | null) => THREE.Material | null) {
   const lmOf = (o: THREE.Object3D): string | null => {
     for (let p: THREE.Object3D | null = o; p; p = p.parent) if (p.name.startsWith('lm_')) return p.name.replace(/_\d+$/, '').replace(/\.\d+$/, '');
     return null;
   };
+  const { cache } = S;
   root.traverse((c) => {
     const mesh = c as THREE.Mesh;
     if (!mesh.isMesh) return;
@@ -135,23 +167,21 @@ export async function loadWorld(env: Env, renderer: THREE.WebGLRenderer, progres
     const name = (src.name || '').replace(/\.\d+$/, '');
     const lmName = lmOf(mesh);
     const lm = lmName && mesh.geometry.getAttribute('uv1') ? lms.get(lmName) ?? null : null;
-    let mat: THREE.Material | null = null;
-    if (name === 'od_glass') mat = glass;
-    else if (name === 'od_shopglass') mat = shop;
-    else if (name === 'od_neon') mat = neonMat;
-    else if (name === 'od_frond') mat = frondMat;
-    else if (name === 'od_frond_dry') mat = dryMat;
-    else if (name === 'od_bush') mat = bushMat;
-    else if (name === 'od_water') {
-      sea = makeSea(meta.water_x, meta.sea, env.hdr!, new THREE.Color(9.18 / 9.18, 7.38 / 9.18, 5.23 / 9.18).multiplyScalar(9.18));
-      mat = sea;
-      mesh.renderOrder = 2;
-    } else if (name === 'od_awning') {
+    let mat: THREE.Material | null = special(name, mesh, lm);
+    if (mat) {
+      // (the caller's)
+    } else if (name === 'od_glass') mat = S.glass;
+    else if (name === 'od_shopglass') mat = S.shop;
+    else if (name === 'od_neon') mat = S.neonMat;
+    else if (name === 'od_frond') mat = S.frondMat;
+    else if (name === 'od_frond_dry') mat = S.dryMat;
+    else if (name === 'od_bush') mat = S.bushMat;
+    else if (name === 'od_awning') {
       const key = 'awning' + (lm ? lmName : '');
       mat = cache.get(key) ?? null;
       if (!mat) {
         const m = odMaterial({ name: 'od_awning', tile: 1, roughness: 0.9, kind: 'awning' }, lm);
-        m.map = awningTex;
+        m.map = S.awningTex;
         cache.set(key, (mat = m));
       }
     } else if (name.startsWith('od_')) {
@@ -163,30 +193,38 @@ export async function loadWorld(env: Env, renderer: THREE.WebGLRenderer, progres
       // Poly Haven props keep their own scanned materials
       if (src.map) src.map.anisotropy = 4;
       mat = src;
-      if (/street_lamp_01_(bulb|glass)/.test(name) && !lamps.includes(src)) lamps.push(src);
+      if (/street_lamp_01_(bulb|glass)/.test(name) && !S.lamps.includes(src)) S.lamps.push(src);
     }
     mesh.material = mat;
     // shadows: everything casts except the sea, the horizon plane and neon; ground and walls receive
-    const isGround = !!lmName && /gnear|gfar/.test(lmName);
-    mesh.castShadow = !(name === 'od_water' || name === 'od_far' && mesh.name.startsWith('horizon') || name === 'od_neon' || isGround);
-    mesh.receiveShadow = name !== 'od_neon' && name !== 'od_water';
+    const isGround = !!lmName && /gnear|gfar|dtg/.test(lmName);
+    mesh.castShadow = !(name === 'od_water' || name === 'od_bay' || name === 'od_far' && mesh.name.startsWith('horizon') || name === 'od_neon' || isGround || name === 'od_farground');
+    mesh.receiveShadow = name !== 'od_neon' && name !== 'od_water' && name !== 'od_bay';
     if (mesh.name.startsWith('horizon')) {
       mesh.castShadow = false;
     }
     env.prep(mat);
   });
-  for (const m of [frondMat, dryMat, bushMat]) env.prep(m);
+  for (const m of [S.frondMat, S.dryMat, S.bushMat]) env.prep(m);
   instanceRepeats(root);
-  if (!sea) throw new Error('no sea in the block');
-  const windows = (probe: THREE.Texture | null, k = 1) => {
-    if (!probe) return;
-    for (const g of [glass, shop]) {
-      g.envMap = probe;
-      g.envMapIntensity = k;
-      g.needsUpdate = true;
-    }
-  };
-  return { root, meta, neon, sea, lamps, windows };
+}
+
+/** lightmaps listed in a manifest, from lm/ */
+export async function loadLightmaps(manifest: Record<string, LightmapInfo>, tl = new THREE.TextureLoader()): Promise<LmMap> {
+  const lms: LmMap = new Map();
+  await Promise.all(
+    Object.entries(manifest).map(async ([name, info]) => {
+      const t = await tl.loadAsync(BASE + 'lm/' + name + '.webp');
+      t.channel = 1;
+      t.colorSpace = THREE.NoColorSpace;
+      t.flipY = false;
+      t.generateMipmaps = true;
+      t.minFilter = THREE.LinearMipmapLinearFilter;
+      t.anisotropy = 4;
+      lms.set(name, { tex: t, info });
+    }),
+  );
+  return lms;
 }
 
 /** awning canvas: wide stripes, white and the awning's own colour (vertex colour multiplies) */

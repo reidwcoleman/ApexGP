@@ -275,6 +275,55 @@ export class Dressing {
     }
   }
 
+  /**
+   * Downtown's signals: a mast arm over each approach from the corner on its right, two heads facing the
+   * traffic; north-south approaches run with Collins' phase, east-west with the cross streets'. (Blender
+   * coords: crosswalk centre, heading of the arriving traffic, the road's width, one-way.)
+   */
+  addSignals(list: { legs: [number, number, number, number, number][] }[]) {
+    const pile = new Pile();
+    const pole = new THREE.MeshStandardMaterial({ color: 0x8d9298, metalness: 0.7, roughness: 0.42 });
+    const housing = new THREE.MeshStandardMaterial({ color: 0x1a1b1d, roughness: 0.55 });
+    for (const c of list) {
+      for (const [x, y, hb, W, one] of c.legs) {
+        const dx = Math.sin(hb), dy = Math.cos(hb);
+        const ph: 'ns' | 'ew' = Math.abs(dy) > 0.7 ? 'ns' : 'ew';
+        const rx = dy, ry = -dx;
+        const off = (one ? W / 2 : W / 2) + 1.3;
+        const cx = x + rx * off - dx * 1.2, cy = y + ry * off - dy * 1.2;
+        const base = B(cx, cy, 0);
+        base.y = this.gh(base.x, base.z);
+        const H = 6.6;
+        pile.add(pole, cyl, rod(base, base.clone().setY(base.y + H), 0.14));
+        const reach = one ? W * 0.78 : W * 0.48;
+        const end = B(cx - rx * reach, cy - ry * reach, 0).setY(base.y + H - 0.3);
+        pile.add(pole, cyl, rod(base.clone().setY(base.y + H - 0.3), end, 0.085));
+        pile.add(pole, cyl, rod(base.clone().setY(base.y + H - 1.5), B(cx - rx * reach * 0.42, cy - ry * reach * 0.42, 0).setY(base.y + H - 0.32), 0.04));
+        const face = Math.atan2(-dx, dy);
+        const nh = one && W > 9 ? 3 : 2;
+        for (let k = 0; k < nh; k++) {
+          const f = 0.45 + (0.5 * (k + 0.5)) / nh;
+          const hp = B(cx - rx * reach * f, cy - ry * reach * f, 0).setY(base.y + H - 1.05);
+          pile.add(housing, box, at(hp, face, 0.36, 1.08, 0.26));
+          for (const [i, col] of (['r', 'y', 'g'] as const).entries()) {
+            const lp = hp.clone().add(new THREE.Vector3(Math.sin(face), 0, Math.cos(face)).multiplyScalar(0.135));
+            lp.y += 0.34 - i * 0.34;
+            pile.add(this.lens[ph][col], cyl, M.compose(lp, Q.setFromAxisAngle(new THREE.Vector3(Math.cos(face), 0, -Math.sin(face)), Math.PI / 2), V.set(0.24, 0.02, 0.24)).clone());
+            const vp = lp.clone().add(new THREE.Vector3(Math.sin(face), 0, Math.cos(face)).multiplyScalar(0.09));
+            vp.y += 0.1;
+            pile.add(housing, box, at(vp, face, 0.28, 0.02, 0.18));
+          }
+        }
+        // the traffic stops a few metres short of the crosswalk
+        const sp = B(x - dx * 3.4, y - dy * 3.4, 0);
+        this.stops.push({ x: sp.x, z: sp.z, yaw: Math.PI - hb, phase: ph });
+      }
+    }
+    const g = pile.build(() => true);
+    this.env.prepObject(g, true, true);
+    this.root.add(g);
+  }
+
   /** the lights: Collins green 14 s, amber 3, all red 1.5, then the cross streets the same */
   signalState(ph: 'ns' | 'ew'): 'g' | 'y' | 'r' {
     const T = 37;

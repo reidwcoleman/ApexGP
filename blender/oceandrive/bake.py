@@ -17,10 +17,15 @@ TEST = 'test' in argv
 ONLY = next((a.split('=', 1)[1].split(',') for a in argv if a.startswith('only=')), None)
 sc = bpy.context.scene
 SIZES = {'lm_block': 4096, 'lm_gnear': 4096, 'lm_front2': 2048, 'lm_city': 4096, 'lm_gfar': 2048}
+# another scene (downtown): OD_BAKE_SIZES=lm_a:4096,lm_b:2048 OD_BAKE_TAG=dt
+if os.environ.get('OD_BAKE_SIZES'):
+    SIZES = {k: int(v) for k, v in (x.split(':') for x in os.environ['OD_BAKE_SIZES'].split(','))}
+TAG = os.environ.get('OD_BAKE_TAG', '')
+MANIFEST = os.path.join(WORK, f'lightmaps{("_" + TAG) if TAG else ""}.json')
 if TEST:
     SIZES = {'lm_gnear': 1024}
 SAMPLES = 64 if TEST else 128
-NOLM = {'od_glass', 'od_shopglass', 'od_interior', 'od_neon', 'od_water', 'od_frame'}
+NOLM = {'od_glass', 'od_shopglass', 'od_interior', 'od_neon', 'od_water', 'od_frame', 'od_rail', 'od_bay'}
 
 sc.render.engine = 'CYCLES'
 prefs = bpy.context.preferences.addons['cycles'].preferences
@@ -147,7 +152,7 @@ for name, size in SIZES.items():
     split_glass(ob)
     lightmap_uv(ob)
     if ONLY and name not in ONLY:
-        prev = json.load(open(os.path.join(WORK, 'lightmaps.json'))) if os.path.exists(os.path.join(WORK, 'lightmaps.json')) else {}
+        prev = json.load(open(MANIFEST)) if os.path.exists(MANIFEST) else {}
         manifest[name] = prev.get(name, dict(size=size, scale=SCALE, gamma=2.2))
         print(name, 'kept', flush=True)
         continue
@@ -185,7 +190,7 @@ for name, size in SIZES.items():
             n = m.node_tree.nodes.get(k)
             if n:
                 m.node_tree.nodes.remove(n)
-json.dump(manifest, open(os.path.join(WORK, 'lightmaps.json'), 'w'), indent=1)
+json.dump(manifest, open(MANIFEST, 'w'), indent=1)
 if not TEST:
-    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(WORK, 'oceandrive_baked.blend'))
+    bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath.replace('.blend', '_baked.blend'))
 print('done', round(time.time() - t0, 1))

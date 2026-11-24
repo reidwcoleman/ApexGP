@@ -302,6 +302,17 @@ export class Cars {
     c.driver = p;
   }
 
+  /** more traffic loops (downtown's, over the bridge): three x, z; a car every ~110 m of loop */
+  addRoutes(loops: THREE.Vector2[][]) {
+    for (const poly of loops) {
+      const R = makeRoute(poly, true);
+      this.routes.push(R);
+      const n = Math.max(1, Math.round(R.pts.length / 110));
+      for (let i = 0; i < n; i++) this.addTraffic(R, ((i + this.rnd() * 0.5) / n) * R.pts.length);
+    }
+    for (const c of this.list) if (c.route && loops.length) this.place(c, 0);
+  }
+
   private addTraffic(route: Route, s: number) {
     const c = this.make(this.pickKind(true), true);
     c.route = route;
@@ -992,6 +1003,8 @@ export class Cars {
   update(dt: number, walker: THREE.Vector3 | null, eye: THREE.Vector3) {
     this.flash += dt;
     for (const c of this.list) {
+      // a car half a mile off is a speck: don't draw it
+      c.root.visible = (c.x - eye.x) ** 2 + (c.z - eye.z) ** 2 < 650 * 650 || c === this.driven;
       // burning: it goes up after a few seconds
       if (c.burnT > 0 && !c.wreck) {
         c.burnT += dt;

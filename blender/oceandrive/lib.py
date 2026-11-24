@@ -152,6 +152,15 @@ MATS = {
     'od_far':      dict(col=(0.75, 0.74, 0.71), rough=0.85),
     'od_water':    dict(col=(0.05, 0.15, 0.17), rough=0.05),
     'od_wetsand':  dict(col=(0.55, 0.48, 0.38), rough=0.4),
+    # downtown
+    'od_curtain':  dict(col=(0.16, 0.18, 0.20), rough=0.1),
+    'od_ribbon':   dict(col=(0.55, 0.54, 0.52), rough=0.6),
+    'od_garage':   dict(col=(0.45, 0.44, 0.42), rough=0.8),
+    'od_crown':    dict(col=(0.75, 0.75, 0.75), rough=0.4),
+    'od_rail':     dict(col=(0.10, 0.12, 0.12), rough=0.05),
+    'od_skycondo': dict(col=(0.40, 0.42, 0.44), rough=0.3),
+    'od_farground': dict(col=(0.40, 0.39, 0.37), rough=0.9),
+    'od_bay':      dict(col=(0.05, 0.15, 0.17), rough=0.05),
 }
 GEN = None  # set by build.py: folder of generated textures
 

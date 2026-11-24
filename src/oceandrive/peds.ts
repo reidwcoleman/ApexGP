@@ -53,8 +53,11 @@ export interface Ped extends Hittable {
   car: Car | null;
   punchT: number;
   lineT: number;
-  home: { x: number; z: number; lane: number; dir: number; z0: number; z1: number; sit: boolean; clip: string; yaw: number };
+  home: { x: number; z: number; lane: number; dir: number; z0: number; z1: number; sit: boolean; clip: string; yaw: number; path?: Path | null };
   playing: string;
+  /** a walker on a sidewalk line (downtown): where along it */
+  path?: Path | null;
+  s?: number;
   hurt: (dmg: number, dir: THREE.Vector3, zone: number, byYou: boolean) => void;
 }
 
@@ -78,6 +81,35 @@ const LINES = {
   hands: ["Don't shoot! Please!", 'Take whatever you want!', 'Easy, easy!', 'Please, I have kids!'],
   hurt: ['Agh!', 'My leg!', 'Ow!'],
 };
+
+/** a walking line (three x, z) with its running length */
+export interface Path {
+  pts: THREE.Vector2[];
+  cum: number[];
+  len: number;
+}
+export function makePath(pts: THREE.Vector2[]): Path {
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + pts[i].distanceTo(pts[i - 1]));
+  return { pts, cum, len: cum[cum.length - 1] };
+}
+function pathAt(P: Path, s: number, out: { x: number; z: number; tx: number; tz: number }) {
+  let lo = 0, hi = P.cum.length - 1;
+  while (hi - lo > 1) {
+    const m = (lo + hi) >> 1;
+    if (P.cum[m] <= s) lo = m;
+    else hi = m;
+  }
+  const a = P.pts[lo], b = P.pts[hi];
+  const L = Math.max(1e-4, P.cum[hi] - P.cum[lo]);
+  const f = THREE.MathUtils.clamp((s - P.cum[lo]) / L, 0, 1);
+  out.x = a.x + (b.x - a.x) * f;
+  out.z = a.y + (b.y - a.y) * f;
+  out.tx = (b.x - a.x) / L;
+  out.tz = (b.y - a.y) / L;
+  return out;
+}
+const PQ = { x: 0, z: 0, tx: 0, tz: 1 };
 
 export interface You {
   pos: THREE.Vector3;
@@ -180,6 +212,30 @@ export class Peds {
     for (let i = 0; i < 6; i++) this.group(9.6 + r() * 0.6, -80 + r() * 160);
     for (let i = 0; i < 5; i++) this.group(185 + r() * 40, -70 + r() * 140);
     for (let i = 0; i < 4; i++) this.group(232 + r() * 10, -90 + r() * 180);
+  }
+
+  /** people on downtown's sidewalks and park paths: n of them, spread by the lines' length */
+  spawnWalks(lines: THREE.Vector2[][], n: number) {
+    const paths = lines.map(makePath).filter((p) => p.len > 20);
+    const tot = paths.reduce((a, p) => a + p.len, 0);
+    const r = this.rnd;
+    for (let i = 0; i < n; i++) {
+      let x = r() * tot;
+      let P = paths[0];
+      for (const p of paths) {
+        x -= p.len;
+        if (x <= 0) {
+          P = p;
+          break;
+        }
+      }
+      const s0 = r() * P.len;
+      pathAt(P, s0, PQ);
+      const d = this.add(PQ.x, PQ.z, -1, r() < 0.5 ? 1 : -1, 0, 0, false, 0, r() < 0.06 ? 'jog' : 'walk');
+      d.path = P;
+      d.s = s0;
+      d.home.path = P;
+    }
   }
 
   private readonly pos: { x: number; z: number }[] = [];
@@ -430,6 +486,13 @@ export class Peds {
     d.x = H.lane === 0 ? H.x : H.lane;
     d.z = H.sit ? H.z : H.z0 + this.rnd() * (H.z1 - H.z0);
     if (H.sit) d.x = H.x;
+    if (H.path) {
+      d.path = H.path;
+      d.s = this.rnd() * H.path.len;
+      pathAt(H.path, d.s, PQ);
+      d.x = PQ.x;
+      d.z = PQ.z;
+    }
     d.lane = H.lane;
     d.dir = H.dir;
     d.sit = H.sit;
@@ -620,6 +683,10 @@ export class Peds {
       this.animate(d, dt, eye);
       return;
     }
+    if (d.path) {
+      this.walkPath(d, d.path, dt, you, eye);
+      return;
+    }
     // keep to the lane, step round what blocks it
     let want = d.speed;
     const ax = d.x, az = d.z + d.dir * 0.9;
@@ -650,6 +717,54 @@ export class Peds {
       if (!this.you?.driving) this.say(d, LINES.bump);
     }
     const tyaw = d.dir > 0 ? 0 : Math.PI;
+    let dy = tyaw - d.yaw;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    d.yaw += dy * Math.min(1, dt * 5);
+    const h = this.ground.height(d.x, d.z);
+    d.y = Number.isNaN(h) ? 0 : h;
+    d.p.root.position.set(d.x, d.y, d.z);
+    d.p.root.rotation.set(0, d.yaw, 0);
+    if (d.playing !== d.clip) this.play(d, d.clip, 0.3);
+    const act = (d.p as unknown as { current: THREE.AnimationAction | null }).current;
+    const cs = this.kit.speed.get(d.clip) ?? (d.clip === 'jog' ? 2.8 : 1.35);
+    if (act) act.timeScale = want / cs;
+    this.animate(d, dt, eye);
+  }
+
+  /** along a sidewalk line, stepping round what's in the way, turning back at its ends */
+  private walkPath(d: Ped, P: Path, dt: number, you: THREE.Vector3, eye: THREE.Vector3) {
+    let want = d.speed;
+    pathAt(P, d.s ?? 0, PQ);
+    const fx = PQ.tx * d.dir, fz = PQ.tz * d.dir;
+    const ax = d.x + fx * 0.9, az = d.z + fz * 0.9;
+    const ahead = this.ground.blocked(ax, az) || Math.hypot(you.x - ax, you.z - az) < 0.8 || (!!this.cars && this.cars.blocks(ax, az));
+    if (ahead) {
+      d.side += (d.side >= 0 ? 1 : -1) * dt * 1.6;
+      if (Math.abs(d.side) > 1.3) {
+        d.side = 0;
+        d.dir = -d.dir;
+      }
+      want *= 0.5;
+    } else d.side *= 1 - Math.min(1, dt * 0.6);
+    d.s = (d.s ?? 0) + d.dir * want * dt;
+    if (d.s > P.len) {
+      d.s = P.len;
+      d.dir = -1;
+    } else if (d.s < 0) {
+      d.s = 0;
+      d.dir = 1;
+    }
+    pathAt(P, d.s, PQ);
+    // walkers keep right of the line (two directions pass each other)
+    const off = d.side + 0.5 * d.dir;
+    const tx = PQ.x - PQ.tz * off, tz = PQ.z + PQ.tx * off;
+    d.x += (tx - d.x) * Math.min(1, dt * 3);
+    d.z += (tz - d.z) * Math.min(1, dt * 3);
+    if (Math.abs(you.x - d.x) < 0.55 && Math.abs(you.z - d.z) < 0.55) {
+      d.x += Math.sign(d.x - you.x || 1) * dt * 1.5;
+      if (!this.you?.driving) this.say(d, LINES.bump);
+    }
+    const tyaw = Math.atan2(PQ.tx * d.dir, PQ.tz * d.dir);
     let dy = tyaw - d.yaw;
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
     d.yaw += dy * Math.min(1, dt * 5);

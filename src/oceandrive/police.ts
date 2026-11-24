@@ -8,6 +8,7 @@ import { castRay, lineOfSight, type Fx, type Sfx } from './combat.ts';
 import { GUNS, makeGun, muzzleOf, poseGun, type GunId } from './weapons.ts';
 import type { Actor } from './gunplay.ts';
 import type { DressData } from './dressing.ts';
+import { RoadGraph } from './roadgraph.ts';
 import { fill } from './peds.ts';
 
 /**
@@ -22,7 +23,7 @@ import { fill } from './peds.ts';
  *
  * A crime raises the heat (shooting in public, hitting people, pulling a driver out, killing,
  * anything against an officer); the stars follow the heat. Units come in from out of sight and
- * drive the street grid to you. They lose you when nobody (no officer, no car, no helicopter) has
+ * drive the streets to you (over the bridge too). They lose you when nobody (no officer, no car, no helicopter) has
  * seen you for a while: the stars flash grey while they search, then go.
  */
 
@@ -108,8 +109,8 @@ export class Police {
   private spawnT = 0;
   private sayT = 0;
   private rnd = Math.random;
-  private readonly nodesX: number[];
-  private readonly nodesZ: number[];
+  /** the streets of both districts (set by the page once downtown is in) */
+  graph: RoadGraph;
   private logo: THREE.Texture;
   private swatLogo: THREE.Texture;
   private nearSiren: THREE.Vector3 | null = null;
@@ -130,9 +131,7 @@ export class Police {
     readonly sfx: Sfx,
     data: DressData,
   ) {
-    // the street grid: Ocean Drive and the avenues (north-south), the numbered streets (east-west)
-    this.nodesX = [(data.od[0] + data.od[1]) / 2 - 0.9, ...data.xs.map(([a, b]) => (a + b) / 2)].sort((a, b) => a - b);
-    this.nodesZ = data.ys.map(([a, b]) => -(a + b) / 2).sort((a, b) => a - b);
+    this.graph = new RoadGraph(data, null);
     this.logo = printTex('POLICE', '#e8e8e8');
     this.swatLogo = printTex('SWAT', '#e8e8e8');
   }
@@ -252,72 +251,26 @@ export class Police {
     this.sfx.say(who, lines[Math.floor(this.rnd() * lines.length)], p, { pitch: 0.8, rate: 1.2, force });
   }
 
-  // ------------------------------------------------------------------ the street grid
-  private nearestNode(x: number, z: number): [number, number] {
-    let bi = 0, bj = 0, bd = Infinity;
-    for (let i = 0; i < this.nodesX.length; i++)
-      for (let j = 0; j < this.nodesZ.length; j++) {
-        const d = Math.hypot(this.nodesX[i] - x, this.nodesZ[j] - z);
-        if (d < bd) {
-          bd = d;
-          bi = i;
-          bj = j;
-        }
-      }
-    return [bi, bj];
-  }
-
-  /** is (x, z) on a road line: the index of the avenue (x) or street (z) */
-  private onAvenue(x: number) {
-    return this.nodesX.findIndex((v) => Math.abs(v - x) < 7.5);
-  }
-  private onStreet(z: number) {
-    return this.nodesZ.findIndex((v) => Math.abs(v - z) < 6);
-  }
-
-  /** a route along the grid: to the intersection near the car, round the blocks, to the target */
+  // ------------------------------------------------------------------ the streets
+  /** a route along the streets (both districts, over the bridge) */
   private route(fx: number, fz: number, tx: number, tz: number): { x: number; z: number }[] {
-    const ai = this.onAvenue(fx), si = this.onStreet(fz);
-    const ti = this.onAvenue(tx), tj = this.onStreet(tz);
-    // the same road: straight there
-    if ((ai >= 0 && ai === ti) || (si >= 0 && si === tj) || Math.hypot(tx - fx, tz - fz) < 30) return [{ x: tx, z: tz }];
-    // the first intersection: along whatever road we're on
-    let [i0, j0] = this.nearestNode(fx, fz);
-    if (ai >= 0) {
-      i0 = ai;
-      j0 = this.nodesZ.reduce((b, v, j) => (Math.abs(v - fz) < Math.abs(this.nodesZ[b] - fz) ? j : b), 0);
-    } else if (si >= 0) {
-      j0 = si;
-      i0 = this.nodesX.reduce((b, v, i) => (Math.abs(v - fx) < Math.abs(this.nodesX[b] - fx) ? i : b), 0);
-    }
-    const [i1, j1] = this.nearestNode(tx, tz);
-    const pts: { x: number; z: number }[] = [{ x: this.nodesX[i0], z: this.nodesZ[j0] }];
-    // an L round the blocks: across first, then along (or the other way if that's on the target's road)
-    const alongFirst = tj >= 0 && tj === j1;
-    if (!alongFirst) pts.push({ x: this.nodesX[i0], z: this.nodesZ[j1] }, { x: this.nodesX[i1], z: this.nodesZ[j1] });
-    else pts.push({ x: this.nodesX[i1], z: this.nodesZ[j0] }, { x: this.nodesX[i1], z: this.nodesZ[j1] });
-    pts.push({ x: tx, z: tz });
-    // drop repeats and points behind the first
-    return pts.filter((p, k) => k === 0 || Math.hypot(p.x - pts[k - 1].x, p.z - pts[k - 1].z) > 1);
+    return this.graph.route(fx, fz, tx, tz);
   }
 
   // ------------------------------------------------------------------ units
   private spawnUnit(you: You, eye: THREE.Vector3, swat: boolean) {
     // an intersection 110-200 m away, out of sight
     const cands: [number, number][] = [];
-    for (const x of this.nodesX)
-      for (const z of this.nodesZ) {
-        const d = Math.hypot(x - you.pos.x, z - you.pos.z);
-        if (d < 100 || d > 230) continue;
-        if (lineOfSight(this.ground, eye, new THREE.Vector3(x, 1.5, z)) && Math.hypot(x - eye.x, z - eye.z) < 160) continue;
-        if (this.cars.list.some((c) => Math.hypot(c.x - x, c.z - z) < 8)) continue;
-        cands.push([x, z]);
-      }
+    for (const [x, z] of this.graph.ring(you.pos.x, you.pos.z, 100, 260)) {
+      if (Number.isNaN(this.ground.height(x, z))) continue;
+      if (lineOfSight(this.ground, eye, new THREE.Vector3(x, 1.5, z)) && Math.hypot(x - eye.x, z - eye.z) < 160) continue;
+      if (this.cars.list.some((c) => Math.hypot(c.x - x, c.z - z) < 8)) continue;
+      cands.push([x, z]);
+    }
     if (!cands.length) return;
     const [x, z] = cands[Math.floor(this.rnd() * cands.length)];
-    const yaw = Math.atan2(you.pos.x - x, you.pos.z - z);
-    // snap the heading to the road it's on
-    const snap = Math.round(yaw / (Math.PI / 2)) * (Math.PI / 2);
+    // pointing down the street that leads toward you
+    const snap = this.graph.headingAt(x, z, you.pos.x, you.pos.z);
     const drv = this.officer(swat);
     const mate = this.officer(swat);
     const kind = swat ? 'van' : this.rnd() < 0.3 ? 'policeSuv' : 'police';
@@ -491,9 +444,9 @@ export class Police {
         ai.on = true;
         ai.ram = false;
         ai.stop = 2;
-        const away = this.nearestNode(c.x + (c.x - you.pos.x) * 3, c.z + (c.z - you.pos.z) * 3);
-        ai.tx = this.nodesX[away[0]];
-        ai.tz = this.nodesZ[away[1]];
+        const away = this.graph.nearestNode(c.x + (c.x - you.pos.x) * 3, c.z + (c.z - you.pos.z) * 3);
+        ai.tx = this.graph.x[away];
+        ai.tz = this.graph.z[away];
       }
       return;
     }
@@ -514,19 +467,9 @@ export class Police {
     let tx = target.x, tz = target.z;
     // on foot: pull up on the road nearest you (not through the parked cars to the sidewalk)
     if (!you.driving || this.unseen > 2) {
-      let bd = Infinity, bx = tx, bz = tz;
-      for (const x of this.nodesX) if (Math.abs(x - tx) < bd) {
-        bd = Math.abs(x - tx);
-        bx = x;
-        bz = tz;
-      }
-      for (const z of this.nodesZ) if (Math.abs(z - tz) < bd) {
-        bd = Math.abs(z - tz);
-        bx = tx;
-        bz = z;
-      }
-      tx = bx;
-      tz = bz;
+      const q = this.graph.nearestRoad(tx, tz);
+      tx = q.x;
+      tz = q.z;
     }
     // lead a moving car
     if (you.driving && you.car && this.unseen <= 2) {

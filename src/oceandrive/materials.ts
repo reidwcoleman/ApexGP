@@ -522,3 +522,205 @@ export const TABLE: Record<string, OdOpts> = {
   od_lamp: { name: 'od_lamp', roughness: 0.3, kind: 'none' },
   od_signal: { name: 'od_signal', roughness: 0.4, kind: 'none' },
 };
+
+// ------------------------------------------------------------------------------- downtown facades
+/**
+ * Tower facades drawn in the shader from the world position (the GLB carries one quad per wall):
+ *  - curtain: coated glass in 1.5 m panels on 3.9 m floors, aluminium mullions, a spandrel band at each
+ *    floor slab; behind the vision glass, offices (interior mapping: ceiling grid lights, carpet, desks,
+ *    the core wall), some lit at night, whole floors on for the cleaners; every panel sits a hair off
+ *    true, so the reflections break up panel by panel as on a real tower
+ *  - ribbon: concrete (the vertex colour) with bands of windows onto offices
+ *  - garage: open decks between concrete parapets, the lights on inside at night
+ *  - skycondo: residential glass with slab lines, for the skyline far off
+ * The tint (vertex colour) colours the glass and its reflection.
+ */
+export type FacadeKind = 'curtain' | 'ribbon' | 'garage' | 'skycondo';
+export function facadeMaterial(kind: FacadeKind, lm: { tex: THREE.Texture; info: LightmapInfo } | null): THREE.MeshPhysicalMaterial {
+  const concrete = kind === 'ribbon' || kind === 'garage';
+  const m = odMaterial(
+    concrete
+      ? { name: 'od_' + kind, diff: 'white_plaster_02_diff.webp', nor: 'white_plaster_02_nor.webp', rough: 'white_plaster_02_rough.webp', tile: 2.2, kind: 'none', grime: 0, normalScale: 0.5, roughness: 0.9 }
+      : { name: 'od_' + kind, kind: 'none', roughness: 0.06 },
+    lm,
+  );
+  const base = m.onBeforeCompile;
+  const key = m.customProgramCacheKey();
+  m.customProgramCacheKey = () => key + ':facade:' + kind;
+  m.onBeforeCompile = (sh, r) => {
+    base(sh, r);
+    let f = sh.fragmentShader;
+    const decl = /* glsl */ `
+      float odIsGlass = 0.0; float odMetal = 0.0; float odRough = -1.0; vec3 odRoom = vec3( 0.0 ); vec2 odPanel = vec2( 0.0 ); float odTilt = 0.0;
+      // an office behind the glass: a ray into a box (bay RW wide, floor RH high, RD deep)
+      vec3 odOffice( vec3 p, vec3 d, float RW, float RH, float RD, float y0, vec2 salt, out float lit ) {
+        vec3 cell = vec3( floor( p.x / RW ), floor( ( p.y - y0 ) / RH ), 0.0 );
+        vec3 lo = vec3( cell.x * RW, y0 + cell.y * RH, p.z - 0.001 );
+        vec3 hi = vec3( lo.x + RW, lo.y + RH, p.z + RD );
+        vec3 tA = ( lo - p ) / d, tB = ( hi - p ) / d;
+        vec3 tM = max( tA, tB );
+        float t = min( min( tM.x, tM.y ), tM.z );
+        vec3 hp = p + d * t;
+        float r1 = odHash12( cell.xy + salt );
+        float r2 = odHash12( cell.xy * 1.7 + salt + 3.1 );
+        float rf = odHash12( vec2( cell.y, salt.x ) + 0.37 );   // the floor's own
+        // who's in: by room, plus whole floors at night
+        lit = step( 0.62, r1 ) * step( 0.25, rf ) + step( 0.86, rf );
+        lit = clamp( lit, 0.0, 1.0 );
+        vec3 col;
+        float depth = clamp( ( hp.z - p.z ) / RD, 0.0, 1.0 );
+        if ( t == tM.y && d.y > 0.0 ) {
+          // ceiling: a grid of light panels
+          vec2 q = vec2( hp.x - lo.x, hp.z - p.z );
+          float pan = step( 0.62, fract( q.x / 1.5 ) ) * step( 0.55, fract( q.y / 1.8 ) );
+          col = vec3( 0.78, 0.78, 0.76 ) + pan * ( 0.4 + 3.2 * lit * uNight );
+        } else if ( t == tM.y ) {
+          col = mix( vec3( 0.26, 0.27, 0.29 ), vec3( 0.36, 0.33, 0.3 ), step( 0.5, r2 ) );
+        } else if ( t == tM.z ) {
+          col = mix( vec3( 0.62, 0.62, 0.6 ), vec3( 0.5, 0.55, 0.6 ), r2 );
+        } else {
+          col = vec3( 0.66, 0.66, 0.64 );
+        }
+        // desks and screens across the floor
+        float rel = hp.y - lo.y;
+        float desk = step( rel, 0.78 ) * step( 0.68, rel ) * step( 0.15, depth ) * step( depth, 0.75 );
+        col = mix( col, vec3( 0.2, 0.2, 0.21 ), desk * 0.8 );
+        float shade = 0.45 + 0.55 * ( 1.0 - depth );
+        float day = ( 1.0 - uNight ) * uSkyK;
+        vec3 light = day * vec3( 0.42, 0.45, 0.5 ) * shade + uNight * lit * vec3( 0.95, 0.97, 1.0 ) * ( 0.55 + 0.45 * shade ) * 1.25;
+        return col * light;
+      }`;
+    f = f.replace('uniform float uGrime;', 'uniform float uGrime;\n' + decl);
+    let body = '';
+    const frame = /* glsl */ `
+      vec3 N = normalize( vOdNormalW );
+      vec3 T = normalize( cross( vec3( 0.0, 1.0, 0.0 ), N ) );
+      vec3 Vd = normalize( vOdWorld - cameraPosition );
+      vec3 p = vec3( dot( vOdWorld, T ), vOdWorld.y, -dot( vOdWorld, N ) );
+      vec3 d = vec3( dot( Vd, T ), Vd.y, -dot( Vd, N ) );
+      bool wall = abs( N.y ) < 0.5;
+      vec2 salt = floor( vOdWorld.xz / 50.0 ) * 7.13 + floor( dot( vOdWorld.xz, N.xz ) / 3.0 );
+      vec3 tint = vColor.rgb;`;
+    if (kind === 'curtain') {
+      body = /* glsl */ `
+      ${frame}
+      if ( wall ) {
+        float PW = 1.5, FH = 3.9, y0 = 0.15;
+        float u = p.x / PW;
+        float v = ( p.y - y0 ) / FH;
+        vec2 fc = vec2( fract( u ), fract( v ) );
+        odPanel = vec2( floor( u ), floor( v ) ) + salt;
+        float fw = fwidth( u ) * 1.2 + 0.0001;
+        float mull = 1.0 - smoothstep( 0.03, 0.03 + fw, fc.x ) * smoothstep( 0.03, 0.03 + fw, 1.0 - fc.x );
+        float fv = fwidth( v ) * 1.2 + 0.0001;
+        float spand = 1.0 - smoothstep( 0.24, 0.24 + fv, fc.y );
+        float tran = 1.0 - smoothstep( 0.012, 0.012 + fv, abs( fc.y - 0.24 ) );
+        mull = max( mull, tran );
+        float lit;
+        vec3 room = odOffice( p, d, 4.5, FH, 9.0, y0, salt, lit );
+        // the glass: a tinted coating that reflects like a dull metal; the room through it
+        odIsGlass = ( 1.0 - mull ) * ( 1.0 - spand );
+        float trans = 0.22 + 0.25 * dot( tint, vec3( 0.33 ) );
+        odRoom = room * tint * 1.6 * trans * odIsGlass;
+        // the far ones blur into the coating (no shimmer)
+        odRoom *= 1.0 - smoothstep( 260.0, 700.0, length( vOdWorld - cameraPosition ) ) * 0.6;
+        vec3 glassC = tint * 0.55 + 0.05;
+        vec3 spandC = tint * 0.32 + 0.03;
+        vec3 metalC = vec3( 0.55, 0.57, 0.6 );
+        diffuseColor.rgb = mix( mix( glassC, spandC, spand ), metalC, mull );
+        odMetal = mix( mix( 0.62, 0.7, spand ), 0.85, mull );
+        odRough = mix( mix( 0.035, 0.1, spand ), 0.35, mull );
+        odTilt = 1.0 - mull;
+      } else {
+        diffuseColor.rgb = vec3( 0.3 );
+      }`;
+    } else if (kind === 'ribbon') {
+      body = /* glsl */ `
+      ${frame}
+      if ( wall ) {
+        float FH = 3.9, y0 = 0.15;
+        float v = ( p.y - y0 ) / FH;
+        float fc = fract( v );
+        float fv = fwidth( v ) * 1.2 + 0.0001;
+        float win = smoothstep( 0.3, 0.3 + fv, fc ) * ( 1.0 - smoothstep( 0.82, 0.82 + fv, fc ) ) * step( 1.0, floor( v ) );
+        float u = p.x / 1.6;
+        float fw = fwidth( u ) * 1.2 + 0.0001;
+        float mull = 1.0 - smoothstep( 0.04, 0.04 + fw, fract( u ) ) * smoothstep( 0.04, 0.04 + fw, 1.0 - fract( u ) );
+        float g = win * ( 1.0 - mull );
+        float lit;
+        vec3 room = odOffice( p, d, 4.8, FH, 8.0, y0, salt, lit );
+        odIsGlass = g;
+        odRoom = room * vec3( 0.75, 0.8, 0.82 ) * 0.55 * g;
+        diffuseColor.rgb = mix( diffuseColor.rgb * tint, vec3( 0.08, 0.1, 0.12 ), g );
+        diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.32, 0.33, 0.34 ), win * mull );
+        odMetal = mix( 0.0, 0.55, g );
+        odRough = mix( -1.0, 0.05, g );
+        odTilt = g;
+      } else {
+        diffuseColor.rgb *= tint;
+      }`;
+    } else if (kind === 'garage') {
+      body = /* glsl */ `
+      ${frame}
+      diffuseColor.rgb *= tint;
+      if ( wall ) {
+        float FH = 3.05, y0 = 0.15;
+        float v = ( p.y - y0 ) / FH;
+        float fc = fract( v );
+        float fv = fwidth( v ) * 1.2 + 0.0001;
+        float open = smoothstep( 0.38, 0.38 + fv, fc ) * ( 1.0 - smoothstep( 0.9, 0.9 + fv, fc ) );
+        float u = p.x / 8.4;
+        float fw = fwidth( u ) * 1.2 + 0.0001;
+        float col = 1.0 - smoothstep( 0.05, 0.05 + fw, fract( u ) ) * smoothstep( 0.05, 0.05 + fw, 1.0 - fract( u ) );
+        open *= 1.0 - col;
+        // inside the deck: dark, a row of fluorescent tubes under the slab above at night, a car or two
+        float lamp = step( 0.8, fc ) * step( 0.6, fract( p.x / 4.2 ) ) * step( fract( p.x / 4.2 ), 0.8 );
+        float car = step( fc, 0.6 ) * step( 0.5, odHash12( vec2( floor( p.x / 2.6 ), floor( v ) ) + salt ) );
+        vec3 inside = mix( vec3( 0.05, 0.05, 0.055 ), vec3( 0.12, 0.12, 0.14 ) * ( 0.4 + odHash12( vec2( floor( p.x / 2.6 ), floor( v ) ) ) ), car );
+        diffuseColor.rgb = mix( diffuseColor.rgb, inside, open );
+        odRoom = open * lamp * uNight * vec3( 1.6, 1.7, 1.6 ) + open * uNight * vec3( 0.05, 0.06, 0.06 );
+      }`;
+    } else {
+      body = /* glsl */ `
+      ${frame}
+      if ( wall ) {
+        float FH = 3.15, y0 = 0.15;
+        float v = ( p.y - y0 ) / FH;
+        float fc = fract( v );
+        float fv = fwidth( v ) * 1.2 + 0.0001;
+        float slab = 1.0 - smoothstep( 0.1, 0.1 + fv, fc );
+        vec2 c = vec2( floor( p.x / 3.0 ), floor( v ) ) + salt;
+        float r = odHash12( c );
+        diffuseColor.rgb = mix( vec3( 0.12, 0.15, 0.17 ) + tint * 0.12, tint * 0.95, slab );
+        odMetal = mix( 0.5, 0.0, slab );
+        odRough = mix( 0.06, 0.8, slab );
+        odRoom = ( 1.0 - slab ) * ( ( 1.0 - uNight ) * uSkyK * vec3( 0.05, 0.055, 0.06 ) * r + uNight * step( 0.55, r ) * vec3( 1.0, 0.78, 0.5 ) * 0.9 );
+        odTilt = 1.0 - slab;
+        odPanel = c;
+      } else {
+        diffuseColor.rgb *= tint;
+      }`;
+    }
+    f = f.replace('#include <color_fragment>', '#include <color_fragment>\n{\n' + body + '\n}');
+    f = f.replace('//OD_END_roughnessmap_fragment', '//OD_END_roughnessmap_fragment\nif ( odRough >= 0.0 ) roughnessFactor = mix( roughnessFactor, odRough, 1.0 );');
+    f = f.replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = max( metalnessFactor, odMetal );');
+    f = f.replace(
+      '//OD_END_normal_fragment_maps',
+      `//OD_END_normal_fragment_maps
+      if ( odTilt > 0.0 ) {
+        // each pane a hair off true
+        vec2 tl = vec2( odHash12( odPanel * 1.31 ), odHash12( odPanel * 2.17 + 5.0 ) ) - 0.5;
+        vec3 Nw = normalize( vOdNormalW );
+        vec3 Tw = normalize( cross( vec3( 0.0, 1.0, 0.0 ), Nw ) );
+        vec3 tiltW = ( Tw * tl.x + vec3( 0.0, 1.0, 0.0 ) * tl.y ) * 0.028 * odTilt;
+        normal = normalize( normal + ( viewMatrix * vec4( tiltW, 0.0 ) ).xyz );
+      }`,
+    );
+    f = f.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += odRoom;');
+    sh.fragmentShader = f;
+  };
+  m.vertexColors = true;
+  m.roughness = concrete ? 0.9 : 0.06;
+  m.specularIntensity = 1;
+  return m;
+}
