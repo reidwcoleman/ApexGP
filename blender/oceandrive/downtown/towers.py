@@ -291,6 +291,17 @@ def skyline(mb, b, z_base=0.0, rng=None):
         mat, col = 'od_far', hexcol(B.rng.choice(hotels.CITY_BODY))
     walls(mb, ring, z0, z1, mat, col)
     roof(mb, ring, z1)
+    # Miami's towers wear light at night: an LED band round the roofline (a colour each), and the
+    # tallest carry red aircraft lights at the corners
+    if b['h'] > 55 and st in ('curtain', 'condo', 'ribbon') and B.rng.random() < 0.6:
+        lc = B.crown if B.crown is not None else hexcol(B.rng.choice(['#ffffff', '#8fd3ff', '#ff4fa3', '#3d7bff', '#40e0d0', '#ffd27a', '#b06bff']))
+        walls(mb, offset_ring(ring, 0.08), z1 - 1.2, z1 - 0.5, 'od_crown', lc)
+        if B.rng.random() < 0.4:
+            # a second band lower down (lighting the crown's facade)
+            walls(mb, offset_ring(ring, 0.08), z1 - 6.0, z1 - 5.5, 'od_crown', lc)
+    if b['h'] > 90:
+        for (px, py) in ring[:4]:
+            mb.box(px - 0.4, py - 0.4, z1 + 0.2, px + 0.4, py + 0.4, z1 + 1.0, 'od_crown', hexcol('#ff1a10'))
     if b['h'] > 60 and B.rng.random() < 0.7:
         xs = [p[0] for p in ring]
         ys = [p[1] for p in ring]

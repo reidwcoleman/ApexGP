@@ -305,9 +305,8 @@ export function makeBay(hdr: THREE.Texture): THREE.ShaderMaterial {
         float rs = max( dot( R, uSunDir ), 0.0 );
         vec3 spec = uSunCol * ( pow( rs, 900.0 ) * 14.0 + pow( rs, 90.0 ) * 0.7 );
         vec3 col = mix( body, sky, F ) + spec;
-        // the city at night: warm and white streaks of light toward you from the far shore
-        float streak = vn( vec2( vW.x * 0.08, vW.z * 0.9 + uTime * 0.6 ) ) * vn( vec2( vW.x * 0.31 + 4.0, vW.z * 2.3 ) );
-        col += uNight * vec3( 1.0, 0.8, 0.55 ) * smoothstep( 0.35, 0.7, streak ) * 0.25 * ( 1.0 - smoothstep( 0.0, 0.25, abs( N.x ) ) ) * F * 3.0;
+        // the city at night, where the mirror can't see: a faint warm sheen off the far shore
+        col += uNight * ( 1.0 - uReflOn ) * vec3( 1.0, 0.8, 0.55 ) * 0.02 * F;
         gl_FragColor = vec4( col, 1.0 );
         #include <tonemapping_fragment>
         #include <colorspace_fragment>

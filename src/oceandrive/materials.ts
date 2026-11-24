@@ -349,7 +349,8 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
             float win = step( 0.22, fc.x ) * step( fc.x, 0.78 ) * step( 0.3, fc.y ) * step( fc.y, 0.82 ) * step( 1.0, ic.y );
             float r = odHash12( ic + floor( vOdWorld.xz * 0.05 ) );
             diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.03, 0.035, 0.04 ) + 0.03 * r, win );
-            totalEmissiveRadiance += win * uNight * step( 0.45, r ) * vec3( 1.0, 0.75, 0.45 ) * 1.6;
+            float r2 = odHash12( ic * 1.37 + 5.1 );
+            totalEmissiveRadiance += win * uNight * step( 0.62, r ) * mix( vec3( 1.0, 0.72, 0.42 ), vec3( 0.9, 0.92, 1.0 ), step( 0.6, r2 ) ) * ( 0.6 + r2 );
           }
         }`,
       );
@@ -480,7 +481,7 @@ export function glassMaterial(shop: boolean): THREE.MeshPhysicalMaterial {
           } else {
             col = vec3( 0.86, 0.85, 0.82 );
             float lamp = 1.0 - smoothstep( 0.1, 0.35, length( vec2( ( hp.x - lo.x ) / RW - 0.5, ( hp.z - p.z ) / RD - 0.55 ) ) );
-            col += lamp * uNight * vec3( 2.0, 1.6, 1.1 );
+            col += lamp * uNight * vec3( 2.0, 1.6, 1.1 ) * step( ${shop ? '0.0' : '0.68'}, r3 );
             shade = 0.5;
           }
         } else { // side walls
@@ -493,8 +494,10 @@ export function glassMaterial(shop: boolean): THREE.MeshPhysicalMaterial {
         // daylight inside: bright near the glass, falling off with depth; the warm lights at night
         float day = ( 1.0 - uNight ) * uSkyK;
         vec3 light = day * vec3( 0.55, 0.58, 0.62 ) * shade * ${shop ? '1.4' : '1.0'};
-        float on = step( ${shop ? '0.0' : '0.35'}, r3 );
-        light += uNight * on * vec3( 1.0, 0.78, 0.5 ) * ${shop ? '1.8' : '1.1'} * ( 0.5 + 0.5 * shade );
+        // who's home: a third of the flats, each in its own light (warm lamps mostly, some cool LEDs, a TV)
+        float on = step( ${shop ? '0.0' : '0.68'}, r3 );
+        vec3 lampC = ${shop ? 'vec3( 1.0, 0.85, 0.65 )' : 'r1 < 0.55 ? vec3( 1.0, 0.74, 0.45 ) : r1 < 0.85 ? vec3( 0.95, 0.92, 0.85 ) : vec3( 0.55, 0.68, 1.0 )'};
+        light += uNight * on * lampC * ${shop ? '1.8' : '1.0'} * ( 0.5 + 0.5 * shade ) * ${shop ? '1.0' : '( 0.5 + r2 )'};
         vec3 room = col * light;
         ${
           shop
@@ -586,7 +589,7 @@ export function facadeMaterial(kind: FacadeKind, lm: { tex: THREE.Texture; info:
         float r2 = odHash12( cell.xy * 1.7 + salt + 3.1 );
         float rf = odHash12( vec2( cell.y, salt.x ) + 0.37 );   // the floor's own
         // who's in: by room, plus whole floors at night
-        lit = step( 0.62, r1 ) * step( 0.25, rf ) + step( 0.86, rf );
+        lit = step( 0.55, r1 ) * step( 0.3, rf ) + step( 0.88, rf );
         lit = clamp( lit, 0.0, 1.0 );
         vec3 col;
         float depth = clamp( ( hp.z - p.z ) / RD, 0.0, 1.0 );
@@ -642,9 +645,10 @@ export function facadeMaterial(kind: FacadeKind, lm: { tex: THREE.Texture; info:
         // the glass: a tinted coating that reflects like a dull metal; the room through it
         odIsGlass = ( 1.0 - mull ) * ( 1.0 - spand );
         float trans = 0.22 + 0.25 * dot( tint, vec3( 0.33 ) );
-        odRoom = room * tint * 1.6 * trans * odIsGlass;
+        // at night the lit floors show through the coating far more than by day
+        odRoom = room * mix( tint, vec3( 0.9 ), uNight * 0.5 ) * 1.6 * ( trans + uNight * 0.45 ) * odIsGlass;
         // the far ones blur into the coating (no shimmer)
-        odRoom *= 1.0 - smoothstep( 260.0, 700.0, length( vOdWorld - cameraPosition ) ) * 0.6;
+        odRoom *= 1.0 - smoothstep( 260.0, 700.0, length( vOdWorld - cameraPosition ) ) * ( 0.6 - uNight * 0.35 );
         vec3 glassC = tint * 0.55 + 0.05;
         vec3 spandC = tint * 0.32 + 0.03;
         vec3 metalC = vec3( 0.55, 0.57, 0.6 );
@@ -715,7 +719,12 @@ export function facadeMaterial(kind: FacadeKind, lm: { tex: THREE.Texture; info:
         diffuseColor.rgb = mix( vec3( 0.12, 0.15, 0.17 ) + tint * 0.12, tint * 0.95, slab );
         odMetal = mix( 0.5, 0.0, slab );
         odRough = mix( 0.06, 0.8, slab );
-        odRoom = ( 1.0 - slab ) * ( ( 1.0 - uNight ) * uSkyK * vec3( 0.05, 0.055, 0.06 ) * r + uNight * step( 0.55, r ) * vec3( 1.0, 0.78, 0.5 ) * 0.9 );
+        float r2 = odHash12( c * 1.31 + 7.7 );
+        float r3 = odHash12( c * 0.73 + 2.9 );
+        // who's home: under a third of the flats, in a colour of their own (warm lamps, cool LEDs, a TV's blue)
+        vec3 lampC = r2 < 0.5 ? vec3( 1.0, 0.72, 0.42 ) : r2 < 0.8 ? vec3( 0.95, 0.9, 0.8 ) : r2 < 0.93 ? vec3( 0.75, 0.85, 1.0 ) : vec3( 0.35, 0.5, 1.0 );
+        float on = step( 0.7, r ) * ( 0.35 + 0.65 * r3 );
+        odRoom = ( 1.0 - slab ) * ( ( 1.0 - uNight ) * uSkyK * vec3( 0.05, 0.055, 0.06 ) * r + uNight * on * lampC * 0.75 );
         odTilt = 1.0 - slab;
         odPanel = c;
       } else {

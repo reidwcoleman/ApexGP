@@ -125,7 +125,11 @@ export class Env {
           vec3 d = normalize( vDir );
           vec3 c = photo( d );
           // night: the photo's last afterglow fades to a deep, slightly blue sky
-          c = mix( c, vec3( dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) ) * vec3( 0.45, 0.6, 1.0 ) * 0.7, uNightSky );
+          c = mix( c, vec3( dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) ) * vec3( 0.55, 0.63, 0.82 ) * 0.62, uNightSky );
+          // a city's sky at night: sodium and LED light thrown up into the haze, a dull orange-grey band
+          // low all round the horizon, strongest toward the mainland (the west)
+          float lowK = exp( -max( d.y, 0.0 ) * 9.0 ) * ( 0.75 + 0.25 * max( -d.x, 0.0 ) );
+          c += uNightSky * lowK * vec3( 0.16, 0.1, 0.065 ) * 0.55;
           float cs = dot( d, uSun );
           // the photo's own sun (with its lens starburst) is replaced by the sky from just outside it,
           // carried inward; a clean disc and glow are drawn over that
