@@ -56,6 +56,28 @@ export class Arsenal {
   aiming = false;
   /** shots fired at you are seen by the police as an armed suspect */
   firedT = 99;
+  /** the weapon wheel (Tab held): the mouse points at a slot, letting go of Tab takes it */
+  readonly wheel = { open: false, sel: 0, x: 0, y: 0 };
+  static readonly ORDER = ORDER;
+
+  /** while Tab is held the mouse moves the pointer on the wheel (not the camera) */
+  steerWheel(dx: number, dy: number) {
+    const W = this.wheel;
+    if (!W.open) {
+      W.open = true;
+      W.x = W.y = 0;
+      W.sel = ORDER.indexOf(this.weapon);
+    }
+    W.x += dx;
+    W.y += dy;
+    const l = Math.hypot(W.x, W.y);
+    if (l > 90) {
+      W.x *= 90 / l;
+      W.y *= 90 / l;
+    }
+    // four slots: up fists, right pistol, down shotgun, left carbine
+    if (l > 18) W.sel = ((Math.round(Math.atan2(W.x, -W.y) / (Math.PI / 2)) % 4) + 4) % 4;
+  }
   private readonly tmp = new THREE.Vector3();
 
   constructor(readonly scene: THREE.Scene, readonly player: Player, readonly W: Battlefield) {}
@@ -95,12 +117,19 @@ export class Arsenal {
     for (const g of Object.values(this.guns)) g!.visible = false;
     if (driving || P.dead) {
       this.aiming = false;
+      this.wheel.open = false;
       P.aimK = 0;
       return;
     }
-    // choose
+    // choose: the number keys, Q or the mouse wheel to step through, the wheel (Tab held)
     for (let i = 0; i < ORDER.length; i++) if (inp.hit(`Digit${i + 1}`)) this.select(ORDER[i]);
-    if (inp.hit('Tab') || inp.hit('KeyQ')) this.select(ORDER[(ORDER.indexOf(this.weapon) + 1) % ORDER.length]);
+    if (inp.hit('KeyQ') || inp.wheel > 0) this.select(ORDER[(ORDER.indexOf(this.weapon) + 1) % ORDER.length]);
+    if (inp.wheel < 0) this.select(ORDER[(ORDER.indexOf(this.weapon) + ORDER.length - 1) % ORDER.length]);
+    if (this.wheel.open && !inp.down('Tab')) {
+      this.wheel.open = false;
+      this.select(ORDER[this.wheel.sel]);
+    }
+    if (this.wheel.open) return;
     if (this.weapon === 'fists') {
       this.fists(dt, inp);
       return;

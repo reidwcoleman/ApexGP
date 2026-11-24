@@ -215,7 +215,7 @@ export class Police {
     const female = !swat && this.rnd() < 0.25;
     const look: Look = swat
       ? { female: false, tone: this.rnd(), top: 'jacket', topColor: 0x15171a, top2: 0x1c1e22, accent: 0x0e0f11, bottom: 'trousers', bottomColor: 0x16171a, shoeColor: 0x0b0b0c, gloves: 0x111111, cap: 0x111214, logo: this.swatLogo, hair: 'none', hairColor: 0x1a120c, build: 1.05 }
-      : { female, tone: this.rnd(), top: 'polo', topColor: 0x1b2740, top2: 0x1b2740, accent: 0x0f1626, bottom: 'trousers', bottomColor: 0x12151c, shoeColor: 0x0b0b0c, cap: 0x141c2c, logo: this.logo, hair: 'none', hairColor: 0x1a120c };
+      : { female, tone: this.rnd(), top: 'polo', topColor: 0x9db6d3, top2: 0x9db6d3, accent: 0x0d0e10, bottom: 'trousers', bottomColor: 0x151b2b, shoeColor: 0x0b0b0c, cap: 0x151b2b, logo: this.logo, hair: 'none', hairColor: 0x1a120c };
     const p = new Person(this.kit, look);
     this.env.prepObject(p.root, true, true);
     fill(p.root);

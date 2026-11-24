@@ -293,8 +293,8 @@ class Flashes {
       t.t += dt;
       const L = t.a.distanceTo(t.b);
       const speed = 900; // m/s along the line
-      const head = Math.min(L, t.t * speed), tail = Math.max(0, head - Math.min(2.6, L * 0.5));
-      if (tail >= L - 0.01 || t.t > 0.25) {
+      const head = Math.min(L, t.t * speed), tail = Math.max(0, head - Math.min(1.5, L * 0.4));
+      if (tail >= L - 0.01 || t.t > 0.12) {
         t.m.visible = false;
         continue;
       }
@@ -309,7 +309,7 @@ class Flashes {
       t.m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(side, d, nrm));
       // (a streak passing the lens would fill the screen)
       const near = new THREE.Line3(p0, p0.clone().addScaledVector(d, len)).closestPointToPoint(cp, true, new THREE.Vector3()).distanceTo(cp);
-      t.m.visible = near > 2.5;
+      t.m.visible = near > 4;
       t.m.scale.set(0.014, len, 1);
     }
   }
@@ -410,6 +410,20 @@ export class Fx {
   }
 
   /** a wreck smokes, then burns: call each frame from the car (p: the bonnet) */
+  /** tyre smoke: pale puffs off a sliding wheel, low, spreading and hanging in the air */
+  tyreSmoke(p: THREE.Vector3, k: number, dt: number) {
+    if (Math.random() > dt * 26 * k) return;
+    const g = 0.78 + Math.random() * 0.1;
+    this.soft.emit(
+      p.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.3, 0.15, (Math.random() - 0.5) * 0.3)),
+      new THREE.Vector3((Math.random() - 0.5) * 0.8, 0.35 + Math.random() * 0.4, (Math.random() - 0.5) * 0.8),
+      [g, g, g * 0.98],
+      0.35,
+      1.6 + Math.random() * 0.8,
+      { grow: 2.6, drag: 0.9, alpha: 0.22 * Math.min(1, k + 0.3) },
+    );
+  }
+
   smoke(p: THREE.Vector3, fire: boolean, dt: number) {
     // smoke: thin and grey from a hurt engine, thick and dark off a fire, drifting with the breeze
     if (Math.random() < dt * (fire ? 16 : 10)) {

@@ -33,6 +33,7 @@ import { PlanarReflection, reflectable, REFLECT } from './reflection.ts';
 import { Boats } from './boats.ts';
 import { RoadGraph } from './roadgraph.ts';
 import { NightLights } from './nightlights.ts';
+import { Chunks } from './chunks.ts';
 
 const BASE = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'oceandrive/';
 const Q = new URLSearchParams(location.search);
@@ -162,6 +163,10 @@ async function boot() {
   await carsP;
   // the street furniture, signals, signs, palms down the side streets, parked cars along them
   const dress = new Dressing(scene, env, ground, (await (await fetch(BASE + 'dressing.json')).json()) as DressData, kit, world.root);
+  // the props, cut into cells that cull on their own (and drop out with distance)
+  const chunks = new Chunks();
+  chunks.add(world.root);
+  chunks.add(dress.root);
   cars.stopFor = (x, z, yaw) => dress.stopFor(x, z, yaw);
   // each tile of the county brings its traffic, signals, people and lights as it arrives
   const tileCentre = (core: [number, number][]) => new THREE.Vector3(core.reduce((a, p) => a + p[0], 0) / core.length, 38, -core.reduce((a, p) => a + p[1], 0) / core.length);
@@ -175,6 +180,7 @@ async function boot() {
       lampSpots.push(...spots);
       nightLights.addLamps(spots);
       reflectable(t.root, (m) => /lm_\w+(b[12]|br)|gl_/.test(m.name + (m.parent?.name ?? '')));
+      chunks.add(t.root);
       if (probesReady) {
         const c = tileCentre(t.info.core);
         t.setProbe(env.probeAt(c.x, c.z));
@@ -205,6 +211,8 @@ async function boot() {
     cars.park(spots);
   }
   let shadowPasses = 0;
+  /** frames drawn (the far shadow cascades go by it) */
+  const shadowClock = { n: 0 };
   // shadow layers: the near cascade draws every caster; the middle one skips the small props (chairs,
   // AC units, shrubs, people), whose shadows are a pixel at that range; the far one only the buildings
   {
@@ -217,7 +225,9 @@ async function boot() {
       if (SMALL.test(tag)) return;
       let car = false;
       for (let p: THREE.Object3D | null = m; p; p = p.parent) if (cars.list.some((c) => c.root === p)) car = true;
-      if (car || MID.test(tag) || (m as THREE.InstancedMesh).isInstancedMesh) m.layers.enable(2);
+      // (cars: the near cascade only; past it their shadow is a smudge the contact shadow already draws)
+      if (car) return;
+      if (MID.test(tag) || (m as THREE.InstancedMesh).isInstancedMesh) m.layers.enable(2);
       else m.layers.enable(1);
     });
     // three culls shadow casters by the *view* camera's layers, so draw the cascades one at a time
@@ -233,6 +243,10 @@ async function boot() {
       if (lights.length) shadowPasses++;
       for (const l of lights) {
         const i = L.indexOf(l);
+        // what's in the middle and far cascades doesn't move: they're redrawn every 2nd and 4th frame
+        // (a skipped cascade keeps its map and the matrix it was drawn with, so they still agree)
+        if (i === 1 && shadowClock.n % 2 !== 0 && shadowClock.n > 8) continue;
+        if (i === 2 && shadowClock.n % 4 !== 1 && shadowClock.n > 8) continue;
         cam.layers.mask = i >= 0 ? MASK[i] : saved;
         orig([l], sc, cam);
       }
@@ -431,7 +445,7 @@ async function boot() {
     const ft = acc / frames;
     acc = frames = 0;
     let next = dpr;
-    if (ft > 0.024) next = Math.max(0.7, dpr - 0.15);
+    if (ft > 0.024) next = Math.max(0.55, dpr - 0.15);
     else if (ft < 0.0145) next = Math.min(maxDpr, dpr + 0.1);
     if (Math.abs(next - dpr) > 0.01) {
       dpr = next;
@@ -445,9 +459,12 @@ async function boot() {
   let driving = false;
   let frameN = 0;
   const camDir = new THREE.Vector3();
+  const viewFrustum = new THREE.Frustum(), viewM = new THREE.Matrix4();
+  const tyreA = new THREE.Vector3(), tyreB = new THREE.Vector3();
   const frame = () => {
     const now = performance.now();
-    const dt = Math.min(0.05, (now - last) / 1000);
+    // (time slows while the weapon wheel is open)
+    const dt = Math.min(0.05, (now - last) / 1000) * (arsenal.wheel.open ? 0.25 : 1);
     last = now;
     t += dt;
     seaTick(t);
@@ -480,6 +497,11 @@ async function boot() {
     if (input.hit('KeyH')) hud.toggle();
     if (input.hit('KeyT')) setLook(TIMES[(TIMES.indexOf(sky.time) + 1) % TIMES.length], sky.weather);
     if (input.hit('KeyY')) setLook(sky.time, WEATHERS[(WEATHERS.indexOf(sky.weather) + 1) % WEATHERS.length]);
+    // Tab held: the mouse points at the weapon wheel instead of turning the camera
+    if (input.down('Tab') && !driving && canAct) {
+      arsenal.steerWheel(input.mdx, input.mdy);
+      input.mdx = input.mdy = 0;
+    }
     if (camQ && lookQ) {
       player.update(dt, input, camera);
       camera.position.set(camQ[0], camQ[1], camQ[2]);
@@ -515,6 +537,7 @@ async function boot() {
     cars.setWalkers(peds.positions());
     cars.update(dt, driving ? null : player.pos, camera.position);
     countyM.update(dt, camera.position);
+    chunks.update(camera.position);
     boats?.update(dt);
     const yourCar = driving ? cars.yours : null;
     peds.you = {
@@ -522,6 +545,9 @@ async function boot() {
       aimFrom: arsenal.aiming ? arsenal.aimFrom : null, aimDir: arsenal.aiming ? arsenal.aimDir : null,
       hurt: (d, dir) => player.hurt(d, dir),
     };
+    camera.updateMatrixWorld();
+    viewFrustum.setFromProjectionMatrix(viewM.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    peds.frustum = viewFrustum;
     peds.update(dt, driving ? cars.playerPos() : player.pos, camera.position);
     const youSpeed = driving && yourCar ? Math.hypot(yourCar.vx, yourCar.vz) : (player as unknown as { speed: number }).speed;
     police.update(dt, {
@@ -567,10 +593,15 @@ async function boot() {
       weapon: arsenal.weapon, mag: arsenal.weapon === 'fists' ? 0 : arsenal.ammo[arsenal.weapon].mag, reserve: arsenal.weapon === 'fists' ? 0 : arsenal.ammo[arsenal.weapon].reserve,
       reloading: arsenal.reloading, aim: player.aimK, armed: arsenal.armed && !driving,
     });
+    hud.weaponWheel(arsenal.wheel.open, arsenal.wheel.sel, (['pistol', 'shotgun', 'rifle'] as const).map((g) => `${arsenal.ammo[g].mag} / ${arsenal.ammo[g].reserve}`));
     if ((frameN++ & 1) === 0)
       drawMap(hud.map, dress.data, { x: driving ? cars.playerPos().x : player.pos.x, z: driving ? cars.playerPos().z : player.pos.z, yaw: driving && yourCar ? yourCar.yaw : player.yaw, camYaw: Math.atan2(camDir.set(0, 0, -1).applyQuaternion(camera.quaternion).x, camDir.z) },
-        police.blips(), police.searching ? { x: police.lastKnown.x, z: police.lastKnown.z, r: 45 } : null, t);
-    audio.update(t, driving ? cars.playerPos().x : player.pos.x, U.uSwash.value, driving ? cars.speedKmh() : -1, sky.out.rain);
+        police.blips(), police.searching ? { x: police.lastKnown.x, z: police.lastKnown.z, r: 45 } : null, t, police.graph);
+    audio.update(t, driving ? cars.playerPos().x : player.pos.x, U.uSwash.value, driving ? cars.speedKmh() : -1, sky.out.rain, driving ? cars.drv : null);
+    if (driving && cars.drv.skid > 0.25 && cars.rearContacts(tyreA, tyreB)) {
+      fx.tyreSmoke(tyreA, cars.drv.skid, dt);
+      fx.tyreSmoke(tyreB, cars.drv.skid, dt);
+    }
     // weather and light
     sky.update(dt);
     const o = sky.out;
@@ -607,6 +638,7 @@ async function boot() {
       skyline.bay.uniforms.uReflOn.value = mirror.active ? 1 : 0;
     }
     post.render(t);
+    shadowClock.n++;
     adapt(dt);
     input.endFrame();
     requestAnimationFrame(frame);

@@ -13,6 +13,8 @@ export class Ambience {
   private engO: OscillatorNode[] = [];
   private engF!: BiquadFilterNode;
   private rain!: GainNode;
+  private skid!: GainNode;
+  private skidF!: BiquadFilterNode;
   private master!: GainNode;
 
   /** the audio graph, once the first gesture has started it */
@@ -98,6 +100,16 @@ export class Ambience {
     this.rain.gain.value = 0;
     n4.connect(rf).connect(rf2).connect(this.rain).connect(master);
     n4.start(0, 0.7);
+    // tyres sliding: a squeal (narrow band of noise, warbling)
+    const n5 = this.noise(ctx, true);
+    this.skidF = ctx.createBiquadFilter();
+    this.skidF.type = 'bandpass';
+    this.skidF.frequency.value = 1150;
+    this.skidF.Q.value = 9;
+    this.skid = ctx.createGain();
+    this.skid.gain.value = 0;
+    n5.connect(this.skidF).connect(this.skid).connect(master);
+    n5.start(0, 1.9);
     // engine
     this.engF = ctx.createBiquadFilter();
     this.engF.type = 'lowpass';
@@ -166,7 +178,7 @@ export class Ambience {
   }
 
   /** x: three x (the sea is at x ≈ 262); swash: -0.07..0.07; kmh while driving or -1; rain 0..1 */
-  update(t: number, x: number, swash: number, kmh: number, rain = 0) {
+  update(t: number, x: number, swash: number, kmh: number, rain = 0, car: { rpm: number; load: number; skid: number } | null = null) {
     const ctx = this.ctx;
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -179,11 +191,15 @@ export class Ambience {
     this.breeze.gain.setTargetAtTime(0.035 * (0.6 + 0.4 * Math.sin(t * 0.37) * Math.sin(t * 0.11)), now, 0.8);
     this.rain.gain.setTargetAtTime(0.32 * rain, now, 0.8);
     const driving = kmh >= 0;
-    this.eng.gain.setTargetAtTime(driving ? 0.16 : 0, now, 0.15);
+    this.eng.gain.setTargetAtTime(driving ? 0.11 + 0.08 * (car?.load ?? 0.5) : 0, now, 0.12);
     if (driving) {
-      const rpm = 900 + ((kmh % 70) / 70) * 5200 + Math.min(kmh, 70) * 20;
-      for (const o of this.engO) o.frequency.setTargetAtTime(rpm / 60, now, 0.08);
-      this.engF.frequency.setTargetAtTime(400 + rpm * 0.35, now, 0.1);
+      // the revs from the gearbox (they drop at each shift), brighter on the throttle
+      const rpm = car ? car.rpm : 900 + ((kmh % 70) / 70) * 5200 + Math.min(kmh, 70) * 20;
+      for (const o of this.engO) o.frequency.setTargetAtTime(rpm / 60, now, 0.05);
+      this.engF.frequency.setTargetAtTime(300 + rpm * (0.25 + 0.2 * (car?.load ?? 0.5)), now, 0.08);
     }
+    const sk = driving && car ? car.skid : 0;
+    this.skid.gain.setTargetAtTime(sk > 0.12 ? 0.05 + 0.2 * sk : 0, now, 0.06);
+    this.skidF.frequency.setTargetAtTime(1000 + 300 * Math.sin(t * 23) * sk + 250 * sk, now, 0.03);
   }
 }

@@ -154,17 +154,29 @@ export function poseGun(P: Person, gun: THREE.Object3D, id: GunId, dir: THREE.Ve
     P.rotateWorld('Bip01_Spine1', right0, -pitch * 0.28 * aim);
     P.rotateWorld('Bip01_Spine2', right0, -pitch * 0.28 * aim);
   }
-  const d = v2.copy(dir).normalize();
-  // carried low: muzzle down and across the body
-  const low = new THREE.Vector3().copy(fwd).multiplyScalar(0.55).addScaledVector(UP, -0.8).addScaledVector(right0, spec.long ? -0.35 : 0).normalize();
+  const dAim = new THREE.Vector3().copy(dir).normalize();
+  const d = v2.copy(dAim);
+  // carried: a pistol hangs in the right hand by the thigh, muzzle down; a long gun at the low ready,
+  // the stock by the right hip and the muzzle forward and down across the front (both are seen from
+  // behind, where the camera is: held in front of the chest they'd be hidden by the body)
+  const low = spec.long
+    ? new THREE.Vector3().copy(fwd).multiplyScalar(0.78).addScaledVector(UP, -0.42).addScaledVector(right0, -0.46).normalize()
+    : new THREE.Vector3().copy(fwd).multiplyScalar(0.3).addScaledVector(UP, -0.95).normalize();
   d.lerp(low, 1 - aim).normalize();
-  const right = new THREE.Vector3().crossVectors(d, UP).normalize();
   const sR = P.worldOf('Bip01_R_UpperArm', new THREE.Vector3());
   const sL = P.worldOf('Bip01_L_UpperArm', new THREE.Vector3());
+  const rightA = new THREE.Vector3().crossVectors(dAim, UP).normalize();
   const grip = new THREE.Vector3();
-  if (spec.long) grip.copy(sR).addScaledVector(d, (id === 'shotgun' ? 0.44 : 0.36) - kick * 0.05).addScaledVector(UP, -0.1).addScaledVector(right, -0.08);
+  if (spec.long) grip.copy(sR).addScaledVector(dAim, (id === 'shotgun' ? 0.44 : 0.36) - kick * 0.05).addScaledVector(UP, -0.1).addScaledVector(rightA, -0.08);
   // (a pistol out in front of the right shoulder, where the camera over it can see it)
-  else grip.copy(sR).lerp(sL, 0.3).addScaledVector(d, 0.5 * aim + 0.25 * (1 - aim) - kick * 0.04).addScaledVector(UP, -0.05 - 0.12 * (1 - aim));
+  else grip.copy(sR).lerp(sL, 0.3).addScaledVector(dAim, 0.5 - kick * 0.04).addScaledVector(UP, -0.05);
+  if (aim < 1) {
+    const gl = spec.long
+      ? new THREE.Vector3().copy(sR).addScaledVector(UP, -0.36).addScaledVector(fwd, 0.2).addScaledVector(right0, 0.04)
+      : new THREE.Vector3().copy(sR).addScaledVector(UP, -0.6).addScaledVector(fwd, 0.1).addScaledVector(right0, 0.1);
+    grip.lerp(gl, 1 - aim);
+  }
+  const right = new THREE.Vector3().crossVectors(d, UP).normalize();
   const gdir = new THREE.Vector3().copy(d).addScaledVector(UP, kick * 0.25).normalize();
   const side = new THREE.Vector3().crossVectors(UP, gdir).normalize();
   const gup = new THREE.Vector3().crossVectors(gdir, side).normalize();

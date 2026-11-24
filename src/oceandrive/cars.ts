@@ -88,7 +88,19 @@ export interface Car {
   crew: Person[];
   /** you did it (the damage that put it on fire) */
   blame: boolean;
+  /** detail level by distance: 0 near (driver shown and animated), 1 mid, 2 far (body, glass and lamps only) */
+  lod: number;
+  /** what's hidden from mid range out: the wheels, the contact shadow, the livery */
+  detail: THREE.Object3D[];
+  /** index in the list at the last grid rebuild */
+  gi: number;
+  /** the painted body (its geometry swapped for a coarse copy far off) */
+  body: THREE.Mesh | null;
 }
+
+const CELL = 12;
+const G_ = 9.81;
+const cellKey = (i: number, j: number) => (i + 32768) * 65536 + (j + 32768);
 
 const lampHead = () => new THREE.MeshStandardMaterial({ color: 0xc9ced4, emissive: 0xfff4e0, emissiveIntensity: 0.02, metalness: 0.7, roughness: 0.08, vertexColors: true });
 const lampTail = () => new THREE.MeshStandardMaterial({ color: 0x7a0804, emissive: 0xc00300, emissiveIntensity: 0.12, roughness: 0.12, vertexColors: true });
@@ -119,46 +131,22 @@ export class Cars {
   private hitCar: Car | null = null;
   private rnd: () => number;
   private readonly routes: Route[] = [];
-  private kinds = new Map<string, { body: THREE.BufferGeometry; glass: THREE.BufferGeometry; heads: THREE.BufferGeometry; tails: THREE.BufferGeometry; decal: THREE.BufferGeometry | null; wheel: THREE.BufferGeometry }>();
+  private kinds = new Map<string, { body: THREE.BufferGeometry; glass: THREE.BufferGeometry; heads: THREE.BufferGeometry; tails: THREE.BufferGeometry; decal: THREE.BufferGeometry | null; wheel: THREE.BufferGeometry; bodyLo?: THREE.BufferGeometry }>();
   private ferrari: THREE.Object3D | null = null;
   private ferrariFwd = 1;
   /** the bodies modelled in Blender (cars.glb): body / glass / heads / tails per model */
   private modelled = new Map<string, Record<string, THREE.BufferGeometry>>();
-  private glass = new THREE.MeshPhysicalMaterial({ color: 0x0c1216, metalness: 0.3, roughness: 0.02, transparent: true, opacity: 0.6, clearcoat: 1, envMapIntensity: 1.5 });
-  private cabinMat = new THREE.MeshStandardMaterial({ color: 0x232325, roughness: 0.85, name: 'od-cabin' });
-  private cabins = new Map<string, THREE.BufferGeometry>();
-  /** what you see through the glass: the tub, the dash, two seat backs with headrests, the rear bench */
-  private cabin(id: ModelId): THREE.BufferGeometry {
-    let g = this.cabins.get(id);
-    if (g) return g;
-    const m = MODELS[id];
-    const hl = m.L / 2;
-    const zF = m.cowl * hl, zR = m.roofR * hl;
-    const parts: THREE.BufferGeometry[] = [];
-    const box = (w: number, h: number, d: number, x: number, y: number, z: number) => {
-      const b = new THREE.BoxGeometry(w, h, d);
-      b.translate(x, y, z);
-      parts.push(b.index ? b.toNonIndexed() : b);
-    };
-    const inW = m.W - 0.24;
-    // the tub up to the sills
-    box(inW, 0.12, zF - zR, 0, m.beltH - 0.12, (zF + zR) / 2);
-    // the dash
-    box(inW, 0.16, 0.42, 0, m.beltH + 0.02, zF - 0.24);
-    // front seats
-    const zs = -m.L * 0.04 - 0.32;
-    for (const sx of [1, -1]) {
-      box(0.48, 0.58, 0.1, sx * m.W * 0.2, m.beltH + 0.12, zs);
-      box(0.24, 0.2, 0.09, sx * m.W * 0.2, Math.min(m.H - 0.12, m.beltH + 0.52), zs - 0.01);
-    }
-    // the rear bench
-    if (zs - zR > 0.5) box(inW - 0.05, 0.5, 0.12, 0, m.beltH + 0.08, zR + 0.3);
-    g = mergeGeometries(parts)!;
-    this.cabins.set(id, g);
-    return g;
-  }
+  private glass = new THREE.MeshPhysicalMaterial({ color: 0x0c1216, metalness: 0.3, roughness: 0.02, transparent: true, opacity: 0.74, clearcoat: 1, envMapIntensity: 1.5 });
   private wheelMat = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.6, roughness: 0.4 });
   private walkers: { x: number; z: number }[] = [];
+  /** the walkers on a grid too (they're looked for ahead of every moving car) */
+  private walkGrid = new Map<number, { x: number; z: number }[]>();
+  /** the cars on a 12 m grid, rebuilt each frame (and whenever one is added or taken away) */
+  private grid = new Map<number, Car[]>();
+  private gridPool: Car[][] = [];
+  private gridDirty = true;
+  private readonly buf: Car[] = [];
+  private readonly buf2: Car[] = [];
   private nightSet = false;
   /** the red and the blue that wash over the street from the nearest light bar (always in the scene: no recompiles) */
   private beacons = [new THREE.PointLight(0xff1a10, 0, 24, 2), new THREE.PointLight(0x2050ff, 0, 24, 2)];
@@ -294,7 +282,7 @@ export class Cars {
       halfW = 0.98;
       wheelR = 0.34;
       seat.set(0.36, 0.22, -0.25);
-      root.add(shadowPlane(4.6, 2.2));
+      root.add(Object.assign(shadowPlane(4.6, 2.2), { userData: { detail: true, noShadow: true } }));
     } else {
       const id = kind as ModelId;
       const spec = MODELS[id];
@@ -302,13 +290,14 @@ export class Cars {
       const body = new THREE.Mesh(g.body, kind === 'cyber' ? new THREE.MeshPhysicalMaterial({ color: 0xb8bcc2, metalness: 1, roughness: 0.32, vertexColors: true }) : paintMaterial(paint, this.rnd() < 0.6));
       root.add(body);
       root.add(new THREE.Mesh(g.glass, this.glass));
-      root.add(new THREE.Mesh(this.cabin(id), this.cabinMat));
       const hm = lampHead(), tm = lampTail();
       lamps.push(hm, tm);
       root.add(new THREE.Mesh(g.heads, hm), new THREE.Mesh(g.tails, tm));
       if (g.decal) {
         const dm = new THREE.MeshStandardMaterial({ map: liveryTexture(kind === 'taxi' ? 'taxi' : 'police'), transparent: true, roughness: 0.35, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false });
-        root.add(new THREE.Mesh(g.decal, dm));
+        const decal = new THREE.Mesh(g.decal, dm);
+        decal.userData.detail = true;
+        root.add(decal);
       }
       const tw = spec.W / 2 - 0.12;
       for (let w = 0; w < 4; w++) {
@@ -326,7 +315,7 @@ export class Cars {
       wb = spec.wb;
       wheelR = spec.wheelR;
       seat.set(spec.W * 0.2, spec.clear + 0.28, -spec.L * 0.04);
-      root.add(shadowPlane(spec.L * 1.02, spec.W * 1.12));
+      root.add(Object.assign(shadowPlane(spec.L * 1.02, spec.W * 1.12), { userData: { detail: true, noShadow: true } }));
     }
     this.env.prepObject(root, true, true);
     // only the body casts (glass, lamps, wheels and trim add draw calls to every cascade for nothing)
@@ -346,7 +335,10 @@ export class Cars {
       mass: spec ? spec.mass : 1480, tw: (spec ? spec.W : 1.95) / 2 - 0.15, top: kind === 'van' || kind === 'pickup' ? 40 : fast ? 72 : 52,
       acc: spec ? Math.min(13, 1.5 + spec.power / spec.mass / 22) : 12, routeMem: null, rest: 0,
       hp: 100, wreck: false, burnT: 0, police: kind === 'police' || kind === 'policeSuv', ai: null, lightbar: [], siren: false, crew: [], blame: false,
+      lod: -1, detail: [...wheels, ...root.children.filter((o) => o.userData.detail)], gi: -1,
+      body: kind === 'ferrari' ? null : (root.children[0] as THREE.Mesh),
     };
+    this.gridDirty = true;
     if (moving) this.seatDriver(car);
     this.list.push(car);
     return car;
@@ -414,6 +406,35 @@ export class Cars {
       c.vy = 0;
       c.pitch = tp;
       c.roll = tr;
+    } else if (c === this.driven) {
+      // the springs push up only while compressed; off a crest at speed, gravity has it
+      const D = this.drv;
+      const n = Math.max(1, Math.ceil(dt / 0.005)), h = dt / n;
+      for (let i = 0; i < n; i++) {
+        const pen = ty - c.y;
+        c.vy -= G_ * h;
+        if (pen > -0.02) c.vy += (Math.max(0, pen + 0.02) * 160 - c.vy * 15) * h;
+        c.y += c.vy * h;
+        if (c.y < ty - 0.15) {
+          c.y = ty - 0.15;
+          c.vy = Math.max(0, c.vy);
+        }
+      }
+      const wasAir = D.air;
+      D.air = c.y > ty + 0.12;
+      D.airT = D.air ? D.airT + dt : 0;
+      if (wasAir && !D.air && c.vy < -4) this.crash(-c.vy * 0.8, c);
+      // the body on its springs: it squats under power, dives under brakes, leans out of a corner
+      const sp = THREE.MathUtils.clamp(-c.aF * 0.011, -0.085, 0.085);
+      const sr = THREE.MathUtils.clamp(c.aL * 0.014, -0.1, 0.1);
+      if (D.air) {
+        c.pitch += (tp * 0.3 + 0.04 - c.pitch) * Math.min(1, dt * 0.8);
+      } else {
+        this.bodyV.x += ((tp + sp - c.pitch) * 120 - this.bodyV.x * 11) * dt;
+        this.bodyV.y += ((tr + sr - c.roll) * 110 - this.bodyV.y * 10) * dt;
+        c.pitch += this.bodyV.x * dt;
+        c.roll += this.bodyV.y * dt;
+      }
     } else {
       c.vy += ((ty - c.y) * 90 - c.vy * 13) * dt;
       c.y += c.vy * dt;
@@ -433,7 +454,7 @@ export class Cars {
     c.spin += (vF * dt) / c.wheelR;
     const sx = c.kind === 'ferrari' ? this.ferrariFwd : 1;
     c.wheels.forEach((w, i) => w.rotation.set(c.spin * sx, i < 2 ? c.steer * 0.7 : 0, 0, 'YXZ'));
-    if (c.driver && dt > 0) c.driver.update(dt);
+    if (c.driver && dt > 0 && c.lod <= 0) c.driver.update(dt);
   }
 
   /** road height; off every map the streets stay drivable at 0 */
@@ -551,6 +572,141 @@ export class Cars {
     this.moveBody(c, dt);
   }
 
+  /** what the driven car is doing, for the sound and the smoke: engine rpm, throttle, gear, how hard the tyres slide */
+  private bodyV = new THREE.Vector2();
+  readonly drv = { rpm: 900, load: 0, gear: 1, skid: 0, shiftT: 0, air: false, airT: 0, spin: 0 };
+
+  /**
+   * The car you drive: a body on two axles. Each axle's tyres push back against sliding sideways up to
+   * a peak (at ~10 degrees of slip) and a little less past it, so a car pushed too hard in a corner lets
+   * go and slides; the load on each axle moves with braking (onto the nose: sharp turn-in) and with power
+   * (onto the tail); the brakes and the engine share each tyre's grip with the cornering (a locked or
+   * spinning wheel barely steers): so the handbrake throws the tail out, a lot of power in a slow corner
+   * slides it, and lifting off mid-corner tucks the nose in. An automatic box with a beat of no drive at
+   * each shift; drag that sets the top speed; a sprung body that can leave the ground.
+   */
+  private stepDriven(c: Car, dt: number, thr: number, brk: number, steerIn: number, hand: boolean) {
+    const D = this.drv;
+    const s = Math.sin(c.yaw), co = Math.cos(c.yaw);
+    const vF = c.vx * s + c.vz * co;
+    const vL = c.vx * co - c.vz * s;
+    const sf = this.surface(c.x, c.z, c.y);
+    const drown = THREE.MathUtils.clamp((sf.water - 0.25) / 0.6, 0, 1);
+    const m = c.mass, G = 9.81;
+    const L = c.wb, a = L * 0.47, b = L - a, hCG = 0.5;
+    const Iz = (m * ((2 * c.halfL) ** 2 + (2 * c.halfW) ** 2)) / 12;
+    const mu = 1.02 * sf.grip * (1 - drown * 0.85);
+    const spd = Math.abs(vF);
+    // steering: less lock the faster you go; the wheel turns at a finite rate
+    const lock = 0.58 / (1 + spd * 0.06);
+    const sw = steerIn * lock;
+    c.steer += THREE.MathUtils.clamp(sw - c.steer, -dt * 3.4, dt * 3.4);
+    // the gearbox: six speeds over the car's top speed
+    const top = c.top;
+    const GEARS = [0.2, 0.36, 0.52, 0.68, 0.84, 1.02];
+    D.shiftT = Math.max(0, D.shiftT - dt);
+    const reverse = vF < -0.5 || (brk > 0 && spd < 0.6 && thr === 0);
+    if (!reverse) {
+      const rr = spd / (top * GEARS[D.gear - 1]);
+      if (rr > 0.96 && D.gear < 6) {
+        D.gear++;
+        D.shiftT = 0.14;
+      } else if (D.gear > 1 && spd / (top * GEARS[D.gear - 2]) < 0.62) D.gear--;
+    } else D.gear = 1;
+    const ratio = reverse ? Math.min(1, spd / 9) : THREE.MathUtils.clamp(spd / (top * GEARS[D.gear - 1]), 0.12, 1);
+    D.rpm += (900 + ratio * 5900 - D.rpm) * Math.min(1, dt * 14);
+    // engine force: the car's launch, then the power (top speed where it meets the drag)
+    const Fmax = m * c.acc * 1.15;
+    const P = Fmax * Math.max(9, top * 0.24);
+    const cA = Math.max(0.05, (P / top - 0.013 * m * G) / (top * top));
+    let Fdrive = 0, brakeDemand = 0;
+    if (thr > 0) {
+      if (vF < -0.5) brakeDemand = thr;
+      else if (D.shiftT <= 0) Fdrive = thr * Math.min(Fmax, P / Math.max(spd, 1)) * (1 - drown);
+    }
+    if (brk > 0) {
+      if (vF > 0.5) brakeDemand = Math.max(brakeDemand, brk);
+      else if (thr === 0) Fdrive = vF > -9 ? -brk * m * 4.2 * (1 - drown) : 0;
+    }
+    D.load = thr > 0 ? thr : brk > 0 && reverse ? brk : 0;
+    // the ground: still in contact (or flying)
+    const air = D.air;
+    // the loads on the axles: weight, moved by the last step's acceleration
+    const dN = THREE.MathUtils.clamp((m * c.aF * hCG) / L, -m * G * 0.32, m * G * 0.32);
+    const Nf = air ? 0 : Math.max(0, (m * G * b) / L - dN), Nr = air ? 0 : Math.max(0, (m * G * a) / L + dN);
+    const capF = mu * Nf, capR = mu * Nr;
+    const dir = Math.sign(vF) || 1;
+    // brakes: 62 % front; past what a tyre holds, it locks
+    const Bf = brakeDemand * m * G * 1.2 * 0.62, Br = brakeDemand * m * G * 1.2 * 0.38;
+    // the tyres' answer to sliding sideways: up to a peak at ~0.15 rad, a little less past it
+    const tyre = (al: number) => Math.sin(1.55 * Math.atan(9 * al));
+    // front: velocity at the front axle in the wheels' frame
+    const vLf = vL + c.w * a, vLr = vL - c.w * b;
+    const cs = Math.cos(c.steer), sn = Math.sin(c.steer);
+    const wLong = vF * cs + vLf * sn, wLat = -vF * sn + vLf * cs;
+    const alF = Math.atan2(wLat, Math.max(Math.abs(wLong), 1.5));
+    // (ABS: the footbrake holds each tyre just short of locking, so it still steers)
+    const FxF = -dir * Math.min(Bf, capF * 0.95) * (spd > 0.3 ? 1 : 0);
+    const limF = Math.sqrt(Math.max(0, capF * capF - FxF * FxF));
+    const FyF = THREE.MathUtils.clamp(-capF * tyre(alF), -limF, limF);
+    // rear: drive, brakes, the handbrake
+    const alR = Math.atan2(vLr, Math.max(spd, 1.5));
+    let FxR = Fdrive - dir * Math.min(Br, capR * 0.95) * (spd > 0.3 ? 1 : 0);
+    let FyR = -capR * tyre(alR) * 1.06;
+    let rearSlide = 0;
+    // (a tyre grips harder along its rolling direction than across it)
+    const capRx = capR * 1.35;
+    if (hand && spd > 0.5) {
+      // locked: it drags, and holds very little sideways
+      FxR = -dir * capR * 0.42;
+      FyR = -capR * 0.34 * Math.sign(vLr) * Math.min(1, Math.abs(vLr) / 1.2);
+      rearSlide = 1;
+    } else if (Math.abs(FxR) > capRx) {
+      // wheelspin: what's left for cornering goes
+      FxR = Math.sign(FxR) * capRx * 0.88;
+      FyR *= 0.62;
+      rearSlide = Math.min(1, (Math.abs(Fdrive) - capRx) / (capRx + 1) + 0.35);
+    } else {
+      const lim = Math.sqrt(Math.max(0, capR * capR - (FxR / 1.35) ** 2));
+      FyR = THREE.MathUtils.clamp(FyR, -lim, lim);
+    }
+    // to the car's frame
+    const fwdF = FxF * cs - FyF * sn, latF = FxF * sn + FyF * cs;
+    // drag: the air, rolling, the surface (sand, grass), the sea
+    const drag = cA * vF * Math.abs(vF) + (0.013 * m * G + m * sf.roll) * Math.sign(vF) * Math.min(1, spd) + m * vF * drown * 2.2;
+    let Fx = fwdF + FxR - drag;
+    const Fy = latF + FyR - m * vL * drown * 2.2;
+    const Tz = a * latF - b * FyR;
+    // at a standstill with nothing pressed, it stays put (the drags don't push it back and forth)
+    if (thr === 0 && brk === 0 && spd < 0.25 && Math.abs(vL) < 0.25) {
+      c.vx = c.vz = 0;
+      c.w *= 0.5;
+      Fx = 0;
+    } else {
+      const ax = Fx / m, ay = Fy / m;
+      c.vx += (s * ax + co * ay) * dt;
+      c.vz += (co * ax - s * ay) * dt;
+      // (a little help catching a slide: the yaw is damped, less so with the handbrake on)
+      c.w += (Tz / Iz - c.w * (hand ? 0.3 : 1.1)) * dt;
+      // the low-speed end: tyres don't slide at walking pace (keeps it from jittering)
+      if (!air && spd < 3 && !hand) {
+        const wT = (vF * Math.tan(c.steer)) / L;
+        c.w += (wT - c.w) * Math.min(1, dt * 8 * (1 - spd / 3));
+      }
+      if (air) c.w *= 1 - Math.min(1, dt * 0.3);
+    }
+    c.aF = THREE.MathUtils.clamp(Fx / m, -14, 14);
+    c.aL = THREE.MathUtils.clamp(Fy / m, -14, 14);
+    c.yaw += c.w * dt;
+    c.v = c.vx * Math.sin(c.yaw) + c.vz * Math.cos(c.yaw);
+    // how hard the tyres are sliding (the squeal and the smoke)
+    const slipF = Math.abs(alF) > 0.2 ? (Math.abs(alF) - 0.2) * 2 : 0, slipR = Math.abs(alR) > 0.17 ? (Math.abs(alR) - 0.17) * 2.4 : 0;
+    const locked = brakeDemand > 0.7 && spd > 6 ? 0.3 : 0;
+    D.skid = air || spd < 1.5 ? 0 : Math.min(1, Math.max(slipF, slipR, rearSlide * (spd > 2 ? 1 : 0.5), locked) * (sf.grip > 0.8 ? 1 : 0.4));
+    D.spin = Fdrive > 0 && Math.abs(Fdrive) > capRx ? Math.min(25, D.spin + dt * 60) : D.spin * (1 - Math.min(1, dt * 6));
+    this.moveBody(c, dt);
+  }
+
   /** a car nobody drives: parked (handbrake on), or knocked loose (its driver brakes) */
   private coast(c: Car, dt: number) {
     const sp = Math.hypot(c.vx, c.vz);
@@ -569,10 +725,14 @@ export class Cars {
   /** car against car: separate them by their masses and trade momentum (with a twist from where they touched) */
   private collide() {
     const L = this.list;
+    this.rebuildGrid();
     for (let i = 0; i < L.length; i++) {
       const a = L[i];
-      for (let j = i + 1; j < L.length; j++) {
-        const b = L[j];
+      const sa0 = Math.hypot(a.vx, a.vz) + Math.abs(a.w);
+      for (const b of this.around(a.x, a.z, 9, this.buf2)) {
+        if (b.gi <= a.gi) continue;
+        // (two parked cars never need sorting out)
+        if (sa0 < 0.01 && Math.hypot(b.vx, b.vz) + Math.abs(b.w) < 0.01) continue;
         if (a.route && b.route) continue; // traffic keeps its own distance
         if (a.ai?.kin || b.ai?.kin) continue; // a unit on its route keeps its own distance too
         const dx0 = a.x - b.x, dz0 = a.z - b.z;
@@ -740,7 +900,7 @@ export class Cars {
 
   /** is a point inside any car's footprint */
   blocks(x: number, z: number): boolean {
-    for (const c of this.list) {
+    for (const c of this.around(x, z, 5)) {
       const dx = x - c.x, dz = z - c.z;
       if (dx * dx + dz * dz > 16) continue;
       const s = Math.sin(c.yaw), co = Math.cos(c.yaw);
@@ -752,7 +912,7 @@ export class Cars {
 
   /** a moving car hitting a person at (x, z): its velocity (for the knock), or null */
   strike(x: number, z: number, r = 0.35): { vx: number; vz: number; car: Car } | null {
-    for (const c of this.list) {
+    for (const c of this.around(x, z, 5 + r)) {
       const sp = Math.hypot(c.vx, c.vz);
       if (sp < 1.6) continue;
       const dx = x - c.x, dz = z - c.z;
@@ -766,7 +926,7 @@ export class Cars {
 
   /** if a point (radius r) is inside a car's footprint: the shortest way out */
   pushOut(x: number, z: number, r: number): { x: number; z: number } | null {
-    for (const c of this.list) {
+    for (const c of this.around(x, z, 5)) {
       const dx = x - c.x, dz = z - c.z;
       if (dx * dx + dz * dz > 16) continue;
       const s = Math.sin(c.yaw), co = Math.cos(c.yaw);
@@ -782,7 +942,7 @@ export class Cars {
 
   nearest(p: THREE.Vector3, r: number): Car | null {
     let best: Car | null = null, bd = Infinity;
-    for (const c of this.list) {
+    for (const c of this.around(p.x, p.z, r + 4)) {
       const d = Math.hypot(c.x - p.x, c.z - p.z) - c.halfW;
       if (d < r && d < bd) {
         bd = d;
@@ -798,6 +958,8 @@ export class Cars {
 
   enter(c: Car, camera: THREE.Camera) {
     if (c.wreck) return false;
+    Object.assign(this.drv, { rpm: 900, load: 0, gear: 1, skid: 0, shiftT: 0, air: false, airT: 0, spin: 0 });
+    this.bodyV.set(0, 0);
     if (c.driver) {
       const p = c.driver;
       c.driver = null;
@@ -835,6 +997,7 @@ export class Cars {
     if (c.route) this.knockLoose(c);
     const s = Math.sin(c.yaw), co = Math.cos(c.yaw);
     this.scene.attach(p.root);
+    p.root.visible = true;
     return { p, x: c.x + co * (c.halfW + 0.6), z: c.z - s * (c.halfW + 0.6), yaw: c.yaw - Math.PI / 2 };
   }
 
@@ -843,6 +1006,7 @@ export class Cars {
     if (c.wreck || c.driver || c === this.driven) return false;
     c.driver = p;
     c.root.add(p.root);
+    p.root.visible = c.police || c.lod <= 0;
     p.root.position.copy(c.seat).add(new THREE.Vector3(0, -0.42, 0));
     p.root.rotation.set(0, 0, 0);
     p.play('sit', { fade: 0.2 });
@@ -893,6 +1057,7 @@ export class Cars {
     c.root.removeFromParent();
     const i = this.list.indexOf(c);
     if (i >= 0) this.list.splice(i, 1);
+    this.gridDirty = true;
   }
 
   /**
@@ -980,6 +1145,17 @@ export class Cars {
     return { x, z, yaw: c.yaw };
   }
 
+  /** where the driven car's rear tyres touch the road (for the smoke) */
+  rearContacts(a: THREE.Vector3, b: THREE.Vector3): boolean {
+    const c = this.driven;
+    if (!c || c.wheels.length < 4) return false;
+    c.wheels[2].getWorldPosition(a);
+    c.wheels[3].getWorldPosition(b);
+    a.y -= c.wheelR * 0.8;
+    b.y -= c.wheelR * 0.8;
+    return true;
+  }
+
   playerPos(): THREE.Vector3 {
     const c = this.driven;
     return c ? this.tmp.set(c.x, c.y, c.z) : this.tmp.set(0, 0, 0);
@@ -1033,6 +1209,69 @@ export class Cars {
   /** people on foot, for the traffic to stop for */
   setWalkers(w: { x: number; z: number }[]) {
     this.walkers = w;
+    for (const a of this.walkGrid.values()) a.length = 0;
+    for (const p of w) {
+      const k = cellKey(Math.floor(p.x / CELL), Math.floor(p.z / CELL));
+      let a = this.walkGrid.get(k);
+      if (!a) this.walkGrid.set(k, (a = []));
+      a.push(p);
+    }
+  }
+
+  private rebuildGrid() {
+    for (const a of this.grid.values()) {
+      a.length = 0;
+      this.gridPool.push(a);
+    }
+    this.grid.clear();
+    for (let i = 0; i < this.list.length; i++) {
+      const c = this.list[i];
+      c.gi = i;
+      const k = cellKey(Math.floor(c.x / CELL), Math.floor(c.z / CELL));
+      let a = this.grid.get(k);
+      if (!a) this.grid.set(k, (a = this.gridPool.pop() ?? []));
+      a.push(c);
+    }
+    this.gridDirty = false;
+  }
+
+  /** the cars whose centres are in the grid cells within r of (x, z) (a superset of those within r) */
+  around(x: number, z: number, r: number, out: Car[] = this.buf): Car[] {
+    if (this.gridDirty) this.rebuildGrid();
+    out.length = 0;
+    const i0 = Math.floor((x - r) / CELL), i1 = Math.floor((x + r) / CELL), j0 = Math.floor((z - r) / CELL), j1 = Math.floor((z + r) / CELL);
+    for (let i = i0; i <= i1; i++)
+      for (let j = j0; j <= j1; j++) {
+        const a = this.grid.get(cellKey(i, j));
+        if (a) for (const c of a) out.push(c);
+      }
+    return out;
+  }
+
+  private walkersAround(x: number, z: number, r: number, fn: (p: { x: number; z: number }) => void) {
+    const i0 = Math.floor((x - r) / CELL), i1 = Math.floor((x + r) / CELL), j0 = Math.floor((z - r) / CELL), j1 = Math.floor((z + r) / CELL);
+    for (let i = i0; i <= i1; i++)
+      for (let j = j0; j <= j1; j++) {
+        const a = this.walkGrid.get(cellKey(i, j));
+        if (a) for (const p of a) fn(p);
+      }
+  }
+
+  /** near: the driver shown and moving; mid: no driver; far: no wheels, contact shadow or livery either */
+  private setLod(c: Car, d2: number) {
+    const lod = d2 < 70 * 70 || c === this.driven ? 0 : d2 < 170 * 170 ? 1 : 2;
+    if (lod === c.lod) return;
+    c.lod = lod;
+    for (const o of c.detail) o.visible = lod < 2;
+    if (c.body && MODELS[c.kind as ModelId]) {
+      const k = this.geo(c.kind as ModelId);
+      if (lod === 2 && !k.bodyLo) k.bodyLo = simplify(k.body.clone(), 0.18);
+      c.body.geometry = lod === 2 ? k.bodyLo! : k.body;
+    }
+    if (!c.police) {
+      if (c.driver) c.driver.root.visible = lod === 0;
+      for (const p of c.crew) p.root.visible = lod === 0;
+    }
   }
 
   drive(dt: number, inp: Input, camera: THREE.PerspectiveCamera) {
@@ -1051,9 +1290,10 @@ export class Cars {
     const [, tl] = c.lamps;
     if (tl) tl.emissiveIntensity = (this.lightsOn ? 0.9 : 0.12) + (brk > 0 && sF > 0.3 ? (this.lightsOn ? 1.6 : 2.5) : 0);
     // physics in small steps (stable at any frame rate)
-    const n = Math.max(1, Math.ceil(dt / 0.008));
-    for (let i = 0; i < n; i++) this.stepBody(c, dt / n, thr, brk, -mv.x, hand);
+    const n = Math.max(1, Math.ceil(dt / 0.005));
+    for (let i = 0; i < n; i++) this.stepDriven(c, dt / n, thr, brk, -mv.x, hand);
     this.place(c, dt);
+    c.spin += this.drv.spin * dt;
     this.camYawOff = THREE.MathUtils.clamp(this.camYawOff - inp.mdx * 0.003, -2.5, 2.5);
     if (inp.mdx === 0) this.camYawOff *= 1 - Math.min(1, dt * 0.8);
     const sp = Math.hypot(c.vx, c.vz);
@@ -1070,6 +1310,12 @@ export class Cars {
     camera.position.copy(this.camPos);
     this.camLook.set(c.x + Math.sin(c.yaw) * 2.5, c.y + 1.0, c.z + Math.cos(c.yaw) * 2.5);
     camera.lookAt(this.camLook);
+    // a wider lens with speed
+    const fov = 55 + Math.min(16, sp * 0.3);
+    if (Math.abs(camera.fov - fov) > 0.05) {
+      camera.fov += (fov - camera.fov) * Math.min(1, dt * 3);
+      camera.updateProjectionMatrix();
+    }
   }
 
   private flash = 0;
@@ -1093,7 +1339,7 @@ export class Cars {
         const p = R.pts[i];
         const dd = (p.x - eye.x) ** 2 + (p.y - eye.z) ** 2;
         if (dd < 140 * 140 || dd > 300 * 300) continue;
-        if (this.list.some((o) => o !== c && (o.x - p.x) ** 2 + (o.z - p.y) ** 2 < 14 * 14)) continue;
+        if (this.around(p.x, p.y, 14).some((o) => o !== c && (o.x - p.x) ** 2 + (o.z - p.y) ** 2 < 14 * 14)) continue;
         c.route = R;
         c.s = i;
         c.x = p.x;
@@ -1111,6 +1357,7 @@ export class Cars {
   }
 
   update(dt: number, walker: THREE.Vector3 | null, eye: THREE.Vector3) {
+    this.rebuildGrid();
     this.flash += dt;
     this.recycleT += dt;
     if (this.recycleT > 0.4) {
@@ -1143,8 +1390,10 @@ export class Cars {
       } else r.intensity = b.intensity = 0;
     }
     for (const c of this.list) {
-      // a car half a mile off is a speck: don't draw it
-      c.root.visible = (c.x - eye.x) ** 2 + (c.z - eye.z) ** 2 < 650 * 650 || c === this.driven;
+      // a car a quarter mile off is a speck in the haze: don't draw it
+      const d2 = (c.x - eye.x) ** 2 + (c.z - eye.z) ** 2;
+      c.root.visible = d2 < 430 * 430 || c === this.driven;
+      this.setLod(c, d2);
       // burning: it goes up after a few seconds
       if (c.burnT > 0 && !c.wreck) {
         c.burnT += dt;
@@ -1189,9 +1438,9 @@ export class Cars {
         const along = dx * s + dz * co, lat = Math.abs(dx * co - dz * s);
         if (along > 0 && along < 30 && lat < 1.3 + r * 0.4) gap = Math.min(gap, along - c.halfL - r);
       };
-      for (const o of this.list) if (o !== c) look(o.x, o.z, o.halfL);
+      for (const o of this.around(c.x + s * 15, c.z + co * 15, 18, this.buf2)) if (o !== c) look(o.x, o.z, o.halfL);
       if (walker) look(walker.x, walker.z, 0.6);
-      for (const w of this.walkers) look(w.x, w.z, 0.5);
+      this.walkersAround(c.x + s * 15, c.z + co * 15, 17, (w) => look(w.x, w.z, 0.5));
       // red lights
       if (this.stopFor) {
         const d = this.stopFor(c.x, c.z, c.yaw);

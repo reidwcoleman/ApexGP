@@ -1,4 +1,21 @@
 import type { DressData } from './dressing.ts';
+import type { RoadGraph } from './roadgraph.ts';
+
+// every street of the county as one path (built once)
+let roadPath: Path2D | null = null;
+let roadOf: RoadGraph | null = null;
+function roads(gr: RoadGraph): Path2D {
+  if (roadPath && roadOf === gr) return roadPath;
+  const p = new Path2D();
+  for (const e of gr.edges) {
+    const q = e.pts;
+    if (q.length < 4) continue;
+    p.moveTo(q[0], q[1]);
+    for (let i = 2; i < q.length; i += 2) p.lineTo(q[i], q[i + 1]);
+  }
+  roadOf = gr;
+  return (roadPath = p);
+}
 
 /**
  * The map in the corner: the street grid (from the same data the city was built from), the park,
@@ -12,6 +29,7 @@ export function drawMap(
   blips: [number, number, 'car' | 'cop' | 'heli'][],
   search: { x: number; z: number; r: number } | null,
   t: number,
+  graph: RoadGraph | null = null,
 ) {
   const g = cv.getContext('2d')!;
   const W = cv.width, H = cv.height;
@@ -37,6 +55,13 @@ export function drawMap(
   g.fillRect(data.od[0], -cy1, data.od[1] - data.od[0], cy1 - cy0 + 200);
   for (const [a, b] of data.xs) g.fillRect(a, -cy1, b - a, cy1 - cy0);
   for (const [a, b] of data.ys) g.fillRect(cx0, -b, cx1 - cx0, b - a);
+  if (graph) {
+    g.strokeStyle = '#c9ccd0';
+    g.lineWidth = 9;
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    g.stroke(roads(graph));
+  }
   // the search
   if (search) {
     g.beginPath();

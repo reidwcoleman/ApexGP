@@ -382,14 +382,61 @@ export class Dressing {
     const scoot = new THREE.MeshStandardMaterial({ color: 0x1d1f22, roughness: 0.5, metalness: 0.4 });
     const scootAccent = new THREE.MeshStandardMaterial({ color: 0x27c4a8, roughness: 0.4 });
     const r = this.rnd;
+    // a pay station: a dark green pillar, its face printed (the P, the screen bezel, keypad, card slot, coin slot, instructions)
+    const payFace = canvasTex(128, 512, (g) => {
+      g.fillStyle = '#1d3a2c';
+      g.fillRect(0, 0, 128, 512);
+      g.fillStyle = '#e9ecef';
+      g.fillRect(14, 14, 100, 54);
+      g.fillStyle = '#1a56b0';
+      g.font = '900 48px Arial';
+      g.textAlign = 'center';
+      g.fillText('P', 64, 60);
+      g.fillStyle = '#e9ecef';
+      g.font = '700 13px Arial';
+      g.fillText('PAY HERE', 64, 92);
+      g.fillStyle = '#0b0d0f';
+      g.fillRect(14, 104, 100, 78);
+      g.fillStyle = '#123a4e';
+      g.fillRect(22, 112, 84, 58);
+      for (let r_ = 0; r_ < 4; r_++) for (let c = 0; c < 3; c++) {
+        g.fillStyle = '#b8bcc0';
+        g.fillRect(30 + c * 24, 196 + r_ * 22, 18, 16);
+      }
+      g.fillStyle = '#0b0d0f';
+      g.fillRect(36, 294, 56, 8);
+      g.fillRect(56, 314, 16, 22);
+      g.fillStyle = '#c9a23a';
+      g.fillRect(14, 350, 100, 3);
+      g.fillStyle = 'rgba(233,236,239,.75)';
+      g.font = '600 10px Arial';
+      for (let k = 0; k < 6; k++) g.fillRect(20, 364 + k * 12, 60 + ((k * 37) % 28), 4);
+      g.fillStyle = 'rgba(0,0,0,.35)';
+      g.fillRect(0, 480, 128, 32);
+    });
+    const payBody = new THREE.MeshStandardMaterial({ color: 0x1d3a2c, metalness: 0.45, roughness: 0.42 });
+    const payFront = new THREE.MeshStandardMaterial({ map: payFace, metalness: 0.3, roughness: 0.38 });
+    const payMats: THREE.Matrix4[] = [];
     const payStation = (x: number, z: number, yaw: number) => {
       const y = this.gh(x, z);
-      pile.add(dark, box, at(new THREE.Vector3(x, y + 0.7, z), yaw, 0.32, 1.4, 0.24));
-      pile.add(screen, box, at(new THREE.Vector3(x, y + 1.18, z).add(new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)).multiplyScalar(0.125)), yaw, 0.22, 0.16, 0.01));
+      payMats.push(at(new THREE.Vector3(x, y + 0.72, z), yaw, 0.32, 1.36, 0.24));
+      // the hood over the face and the plinth
+      pile.add(payBody, box, at(new THREE.Vector3(x, y + 1.43, z).add(new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)).multiplyScalar(0.02)), yaw, 0.36, 0.07, 0.3));
+      pile.add(dark, box, at(new THREE.Vector3(x, y + 0.03, z), yaw, 0.38, 0.06, 0.3));
+      pile.add(screen, box, at(new THREE.Vector3(x, y + 1.08, z).add(new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)).multiplyScalar(0.121)), yaw, 0.17, 0.12, 0.004));
+    };
+    const flushPay = () => {
+      const im = new THREE.InstancedMesh(box, [payBody, payBody, payBody, payBody, payFront, payBody], payMats.length);
+      payMats.forEach((m, i) => im.setMatrixAt(i, m));
+      im.castShadow = im.receiveShadow = true;
+      im.name = 'paystations';
+      this.root.add(im);
+      this.env.prepObject(im, true, true);
     };
     // Ocean Drive's west sidewalk, and the side streets
     for (let y = -300; y < 400; y += 27) payStation(-7.45, -y, Math.PI / 2);
     for (const [y0, y1] of this.data.ys) for (let x = -250; x < -14; x += 34) if (!this.nearRoad(x)) for (const yy of [y0 - 0.9, y1 + 0.9]) payStation(x, -yy, yy < y0 ? 0 : Math.PI);
+    flushPay();
     // newspaper boxes at corners
     for (const [y0, y1] of this.data.ys) {
       if (Math.abs(y0) > 240) continue;
@@ -715,9 +762,9 @@ export class Dressing {
     const towelCols = [['#e8457a', '#ffffff'], ['#1f6fb2', '#ffd23f'], ['#2f8f5b', '#ffffff'], ['#f08a24', '#2a2a2a'], ['#7a3fa0', '#7fe0d0'], ['#c62f3b', '#ffffff']];
     // the sports bodies are the nearest thing to beachwear in the loaded set
     const bodies = ['Sports_Female_02', 'Sports_Male_01'];
-    for (let i = 0; i < 34; i++) {
+    for (let i = 0; i < 60; i++) {
       // in clusters by the umbrellas, thinning out toward the ends of the beach
-      const x = 160 + r() * 62, z = (r() - 0.5) * (i < 20 ? 170 : 560);
+      const x = 160 + r() * 62, z = (r() - 0.5) * (i < 36 ? 190 : 560);
       const y = this.gh(x, z, 0.5);
       const yaw = r() * Math.PI * 2;
       const [a, b] = towelCols[i % towelCols.length];
@@ -741,15 +788,16 @@ export class Dressing {
         const canopy = new THREE.Mesh(new THREE.ConeGeometry(1.05, 0.38, 10, 1, true), new THREE.MeshStandardMaterial({ color: cols[Math.floor(r() * cols.length)], roughness: 0.85, side: THREE.DoubleSide }));
         canopy.position.y = 2.0;
         u.add(pole, canopy);
-        u.position.set(x + Math.cos(yaw) * 0.9, y - 0.15, z - Math.sin(yaw) * 0.9);
-        u.rotation.set((r() - 0.5) * 0.5, r() * 6.28, (r() - 0.5) * 0.5);
+        u.position.set(x + Math.cos(yaw) * 1.35, y - 0.15, z - Math.sin(yaw) * 1.35);
+        u.rotation.set((r() - 0.5) * 0.3, r() * 6.28, (r() - 0.5) * 0.3);
         u.traverse((o) => ((o as THREE.Mesh).isMesh ? ((o as THREE.Mesh).castShadow = true) : 0));
         this.root.add(u);
         this.env.prepObject(u, true, true);
       }
       if (r() < 0.5) {
-        const bag = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.32, 0.3), new THREE.MeshStandardMaterial({ color: r() < 0.5 ? 0x2a6fd6 : 0xe94b3c, roughness: 0.6 }));
-        bag.position.set(x + Math.sin(yaw + 1.3) * 0.9, y + 0.12, z + Math.cos(yaw + 1.3) * 0.9);
+        const bag = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.28, 0.26), new THREE.MeshStandardMaterial({ color: r() < 0.5 ? 0x2a6fd6 : 0xe94b3c, roughness: 0.6 }));
+        // beside the towel's head end, clear of the arms
+        bag.position.set(x - Math.cos(yaw) * 1.25 + Math.sin(yaw) * 0.7, y + 0.12, z + Math.sin(yaw) * 1.25 + Math.cos(yaw) * 0.7);
         bag.rotation.y = r() * 3;
         bag.castShadow = true;
         this.root.add(bag);
@@ -785,17 +833,37 @@ export class Dressing {
   }
 
   /** how far ahead a car (at x, z heading yaw) must stop for a red, or Infinity */
+  private stopGrid: Map<number, typeof this.stops> | null = null;
+  private stopN = -1;
   stopFor(x: number, z: number, yaw: number): number {
     let best = Infinity;
     const fx = Math.sin(yaw), fz = Math.cos(yaw);
-    for (const s of this.stops) {
-      if (Math.cos(s.yaw - yaw) < 0.7) continue;
-      const dx = s.x - x, dz = s.z - z;
-      const along = dx * fx + dz * fz, lat = Math.abs(dx * fz - dz * fx);
-      if (along < 0.5 || along > 40 || lat > 8) continue;
-      const st = this.signalState(s.phase);
-      if (st === 'r' || (st === 'y' && along > 9)) best = Math.min(best, along);
+    // the stop lines on a 32 m grid (rebuilt when a tile brings more)
+    if (!this.stopGrid || this.stopN !== this.stops.length) {
+      this.stopGrid = new Map();
+      this.stopN = this.stops.length;
+      for (const s of this.stops) {
+        const k = (Math.floor(s.x / 32) + 4096) * 8192 + Math.floor(s.z / 32) + 4096;
+        let a = this.stopGrid.get(k);
+        if (!a) this.stopGrid.set(k, (a = []));
+        a.push(s);
+      }
     }
+    const cx = x + fx * 20, cz = z + fz * 20;
+    const i0 = Math.floor((cx - 28) / 32), i1 = Math.floor((cx + 28) / 32), j0 = Math.floor((cz - 28) / 32), j1 = Math.floor((cz + 28) / 32);
+    for (let i = i0; i <= i1; i++)
+      for (let j = j0; j <= j1; j++) {
+        const cell = this.stopGrid.get((i + 4096) * 8192 + j + 4096);
+        if (!cell) continue;
+        for (const s of cell) {
+          if (Math.cos(s.yaw - yaw) < 0.7) continue;
+          const dx = s.x - x, dz = s.z - z;
+          const along = dx * fx + dz * fz, lat = Math.abs(dx * fz - dz * fx);
+          if (along < 0.5 || along > 40 || lat > 8) continue;
+          const st = this.signalState(s.phase);
+          if (st === 'r' || (st === 'y' && along > 9)) best = Math.min(best, along);
+        }
+      }
     return best;
   }
 }

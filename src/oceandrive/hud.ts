@@ -65,6 +65,15 @@ export class Hud {
       #odhud .big { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; background: rgba(0,0,0,0); transition: background 1.2s, opacity .8s; opacity: 0; }
       #odhud .big.on { opacity: 1; background: rgba(0,0,0,.45); }
       #odhud .big b { font-size: 92px; font-weight: 800; font-style: italic; letter-spacing: .04em; text-transform: uppercase; text-shadow: 0 4px 24px rgba(0,0,0,.6); }
+      #odhud .wheel { position: absolute; left: 50%; top: 50%; width: 0; height: 0; opacity: 0; transition: opacity .12s; }
+      #odhud .wheel.on { opacity: 1; }
+      #odhud .wheel::before { content: ""; position: absolute; left: -190px; top: -190px; width: 380px; height: 380px; border-radius: 50%; background: radial-gradient(circle, rgba(6,8,12,.25) 28%, rgba(6,8,12,.62) 30%, rgba(6,8,12,.62) 99%, rgba(255,255,255,.25) 100%); }
+      #odhud .wheel .s { position: absolute; width: 132px; height: 84px; margin: -42px 0 0 -66px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 12px; transition: background .1s, transform .1s; }
+      #odhud .wheel .s b { font-size: 21px; font-weight: 800; font-style: italic; letter-spacing: .04em; text-transform: uppercase; }
+      #odhud .wheel .s span { font-size: 15px; font-weight: 600; opacity: .75; letter-spacing: .08em; }
+      #odhud .wheel .s.sel { background: rgba(255,255,255,.92); color: #0b0d12; transform: scale(1.08); }
+      #odhud .wheel .s:nth-child(1) { left: 0; top: -118px; } #odhud .wheel .s:nth-child(2) { left: 118px; top: 0; }
+      #odhud .wheel .s:nth-child(3) { left: 0; top: 118px; } #odhud .wheel .s:nth-child(4) { left: -118px; top: 0; }
       #odhud .big span { font-size: 20px; font-weight: 600; letter-spacing: .3em; text-transform: uppercase; opacity: .85; }
     `;
     document.head.appendChild(css);
@@ -74,7 +83,7 @@ export class Hud {
     el.innerHTML = `
       <div class="hurt"></div>
       <div class="loc"><b>Ocean Drive</b><span>7th – 8th Street · Miami Beach</span></div>
-      <div class="help"><kbd>W A S D</kbd> move &nbsp; <kbd>Shift</kbd> sprint &nbsp; <kbd>C</kbd> stroll &nbsp; <kbd>Space</kbd> jump &nbsp; <kbd>F</kbd> car (pulls a driver out)<br><kbd>1</kbd> fists <kbd>2</kbd> pistol <kbd>3</kbd> shotgun <kbd>4</kbd> carbine &nbsp; <kbd>RMB</kbd> aim &nbsp; <kbd>LMB</kbd> fire / punch &nbsp; <kbd>R</kbd> reload<br><kbd>T</kbd> time of day &nbsp; <kbd>Y</kbd> weather &nbsp; <kbd>H</kbd> hide HUD &nbsp; (click first)</div>
+      <div class="help"><kbd>W A S D</kbd> move &nbsp; <kbd>Shift</kbd> sprint &nbsp; <kbd>C</kbd> stroll &nbsp; <kbd>Space</kbd> jump &nbsp; <kbd>F</kbd> car (pulls a driver out)<br><kbd>W S</kbd> drive / brake, reverse &nbsp; <kbd>Space</kbd> handbrake &nbsp; <kbd>Tab</kbd> hold: weapon wheel &nbsp; <kbd>1</kbd>-<kbd>4</kbd> / wheel: weapons &nbsp; <kbd>RMB</kbd> aim &nbsp; <kbd>LMB</kbd> fire / punch &nbsp; <kbd>R</kbd> reload<br><kbd>T</kbd> time of day &nbsp; <kbd>Y</kbd> weather &nbsp; <kbd>H</kbd> hide HUD &nbsp; (click first)</div>
       <div class="prompt"><kbd style="border:1px solid #fff;border-radius:4px;padding:0 7px;margin-right:8px">F</kbd><span>Get in</span></div>
       <div class="speed">0<small>KM/H</small></div>
       <div class="sky"><b></b><span></span></div>
@@ -82,6 +91,7 @@ export class Hud {
       <div class="gun"><b></b><span></span><em></em></div>
       <div class="mapw"><canvas class="map" width="420" height="300"></canvas><div class="bars"><div class="h"><i></i></div><div class="a"><i></i></div></div></div>
       <div class="cross"></div>
+      <div class="wheel"><div class="s"><b>Fists</b><span>&nbsp;</span></div><div class="s"><b>Pistol</b><span></span></div><div class="s"><b>Shotgun</b><span></span></div><div class="s"><b>Carbine</b><span></span></div></div>
       <div class="big"><b></b><span></span></div>
       <div class="credit">Map © OpenStreetMap contributors · scans: Poly Haven (CC0) · people: Microsoft Rocketbox · car: Ferrari 458 by vicent091036 (CC BY 4.0) · skies: Poly Haven (CC0)</div>`;
     parent.appendChild(el);
@@ -126,6 +136,17 @@ export class Hud {
   private crossT = 0;
   hitMarker() {
     this.crossT = 0.18;
+  }
+
+  /** the weapon wheel: open or not, the slot pointed at, each gun's rounds */
+  weaponWheel(open: boolean, sel: number, ammo: string[]) {
+    const w = this.el.querySelector('.wheel') as HTMLElement;
+    w.classList.toggle('on', open);
+    if (!open) return;
+    w.querySelectorAll('.s').forEach((s, i) => {
+      s.classList.toggle('sel', i === sel);
+      if (i > 0) s.querySelector('span')!.textContent = ammo[i - 1];
+    });
   }
 
   /** the big word in the middle (null clears it) */

@@ -123,7 +123,12 @@ export interface You {
   hurt: (dmg: number, dir: THREE.Vector3) => void;
 }
 
+const SPV = new THREE.Vector3();
+const SPH = new THREE.Sphere(SPV, 1);
+
 export class Peds {
+  /** the camera's view, for skipping the people outside it (set each frame) */
+  frustum: THREE.Frustum | null = null;
   readonly list: Ped[] = [];
   /** the cars: what blocks a sidewalk, and what's about to hit someone */
   cars: { strike: (x: number, z: number, r?: number) => { vx: number; vz: number; car: Car } | null; blocks: (x: number, z: number) => boolean; reseat: (c: Car, p: Person) => boolean } | null = null;
@@ -268,13 +273,23 @@ export class Peds {
   private animate(d: Ped, dt: number, eye: THREE.Vector3) {
     const dd = (eye.x - d.x) ** 2 + (eye.z - d.z) ** 2;
     // shadows only near the camera; past 170 m nobody is visible enough to draw
-    const lod = dd < 45 * 45 ? 0 : dd < 170 * 170 ? 1 : 2;
+    const lod = dd < 45 * 45 ? 0 : dd < 140 * 140 ? 1 : 2;
     if (lod !== d.lod) {
       d.lod = lod;
-      d.p.root.visible = lod < 2;
-      d.p.root.traverse((o) => ((o as THREE.Mesh).isMesh ? (o.castShadow = lod === 0) : 0));
+      d.p.root.traverse((o) => {
+        if (!(o as THREE.Mesh).isMesh) return;
+        o.castShadow = lod === 0;
+        // the soft pass over the hair's ends: only close up
+        if (o.name === 'person-hair-soft') o.visible = lod === 0;
+      });
     }
-    if (lod === 2) return false;
+    // out of the camera's view (and not near enough to throw a shadow into it): not drawn, not posed
+    const seen = lod < 2 && (lod === 0 && dd < 20 * 20 || !this.frustum || this.frustum.intersectsSphere(SPH.set(SPV.set(d.x, d.y + 0.9, d.z), 1.3)));
+    d.p.root.visible = seen;
+    if (!seen) {
+      d.acc += dt;
+      return false;
+    }
     if (dd < 60 * 60) {
       d.p.update(dt + d.acc);
       d.acc = 0;

@@ -166,7 +166,9 @@ class Shape:
             if k == 'van' and ym < self.cowl - 1.1:
                 return 'paint'
             return 'glass'
-        # behind the roof: the backlight and the C-pillar
+        # behind the roof: the backlight and the C-pillar (a van's back is solid doors)
+        if k == 'van':
+            return 'paint'
         if top:
             return 'glass'
         if k in ('suv', 'gwagon', 'policeSuv', 'van'):
@@ -215,6 +217,10 @@ def cage(sh):
                 except ValueError:
                     continue
                 m = 'paint'
+                if sgn < 0 and sh.kind == 'van':
+                    # a van's back is its two doors: plain, with a narrow lamp low on each corner
+                    f.material_index = MI[m]
+                    continue
                 if which == 'outer':
                     if k in (0, 1, 14, 15):
                         m = 'dark'
@@ -236,7 +242,7 @@ def cage(sh):
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     # creases: the shoulder (ring point 4 = the belt), the sill (2), the roof edge (6) along the car
     bx = sh.m['box']
-    lines = {2: 0.55 + 0.4 * bx, 4: 0.85 + 0.15 * bx, 6: 0.55 + 0.43 * bx, 3: 0.6 * bx * bx}
+    lines = {2: 0.75 + 0.2 * bx, 4: 0.95, 6: 0.78 + 0.2 * bx, 3: 0.6 * bx * bx}
     for i in range(len(rings) - 1):
         for k, c in lines.items():
             for kk in (k, n - k):
@@ -246,14 +252,15 @@ def cage(sh):
     # and every edge between two different materials, a little (crisp lamp, glass and grille outlines)
     for e in bm.edges:
         if len(e.link_faces) == 2 and e.link_faces[0].material_index != e.link_faces[1].material_index:
-            e[crease] = max(e[crease], 0.7)
-    # boxy bodies: the nose and tail edges sharp too
-    if bx > 0.5:
-        for ring in (rings[0], rings[-1]):
-            for k in range(n):
-                e = bm.edges.get((ring[k], ring[(k + 1) % n]))
-                if e:
-                    e[crease] = max(e[crease], 0.5 + 0.45 * bx)
+            mi = {e.link_faces[0].material_index, e.link_faces[1].material_index}
+            # lamp outlines hard (lenses with corners, not eyes), the rest a little
+            e[crease] = max(e[crease], 1.0 if mi & {MI['heads'], MI['tails']} else 0.8)
+    # the nose and tail edges: defined on every body, sharp on the boxy ones
+    for ring in (rings[0], rings[-1]):
+        for k in range(n):
+            e = bm.edges.get((ring[k], ring[(k + 1) % n]))
+            if e:
+                e[crease] = max(e[crease], 0.55 + 0.4 * bx)
     me = bpy.data.meshes.new('cage_' + sh.kind)
     bm.to_mesh(me)
     bm.free()
@@ -329,6 +336,23 @@ def box(bm, col_layer, colors, c, h, color):
         colors.append(color)
 
 
+def mirror(bm, colors, s, x0, y, z):
+    """a wing mirror: a housing that tapers to its stalk, swept back, the dark glass on its rear face"""
+    L = 0.17
+    ins = [(-0.035, -0.03), (0.035, -0.03), (0.035, 0.028), (-0.035, 0.028)]     # (dy, dz) at the stalk
+    out = [(-0.055, -0.05), (0.035, -0.045), (0.04, 0.05), (-0.05, 0.055)]      # at the tip: deeper behind
+    vi = [bm.verts.new((s * x0, y + dy, z + dz)) for dy, dz in ins]
+    vo = [bm.verts.new((s * (x0 + L), y + dy - 0.03, z + dz)) for dy, dz in out]
+    faces = [((vi[0], vi[1], vi[2], vi[3]), PAINT), ((vo[3], vo[2], vo[1], vo[0]), PAINT),
+             ((vi[1], vo[1], vo[2], vi[2]), PAINT), ((vi[0], vi[3], vo[3], vo[0]), DARK),        # front, rear (the glass)
+             ((vi[3], vi[2], vo[2], vo[3]), PAINT), ((vi[0], vo[0], vo[1], vi[1]), PAINT)]
+    for vs, c in faces:
+        if s < 0:
+            vs = tuple(reversed(vs))
+        bm.faces.new(vs)
+        colors.append(c)
+
+
 def extras(sh):
     """mirrors, door handles, plates, a dark cabin, exhausts: one more mesh merged into the body"""
     m = sh.m
@@ -341,8 +365,8 @@ def extras(sh):
         y = sh.cowl - 0.12
         w = sh.width(y)
         bz = sh.belt(y)
-        box(bm, None, colors, (s * (w + 0.03), y, bz + 0.05), (0.05, 0.03, 0.02), DARK)
-        box(bm, None, colors, (s * (w + 0.1), y - 0.02, bz + 0.1), (0.08, 0.05, 0.065), PAINT)
+        box(bm, None, colors, (s * (w + 0.03), y, bz + 0.05), (0.045, 0.022, 0.016), DARK)
+        mirror(bm, colors, s, w + 0.05, y - 0.02, bz + 0.1)
         # door handles
         doors = [sh.cowl - 0.55] if sh.kind in ('coupe', 'super', 'muscle') else [sh.cowl - 0.6, (sh.roofF + sh.roofR) / 2 - 0.25]
         for yd in doors:
@@ -366,8 +390,9 @@ def extras(sh):
         w = hw - 0.16
         box(bm, None, colors, (0, (y0 + y1) / 2, be - 0.05), (w, (y1 - y0) / 2, 0.12), DARK)
         for yr in ((y0 + y1) / 2 + 0.05, (y0 + y1) / 2 - 0.75):
-            if y0 < yr < y1:
-                top = sh.top(yr) - 0.14
+            # only under the roof (a pickup's back row would stand up in the bed)
+            if y0 < yr < y1 and sh.roofR + 0.15 < yr < sh.roofF - 0.1:
+                top = min(sh.top(yr), m['H']) - 0.18
                 h = max(0.1, (top - be) / 2)
                 for s in (1, -1):
                     box(bm, None, colors, (s * w * 0.48, yr, be + h - 0.05), (0.24, 0.06, h), DARK)
@@ -425,6 +450,15 @@ def build(kind):
     bmb.to_mesh(me)
     bmb.free()
     bpy.data.objects.remove(ob)
+    if kind == 'van':
+        # a van's tail lamps: two narrow upright lenses low on the back corners
+        bt = bmesh.new()
+        bt.from_mesh(parts['tails'])
+        m = sh.m
+        for sx in (1, -1):
+            box(bt, None, [], (sx * (sh.hw - 0.1), -sh.hl - 0.012, m['clear'] + 0.62), (0.06, 0.015, 0.22), None)
+        bt.to_mesh(parts['tails'])
+        bt.free()
     out = []
     mats = {'body': material('od-body', (1, 1, 1, 1)), 'glass': material('od-carglass', (0.02, 0.025, 0.03, 1)),
             'heads': material('od-carhead', (0.9, 0.9, 0.9, 1), (1, 1, 0.95, 1)), 'tails': material('od-cartail', (0.5, 0.02, 0.02, 1), (1, 0.05, 0.03, 1))}
@@ -446,6 +480,8 @@ for kind in SPECS:
 if PREVIEW:
     sc = bpy.context.scene
     only = [k for k in sys.argv[sys.argv.index('preview') + 2:]] or list(made)
+    rear = 'rear' in only
+    only = [k for k in only if k != 'rear'] or list(made)
     for kind, obs in made.items():
         for o in obs:
             o.hide_render = kind not in only
@@ -453,6 +489,8 @@ if PREVIEW:
     for i, kind in enumerate(only):
         for o in made[kind]:
             o.location = ((i % cols) * 4.2, -(i // cols) * 7.5, 0)
+            if rear:
+                o.rotation_euler.z = math.pi
     sun = bpy.data.lights.new('sun', 'SUN')
     sun.energy = 3.0
     so = bpy.data.objects.new('sun', sun)
