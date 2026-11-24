@@ -327,7 +327,38 @@ for mb in (mb_g, mb_b1, mb_b2, mb_br):
     if mb.faces:
         ob = mb.build()
         move(ob, C_LM)
-for mb in (mb_rail, mb_rails, mb_pier, mb_poles, mb_mv, mb_furn):
+# utility poles: weathered wood, a crossarm with three insulators, a transformer can now and then, and
+# the wires sagging pole to pole
+mb_util = MB(f'{TP}_utility')
+WOOD = hexcol('#6f604f')
+for line in D.get('poles', []):
+    tops = []
+    for j, (x, y) in enumerate(line):
+        if j + 1 < len(line):
+            nx_, ny_ = line[j + 1][0] - x, line[j + 1][1] - y
+        else:
+            nx_, ny_ = x - line[j - 1][0], y - line[j - 1][1]
+        L = math.hypot(nx_, ny_) or 1
+        ux, uy = nx_ / L, ny_ / L
+        px, py = -uy, ux                      # the crossarm runs across the line
+        H = 10.5
+        mb_util.cyl((x, y, SW - 0.2), 0.15, 0.11, H + 0.2, 7, 'od_wood', WOOD)
+        za = SW + H - 0.6
+        mb_util.obox((x, y, za), (px, py, 0), (ux, uy, 0), (0, 0, 1), 1.15, 0.05, 0.06, 'od_wood', WOOD)
+        pts3 = []
+        for o in (-1.0, 0.0, 1.0):
+            cx, cy = x + px * o, y + py * o
+            cz = za + 0.08 if o else SW + H + 0.05
+            mb_util.cyl((cx, cy, cz), 0.035, 0.03, 0.16, 6, 'od_metal', hexcol('#9aa3a8'))
+            pts3.append((cx, cy, cz + 0.15))
+        if j % 4 == 2:
+            # a transformer can on the side
+            mb_util.cyl((x + px * 0.32, y + py * 0.32, za - 1.9), 0.3, 0.3, 1.1, 10, 'od_metal', hexcol('#7d8487'))
+        # a streetlight cobra-head on some
+        if j % 3 == 0:
+            mb_util.obox((x + px * 0.9, y + py * 0.9, za - 2.2), (px, py, 0), (ux, uy, 0), (0, 0, 1), 0.9, 0.04, 0.04, 'od_metal', hexcol('#8a8f93'))
+    # (the wires are strung at runtime from the same pole lines: a GLB's quantised positions can't hold them)
+for mb in (mb_rail, mb_rails, mb_pier, mb_poles, mb_mv, mb_furn, mb_util):
     if mb.faces:
         ob = mb.build()
         move(ob, C_STATIC)

@@ -32,6 +32,43 @@ export interface DtData {
   walks: [number, number][][];
   /** every drivable street, both districts: nodes, and edges (a, b, polyline, width) */
   graph: { pts: [number, number][]; edges: [number, number, [number, number][], number][] };
+  /** utility pole lines along the curbs (Blender x, y): the poles are in the GLB, the wires are strung here */
+  poles?: [number, number][][];
+}
+
+/** three conductors sagging pole to pole (as thin lines: a GLB's quantised positions can't hold a 3 cm wire) */
+function wires(lines: [number, number][][]): THREE.LineSegments | null {
+  const SW = 0.15, H = 10.5;
+  const za = SW + H - 0.6;
+  const pos: number[] = [];
+  for (const line of lines) {
+    const tops: THREE.Vector3[][] = [];
+    line.forEach(([x, y], j) => {
+      const [nx, ny] = j + 1 < line.length ? [line[j + 1][0] - x, line[j + 1][1] - y] : [x - line[j - 1][0], y - line[j - 1][1]];
+      const L = Math.hypot(nx, ny) || 1;
+      const px = -ny / L, py = nx / L;
+      tops.push([-1, 0, 1].map((o) => new THREE.Vector3(x + px * o, o ? za + 0.23 : SW + H + 0.2, -(y + py * o))));
+    });
+    for (let j = 0; j + 1 < tops.length; j++) {
+      for (let c = 0; c < 3; c++) {
+        const a = tops[j][c], b = tops[j + 1][c];
+        const span = Math.hypot(b.x - a.x, b.z - a.z);
+        const sag = 0.012 * span + 0.25;
+        const N = 10;
+        for (let k = 0; k < N; k++) {
+          for (const t of [k / N, (k + 1) / N]) {
+            pos.push(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t - sag * 4 * t * (1 - t), a.z + (b.z - a.z) * t);
+          }
+        }
+      }
+    }
+  }
+  if (!pos.length) return null;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  const m = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x141414, transparent: true, opacity: 0.85 }));
+  m.name = 'wires';
+  return m;
 }
 
 export interface DtScene {
@@ -134,6 +171,8 @@ export async function loadTile(env: Env, info: TileInfo, progress: (f: number) =
   root.name = 'tile_' + info.name;
   const k = dtSkin(env, null);
   skin(root, lms, env, shared(tl), k.special);
+  const w = data.poles ? wires(data.poles) : null;
+  if (w) root.add(w);
   return { info, root, data, crowns: k.crowns, facades: k.facades, setProbe: k.setProbe, setNight: k.setNight };
 }
 

@@ -520,7 +520,11 @@ export function glassMaterial(shop: boolean): THREE.MeshPhysicalMaterial {
         vec3 cc = mix( vec3( 0.92, 0.9, 0.84 ), vec3( 0.75, 0.55, 0.5 ), step( 0.7, r2 ) );
         float blinds = step( 0.82, r3 ) * step( 0.5, fract( wq.y * 22.0 ) ) * step( 0.45, wq.y );
         room = mix( room, cc * folds * ( day * 0.55 + uNight * on * 0.9 ), clamp( curt, 0.0, 1.0 ) );
-        room = mix( room, vec3( 0.8, 0.79, 0.76 ) * ( day * 0.5 + uNight * 0.6 * on ), blinds );`
+        room = mix( room, vec3( 0.8, 0.79, 0.76 ) * ( day * 0.5 + uNight * 0.6 * on ), blinds );
+        // far off, a flat's own colours melt into the facade: by day the glass shows a dim even room
+        // (no curtain confetti), by night the lit ones keep their light
+        float farK = smoothstep( 90.0, 320.0, length( vOdWorld - cameraPosition ) );
+        room = mix( room, mix( vec3( 0.16, 0.165, 0.17 ) * day, room, uNight ), farK * 0.85 );`
         }
         totalEmissiveRadiance += room;
       }`,

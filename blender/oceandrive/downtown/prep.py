@@ -780,6 +780,26 @@ for w in WAYS:
             walks.append([[round(x, 2), round(y, 2)] for x, y in ls.simplify(0.5).coords])
 print('walk lines', len(walks), round(sum(LineString(w).length for w in walks)))
 
+# ------------------------------------------------------------------ utility poles: wooden poles along the curbs
+# (not downtown's core, where the lines run underground), a span every ~36 m, wires strung pole to pole
+pole_lines = []
+if TILE != 'dt':
+    curb = ROAD_CORE.buffer(0.7, join_style='mitre').boundary.intersection(PAVE.buffer(-0.05)).intersection(CORE.buffer(-4))
+    rngp = random.Random('poles' + TILE)
+    for g in getattr(curb, 'geoms', [curb]):
+        if g.geom_type != 'LineString' or g.length < 60:
+            continue
+        if rngp.random() < 0.45:
+            continue
+        g = g.simplify(1.0)
+        n = int(g.length // 36)
+        if n < 2:
+            continue
+        step = g.length / n
+        ps = [g.interpolate(i * step) for i in range(n + 1)]
+        pole_lines.append([[round(p.x, 2), round(p.y, 2)] for p in ps if not FOOT.buffer(0.6).contains(p)])
+print('pole lines', len(pole_lines), sum(len(p) for p in pole_lines))
+
 # ------------------------------------------------------------------ street furniture: palms, lamps, trees
 def along(line, step, off=0.0):
     L = line.length
@@ -1005,7 +1025,7 @@ dt = dict(
     tx=TX, ty=TY, core=ring(CORE), land=mp(LAND.intersection(SKY).simplify(0.5)), core_land=mp(CORE_LAND),
     road=mp(ROAD_CORE), pave=mp(PAVE), lawn=mp(LAWN), paths=mp(PATHS.intersection(CORE)), med_grass=mp(MED_GRASS), med_pave=mp(MED_PAVE),
     paint_w=mp(PAINT_W), paint_y=mp(PAINT_Y), xwalk=mp(XWALK), foot=mp(FOOT),
-    buildings=core_b, skyline=sky_b, sky_roads=sky_roads, palms=palms_l, lamps=lamps_l, mover=mover,
+    buildings=core_b, skyline=sky_b, sky_roads=sky_roads, palms=palms_l, lamps=lamps_l, mover=mover, poles=pole_lines,
     bridge=BRIDGE, bridge_w=BRIDGE_W, signals=ctrl_out,
     tri=dict(road=tris(ROAD_CORE), pave=tris(inner(PAVE)), lawn=with_z(tris(inner(LAWN)), lambda x, y: lawn_h(x, y) if BEACH and x > 11.5 else 0.15),
              sand=with_z(tris(SAND, 0.2), beach_h) if BEACH else dict(v=[], t=[]), paths=tris(inner(PATHS.intersection(CORE).intersection(BLK))),
@@ -1021,7 +1041,7 @@ GOUT = 'downtown.json' if TILE == 'dt' else f'tile_{TILE}.json'
 json.dump(dt, open(os.path.join(WORK, WOUT), 'w'))
 game = dict(
     tx=TX, ty=TY, core=ring(CORE), bridge=BRIDGE, bridge_w=BRIDGE_W, routes=routes, signals=ctrl_out, walks=walks,
-    lamps=[[p[0], p[1]] for p in lamps_l],
+    lamps=[[p[0], p[1]] for p in lamps_l], poles=pole_lines,
     graph=dict(pts=G_pts, edges=G_edges),
 )
 game['name'] = TILE
