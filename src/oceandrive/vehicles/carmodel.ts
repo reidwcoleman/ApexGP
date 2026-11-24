@@ -552,20 +552,17 @@ export function liveryTexture(kind: 'police' | 'taxi'): THREE.CanvasTexture {
   const g = c.getContext('2d')!;
   g.clearRect(0, 0, 1024, 512);
   if (kind === 'police') {
-    // door: a blue-and-green band with POLICE over it
-    g.fillStyle = '#0d2c6b';
-    g.fillRect(0, 120, 1024, 40);
-    g.fillStyle = '#0f7a4e';
-    g.fillRect(0, 165, 1024, 18);
-    g.fillStyle = '#0d2c6b';
-    g.font = '900 104px "Titillium Web", Arial, sans-serif';
+    // the white doors: POLICE in black, a thin gold rule, the city under it
+    g.fillStyle = '#0b0c0f';
+    g.font = '900 108px "Titillium Web", Arial, sans-serif';
     g.textAlign = 'center';
-    g.fillText('POLICE', 512, 105);
-    g.font = '700 30px Arial';
-    g.fillStyle = '#ffffff';
-    g.fillText('CITY OF MIAMI', 512, 152);
+    g.fillText('POLICE', 512, 108);
+    g.fillStyle = '#c9a23a';
+    g.fillRect(150, 124, 724, 8);
+    g.fillStyle = '#0b0c0f';
+    g.font = '700 32px Arial';
+    g.fillText('MIAMI BEACH', 512, 168);
     // the roof number
-    g.fillStyle = '#0d2c6b';
     g.font = '900 200px Arial';
     g.fillText(String(100 + Math.floor(Math.random() * 800)), 512, 440);
   } else {

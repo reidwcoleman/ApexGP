@@ -81,7 +81,7 @@ export interface Car {
   // ---- police
   police: boolean;
   /** a driver at the wheel steering for (tx, tz): the police, chasing */
-  ai: { tx: number; tz: number; stop: number; ram: boolean; stuck: number; rev: number; on: boolean } | null;
+  ai: { tx: number; tz: number; stop: number; ram: boolean; stuck: number; rev: number; on: boolean; kin?: boolean } | null;
   lightbar: THREE.MeshBasicMaterial[];
   siren: boolean;
   /** who else is in it (the passenger seat), shown seated */
@@ -90,8 +90,8 @@ export interface Car {
   blame: boolean;
 }
 
-const lampHead = () => new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff4e0, emissiveIntensity: 0.4, roughness: 0.15, vertexColors: true });
-const lampTail = () => new THREE.MeshStandardMaterial({ color: 0x5a0000, emissive: 0xff1a10, emissiveIntensity: 0.6, roughness: 0.2, vertexColors: true });
+const lampHead = () => new THREE.MeshStandardMaterial({ color: 0xc9ced4, emissive: 0xfff4e0, emissiveIntensity: 0.02, metalness: 0.7, roughness: 0.08, vertexColors: true });
+const lampTail = () => new THREE.MeshStandardMaterial({ color: 0x7a0804, emissive: 0xff0600, emissiveIntensity: 0.12, roughness: 0.12, vertexColors: true });
 
 /** paint: the white vertex colour takes the paint, the dark trim and chrome keep their own */
 function paintMaterial(color: number, flake: boolean): THREE.MeshPhysicalMaterial {
@@ -128,10 +128,13 @@ export class Cars {
   private wheelMat = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.6, roughness: 0.4 });
   private walkers: { x: number; z: number }[] = [];
   private nightSet = false;
+  /** the red and the blue that wash over the street from the nearest light bar (always in the scene: no recompiles) */
+  private beacons = [new THREE.PointLight(0xff1a10, 0, 26, 1.6), new THREE.PointLight(0x2050ff, 0, 26, 1.6)];
 
   constructor(readonly scene: THREE.Scene, readonly env: Env, readonly ground: Ground, readonly sw: number, readonly kit: PeopleKit) {
     let s = 4242;
     this.rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+    for (const b of this.beacons) scene.add(b);
     this.routes.push(makeRoute(blockLoop(), true), makeRoute([new THREE.Vector2(LANE_X, 330), new THREE.Vector2(LANE_X, -405)], false));
   }
 
@@ -240,7 +243,7 @@ export class Cars {
     let wheels: THREE.Object3D[] = [];
     let halfL = 2.3, halfW = 1.0, wb = 2.65, wheelR = 0.34;
     const sporty = kind === 'super' || kind === 'coupe' || kind === 'muscle' || kind === 'ferrari';
-    const paint = kind === 'taxi' ? 0xf2c21b : kind === 'police' || kind === 'policeSuv' ? 0xf2f2f0 : sporty ? pick(SPORT_PAINT.concat(PAINTS), this.rnd) : pick(PAINTS, this.rnd);
+    const paint = kind === 'taxi' ? 0xf2c21b : kind === 'police' || kind === 'policeSuv' ? 0x0b0c0f : sporty ? pick(SPORT_PAINT.concat(PAINTS), this.rnd) : pick(PAINTS, this.rnd);
     const seat = new THREE.Vector3(0.38, 0.35, -0.15);
     if (kind === 'ferrari' && this.ferrari) {
       const m = this.ferrari.clone(true);
@@ -333,11 +336,11 @@ export class Cars {
   }
 
   /** more traffic loops (downtown's, over the bridge): three x, z; a car every ~110 m of loop */
-  addRoutes(loops: THREE.Vector2[][], max = 50) {
+  addRoutes(loops: THREE.Vector2[][], max = 75) {
     // a car every ~380 m of loop, no more than max for the tile (the busy look comes from where you are)
     const Rs = loops.map((poly) => makeRoute(poly, true));
     const tot = Rs.reduce((a, R) => a + R.pts.length, 0);
-    const per = Math.max(220, tot / max);
+    const per = Math.max(140, tot / max);
     for (const R of Rs) {
       this.routes.push(R);
       const n = Math.max(1, Math.round(R.pts.length / per));
@@ -536,6 +539,7 @@ export class Cars {
       for (let j = i + 1; j < L.length; j++) {
         const b = L[j];
         if (a.route && b.route) continue; // traffic keeps its own distance
+        if (a.ai?.kin || b.ai?.kin) continue; // a unit on its route keeps its own distance too
         const dx0 = a.x - b.x, dz0 = a.z - b.z;
         if (dx0 * dx0 + dz0 * dz0 > 64) continue;
         const sa = Math.hypot(a.vx, a.vz) + Math.abs(a.w), sb = Math.hypot(b.vx, b.vz) + Math.abs(b.w);
@@ -985,8 +989,8 @@ export class Cars {
     this.lightsOn = n > 0;
     for (const c of this.list) {
       const [h, t] = c.lamps;
-      if (h) h.emissiveIntensity = 0.4 + n * 6;
-      if (t) t.emissiveIntensity = 0.6 + n * 3;
+      if (h) h.emissiveIntensity = 0.02 + n * 6;
+      if (t) t.emissiveIntensity = 0.12 + n * 2.2;
     }
   }
 
@@ -1009,7 +1013,7 @@ export class Cars {
     }
     // brake lights
     const [, tl] = c.lamps;
-    if (tl) tl.emissiveIntensity = (this.lightsOn ? 3.6 : 0.6) + (brk > 0 && sF > 0.3 ? 6 : 0);
+    if (tl) tl.emissiveIntensity = (this.lightsOn ? 2.2 : 0.12) + (brk > 0 && sF > 0.3 ? (this.lightsOn ? 5 : 4) : 0);
     // physics in small steps (stable at any frame rate)
     const n = Math.max(1, Math.ceil(dt / 0.008));
     for (let i = 0; i < n; i++) this.stepBody(c, dt / n, thr, brk, -mv.x, hand);
@@ -1077,6 +1081,28 @@ export class Cars {
       this.recycleT = 0;
       this.recycle(eye);
     }
+    // the nearest flashing light bar lights the street
+    {
+      let best: Car | null = null, bd = 140 * 140;
+      for (const c of this.list) {
+        if (!c.lightbar.length || !c.siren || c.wreck) continue;
+        const d = (c.x - eye.x) ** 2 + (c.z - eye.z) ** 2;
+        if (d < bd) {
+          bd = d;
+          best = c;
+        }
+      }
+      const ph = Math.floor(this.flash * 7) % 4;
+      const [r, b] = this.beacons;
+      if (best) {
+        const s_ = Math.sin(best.yaw), c_ = Math.cos(best.yaw);
+        const y = best.y + (MODELS[best.kind as ModelId]?.H ?? 1.5) + 0.3;
+        r.position.set(best.x + c_ * 0.6, y, best.z - s_ * 0.6);
+        b.position.set(best.x - c_ * 0.6, y, best.z + s_ * 0.6);
+        r.intensity = ph < 2 ? 90 : 4;
+        b.intensity = ph >= 2 ? 110 : 4;
+      } else r.intensity = b.intensity = 0;
+    }
     for (const c of this.list) {
       // a car half a mile off is a speck: don't draw it
       c.root.visible = (c.x - eye.x) ** 2 + (c.z - eye.z) ** 2 < 650 * 650 || c === this.driven;
@@ -1093,6 +1119,12 @@ export class Cars {
       }
       if (c === this.driven) continue;
       if (c.ai && c.driver && !c.wreck) {
+        // on its way along a route (moved by the police), only the ride and the wheels
+        if (c.ai.kin) {
+          c.spin += (c.v / c.wheelR) * dt;
+          if (c.root.visible) this.place(c, dt);
+          continue;
+        }
         this.aiDrive(c, dt);
         continue;
       }

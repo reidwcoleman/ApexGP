@@ -170,7 +170,7 @@ async function boot() {
     arrived: (t) => {
       dress.addSignals(t.data.signals);
       cars.addRoutes(t.data.routes.map((r) => r.pts.map(([x, y]) => new THREE.Vector2(x, -y))));
-      peds.spawnWalks(t.data.walks.map((w) => w.map(([x, y]) => new THREE.Vector2(x, -y))), Math.round((Number(Q.get('dtpeds')) || 46) * (t.info.name === 'dt' ? 1 : 0.8)));
+      peds.spawnWalks(t.data.walks.map((w) => w.map(([x, y]) => new THREE.Vector2(x, -y))), Math.round((Number(Q.get('dtpeds')) || 70) * (t.info.name === 'dt' ? 1 : 0.8)));
       const spots = ((t.data as unknown as { lamps: [number, number][] }).lamps ?? []).map(([x, y]) => new THREE.Vector4(x, 6.5, -y, 150));
       lampSpots.push(...spots);
       nightLights.addLamps(spots);

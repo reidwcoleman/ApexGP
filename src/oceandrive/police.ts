@@ -158,7 +158,7 @@ export class Police {
       this.lastKnown.set(x, 0, z);
       this.unseen = 0;
     }
-    if (this.stars > before) this.spawnT = Math.min(this.spawnT, before === 0 ? 1.5 : 0.5);
+    if (this.stars > before) this.spawnT = Math.min(this.spawnT, before === 0 ? 0.4 : 0.3);
   }
 
   /** cleared: after the hospital, the cells, or losing them */
@@ -261,7 +261,7 @@ export class Police {
   private spawnUnit(you: You, eye: THREE.Vector3, swat: boolean) {
     // an intersection 110-200 m away, out of sight
     const cands: [number, number][] = [];
-    for (const [x, z] of this.graph.ring(you.pos.x, you.pos.z, 100, 260)) {
+    for (const [x, z] of this.graph.ring(you.pos.x, you.pos.z, 80, 200)) {
       if (Number.isNaN(this.ground.height(x, z))) continue;
       if (lineOfSight(this.ground, eye, new THREE.Vector3(x, 1.5, z)) && Math.hypot(x - eye.x, z - eye.z) < 160) continue;
       if (this.cars.list.some((c) => Math.hypot(c.x - x, c.z - z) < 8)) continue;
@@ -400,7 +400,7 @@ export class Police {
     const liveUnits = this.units.filter((u) => !u.car.wreck && u.crew.some((o) => o.alive));
     this.spawnT -= dt;
     if (this.stars > 0 && liveUnits.length < wantCars && this.spawnT <= 0 && this.officers.length < 14) {
-      this.spawnT = 3 + this.rnd() * 3;
+      this.spawnT = 2 + this.rnd() * 2;
       this.spawnUnit(you, eye, this.stars >= 4 && !liveUnits.some((u) => u.swat));
     }
     if (this.stars >= 5 && (!this.heli || (!this.heli.alive && this.heli.deadT > 30))) {
@@ -477,11 +477,64 @@ export class Police {
       tz += you.car.vz * 0.9;
     }
     u.pathT -= dt;
-    if (u.pathT <= 0 || !u.path.length) {
-      u.pathT = 1.2;
+    const end = u.path[u.path.length - 1];
+    if (!u.path.length || (u.pathT <= 0 && (!end || Math.hypot(end.x - tx, end.z - tz) > 12))) {
+      u.pathT = 1.5;
       u.path = this.route(c.x, c.z, tx, tz);
+      // the route starts at the nearest node, which may be behind: skip what's behind the car
+      while (u.path.length > 2) {
+        const p0 = u.path[0], p1 = u.path[1];
+        if (Math.hypot(p1.x - c.x, p1.z - c.z) < Math.hypot(p1.x - p0.x, p1.z - p0.z)) u.path.shift();
+        else break;
+      }
     }
     while (u.path.length > 1 && Math.hypot(u.path[0].x - c.x, u.path[0].z - c.z) < 8) u.path.shift();
+    // on the way: a unit drives its route (it doesn't wedge itself on a curb or sit in traffic), fast
+    // where you can't see it, and you hear it coming; the last stretch it drives for real and pulls up
+    const de = Math.hypot(c.x - eye.x, c.z - eye.z);
+    const hidden = d > 45 && (de > 170 || !lineOfSight(this.ground, eye, new THREE.Vector3(c.x, c.y + 1.3, c.z)));
+    ai.kin = false;
+    if (d > 32 && u.path.length >= 1 && !(you.driving && d < 60)) {
+      ai.kin = true;
+      let sp = hidden ? 32 : 20;
+      // in view, it doesn't drive through the cars ahead: it weaves past at their pace
+      if (!hidden) {
+        const hx = Math.sin(c.yaw), hz = Math.cos(c.yaw);
+        for (const o of this.cars.list) {
+          // (only traffic: parked cars sit at the curb, off its line)
+          if (o === c || (!o.driver && Math.hypot(o.vx, o.vz) < 1)) continue;
+          const rx = o.x - c.x, rz = o.z - c.z;
+          const ahead = rx * hx + rz * hz, side = Math.abs(rx * hz - rz * hx);
+          if (ahead > 0 && ahead < 14 && side < 1.8) sp = Math.min(sp, Math.max(3, (ahead - 6) * 2.5 + Math.hypot(o.vx, o.vz)));
+        }
+      }
+      let step = sp * dt;
+      while (step > 0 && u.path.length >= 1) {
+        const p = u.path[0];
+        const dd = Math.hypot(p.x - c.x, p.z - c.z);
+        if (dd <= step) {
+          c.x = p.x;
+          c.z = p.z;
+          if (u.path.length === 1) break;
+          u.path.shift();
+          step -= dd;
+        } else {
+          c.x += ((p.x - c.x) / dd) * step;
+          c.z += ((p.z - c.z) / dd) * step;
+          step = 0;
+        }
+      }
+      const nx = u.path[0];
+      let want = Math.atan2(nx.x - c.x, nx.z - c.z) - c.yaw;
+      want = Math.atan2(Math.sin(want), Math.cos(want));
+      const turn = THREE.MathUtils.clamp(want, -3.2 * dt, 3.2 * dt);
+      c.yaw = hidden ? c.yaw + want : c.yaw + turn;
+      c.w = turn / Math.max(dt, 1e-3);
+      c.v = sp;
+      c.vx = Math.sin(c.yaw) * c.v;
+      c.vz = Math.cos(c.yaw) * c.v;
+      return;
+    }
     const wp = u.path[0] ?? { x: tx, z: tz };
     const last = u.path.length <= 1;
     ai.on = true;

@@ -39,6 +39,7 @@ TRIM = (0.05, 0.05, 0.055, 1.0)
 CHROME = (0.7, 0.7, 0.72, 1.0)
 PLATE = (0.86, 0.86, 0.82, 1.0)
 GRILLE = (0.03, 0.032, 0.035, 1.0)
+DOOR = (0.9, 0.9, 0.89, 1.0)      # under 0.94: keeps its own white whatever the paint
 
 
 def table(pairs):
@@ -137,6 +138,12 @@ class Shape:
         k = self.kind
         ym = (y0 + y1) / 2
         lowg, upg, top = seg in (4, 11), seg in (5, 10), seg in (6, 7, 8, 9)
+        # the black-and-white: doors and roof white, the rest the (black) paint
+        if k in ('police', 'policeSuv'):
+            if seg in (2, 3, 12, 13) and self.roofR - 0.25 <= ym <= self.cowl + 0.05:
+                return 'door'
+            if top and self.roofR <= ym <= self.roofF:
+                return 'door'
         if seg in (0, 15):
             return 'dark'
         if seg in (1, 14) and k in ('suv', 'gwagon', 'pickup', 'policeSuv', 'van'):
@@ -167,7 +174,7 @@ class Shape:
         return 'paint'
 
 
-MATS = ['paint', 'glass', 'dark', 'heads', 'tails', 'grille', 'trim']
+MATS = ['paint', 'glass', 'dark', 'heads', 'tails', 'grille', 'trim', 'door']
 
 
 def cage(sh):
@@ -290,12 +297,12 @@ def classify(ob, sh):
     names = [m.name.replace('cage_', '').split('.')[0] for m in me.materials]
     cls = {f.index: names[f.material_index] if f.material_index < len(names) else 'paint' for f in bm.faces}
     parts = {}
-    for name, keys in (('body', ('paint', 'dark', 'trim', 'grille')), ('glass', ('glass',)), ('heads', ('heads',)), ('tails', ('tails',))):
+    for name, keys in (('body', ('paint', 'dark', 'trim', 'grille', 'door')), ('glass', ('glass',)), ('heads', ('heads',)), ('tails', ('tails',))):
         b2 = bm.copy()
         b2.faces.ensure_lookup_table()
         kill = [f for f in b2.faces if cls[f.index] not in keys]
         bmesh.ops.delete(b2, geom=kill, context='FACES')
-        colors = [{'paint': PAINT, 'dark': DARK, 'trim': TRIM, 'grille': GRILLE}.get(cls[f.index], PAINT) for f in bm.faces if cls[f.index] in keys]
+        colors = [{'paint': PAINT, 'dark': DARK, 'trim': TRIM, 'grille': GRILLE, 'door': DOOR}.get(cls[f.index], PAINT) for f in bm.faces if cls[f.index] in keys]
         me2 = bpy.data.meshes.new(f'car_{sh.kind}_{name}')
         b2.to_mesh(me2)
         if name == 'body':
@@ -340,6 +347,16 @@ def extras(sh):
         doors = [sh.cowl - 0.55] if sh.kind in ('coupe', 'super', 'muscle') else [sh.cowl - 0.6, (sh.roofF + sh.roofR) / 2 - 0.25]
         for yd in doors:
             box(bm, None, colors, (s * (sh.width(yd) + 0.008), yd, be - 0.09), (0.012, 0.09, 0.016), CHROME if sh.kind in ('police',) else TRIM)
+    # police: a push bar on the nose, a light bar base and its feet on the roof, a spotlight by the A-pillar
+    if sh.kind in ('police', 'policeSuv'):
+        for sx in (-0.32, 0.32):
+            box(bm, None, colors, (sx, hl + 0.1, (m['hoodH'] + m['clear']) / 2), (0.035, 0.035, (m['hoodH'] - m['clear']) / 2 - 0.05), DARK)
+        for zz in (m['hoodH'] - 0.12, m['clear'] + 0.25):
+            box(bm, None, colors, (0, hl + 0.11, zz), (0.42, 0.03, 0.03), DARK)
+        yb = (sh.roofF + sh.roofR) / 2 + 0.12
+        box(bm, None, colors, (0, yb, m['H'] + 0.02), (0.64, 0.17, 0.025), DARK)
+        y = sh.cowl - 0.15
+        box(bm, None, colors, (sh.width(y) * 0.98, y, sh.belt(y) + 0.22), (0.04, 0.07, 0.04), CHROME)
     # plates
     box(bm, None, colors, (0, hl + 0.005, m['clear'] + 0.32), (0.26, 0.012, 0.065), PLATE)
     box(bm, None, colors, (0, -hl - 0.005, m['deckH'] - 0.42), (0.26, 0.012, 0.065), PLATE)
