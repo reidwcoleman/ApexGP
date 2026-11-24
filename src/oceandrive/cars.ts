@@ -122,6 +122,8 @@ export class Cars {
   private kinds = new Map<string, { body: THREE.BufferGeometry; glass: THREE.BufferGeometry; heads: THREE.BufferGeometry; tails: THREE.BufferGeometry; decal: THREE.BufferGeometry | null; wheel: THREE.BufferGeometry }>();
   private ferrari: THREE.Object3D | null = null;
   private ferrariFwd = 1;
+  /** the bodies modelled in Blender (cars.glb): body / glass / heads / tails per model */
+  private modelled = new Map<string, Record<string, THREE.BufferGeometry>>();
   private glass = new THREE.MeshPhysicalMaterial({ color: 0x080b0e, metalness: 0.3, roughness: 0.02, transparent: true, opacity: 0.88, clearcoat: 1, envMapIntensity: 1.5 });
   private wheelMat = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.6, roughness: 0.4 });
   private walkers: { x: number; z: number }[] = [];
@@ -138,6 +140,26 @@ export class Cars {
     draco.setDecoderPath(BASE + 'draco/');
     const gl = new GLTFLoader();
     gl.setDRACOLoader(draco);
+    try {
+      const kit = await gl.loadAsync(BASE + "cars.glb");
+      kit.scene.updateMatrixWorld(true);
+      kit.scene.traverse((o) => {
+        const mm = o as THREE.Mesh;
+        const m = /^car_(\w+?)_(body|glass|heads|tails)$/.exec(o.name) ?? (mm.isMesh && o.parent ? /^car_(\w+?)_(body|glass|heads|tails)$/.exec(o.parent.name) : null);
+        if (!mm.isMesh || !m) return;
+        const g = mm.geometry.clone();
+        g.applyMatrix4(mm.matrixWorld);
+        if (!g.getAttribute('color')) {
+          // glass and lamps carry no colours: white
+          const n = g.getAttribute('position').count;
+          g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(n * 3).fill(1), 3));
+        }
+        if (!this.modelled.has(m[1])) this.modelled.set(m[1], {});
+        this.modelled.get(m[1])![m[2]] = g;
+      });
+    } catch (e) {
+      console.warn('[cars] cars.glb', e);
+    }
     const gltf = await gl.loadAsync(BASE + 'cars/ferrari.glb');
     const model = gltf.scene.children[0];
     const fl = model.getObjectByName('wheel_fl'), rl = model.getObjectByName('wheel_rl');
@@ -196,6 +218,14 @@ export class Cars {
     if (!k) {
       const spec = MODELS[id];
       const g = buildCar(spec);
+      // the Blender model where there is one (the procedural decal still dresses the police and taxis)
+      const mg = this.modelled.get(id);
+      if (mg?.body && mg.glass && mg.heads && mg.tails) {
+        g.body = mg.body;
+        g.glass = mg.glass;
+        g.heads = mg.heads;
+        g.tails = mg.tails;
+      }
       const ww = id === 'pickup' || id === 'gwagon' ? 0.28 : id === 'super' || id === 'muscle' ? 0.3 : 0.24;
       const style = id === 'gwagon' || id === 'police' || id === 'policeSuv' ? 'black' : id === 'van' ? 'steel' : 'alloy';
       k = { body: g.body, glass: g.glass, heads: g.heads, tails: g.tails, decal: g.decal, wheel: carWheel(spec.wheelR, ww, style) };
