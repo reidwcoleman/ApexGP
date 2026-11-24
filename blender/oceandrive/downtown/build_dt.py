@@ -7,9 +7,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OD = os.path.dirname(HERE)
 sys.path.insert(0, OD)
 sys.path.insert(0, HERE)
-for m in ('lib', 'hotels', 'palms', 'props', 'towers', 'flora'):
+for m in ('lib', 'hotels', 'palms', 'props', 'towers', 'flora', 'palmkit'):
     sys.modules.pop(m, None)
-import lib, hotels, palms, props, towers, flora
+sys.path.insert(0, os.path.join(OD, 'foliage'))
+import lib, hotels, palms, props, towers, flora, palmkit
 from lib import MB, hexcol, WHITE
 from mathutils import Vector
 
@@ -246,31 +247,36 @@ for x, y in D['mover_cols']:
 rng = random.Random('dtpalms')
 variants = {'royal': [], 'coco': []}
 for i, h in enumerate((13.0, 15.5, 17.5, 19.5)):
-    ob = flora.royal(f'dtpalm_r{i}', random.Random(300 + i), h).build(weld=False)
+    ob = palmkit.royal(f'dtpalm_r{i}', random.Random(300 + i), h).build(weld=False)
     move(ob, C_TPL); ob.hide_render = True
     variants['royal'].append(ob)
-for i, h in enumerate((9.0, 10.8, 12.5, 14.0)):
-    ob = flora.coconut(f'dtpalm_c{i}', random.Random(400 + i), h).build(weld=False)
+for i, h in enumerate((8.5, 9.8, 11.0, 12.5, 13.8, 15.0)):
+    ob = palmkit.coconut(f'dtpalm_c{i}', random.Random(400 + i), h).build(weld=False)
     move(ob, C_TPL); ob.hide_render = True
     variants['coco'].append(ob)
 variants['fan'] = []
 variants['sabal'] = []
 for i, h in enumerate((16.0, 19.0, 22.0)):
-    ob = flora.washingtonia(f'dtpalm_w{i}', random.Random(500 + i), h).build(weld=False)
+    ob = palmkit.washingtonia(f'dtpalm_w{i}', random.Random(500 + i), h).build(weld=False)
     move(ob, C_TPL); ob.hide_render = True
     variants['fan'].append(ob)
 for i, h in enumerate((6.5, 8.0)):
-    ob = flora.sabal(f'dtpalm_s{i}', random.Random(600 + i), h).build(weld=False)
+    ob = palmkit.sabal(f'dtpalm_s{i}', random.Random(600 + i), h).build(weld=False)
     move(ob, C_TPL); ob.hide_render = True
     variants['sabal'].append(ob)
+variants['shade'] = []
+for i, h in enumerate((8.0, 10.0, 12.5)):
+    ob = palmkit.shadetree(f'dtpalm_t{i}', random.Random(900 + i), h).build(weld=False)
+    move(ob, C_TPL); ob.hide_render = True
+    variants['shade'].append(ob)
 for x, y, kind in D['palms']:
     r_ = rng.random()
     if kind == 'royal':
         pool = variants['royal']
     elif kind == 'sidewalk':
-        pool = variants['royal'] if r_ < 0.35 else variants['fan'] if r_ < 0.65 else variants['sabal'] if r_ < 0.8 else variants['coco']
+        pool = variants['royal'] if r_ < 0.3 else variants['fan'] if r_ < 0.55 else variants['sabal'] if r_ < 0.7 else variants['coco'] if r_ < 0.85 else variants['shade']
     else:
-        pool = variants['coco'] if r_ < 0.5 else variants['sabal'] if r_ < 0.8 else variants['fan']
+        pool = variants['coco'] if r_ < 0.35 else variants['shade'] if r_ < 0.7 else variants['sabal'] if r_ < 0.9 else variants['fan']
     v = rng.choice(pool)
     o = bpy.data.objects.new('palm', v.data)
     o.location = (x, y, SW - 0.05)

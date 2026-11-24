@@ -180,36 +180,35 @@ for i, p in enumerate(walk):
         nx, ny = -math.sin(ang), math.cos(ang)
         bx, by = p[0] + nx * 3.2, p[1] + ny * 3.2
         props.place('bench', bx, by, ground.terrain_h(bx, by), ang + math.pi / 2, ASSETS, C_PROPS, C_TPL)
-# dune vegetation: sea grape + shrubs
+# dune vegetation: sea grape (modelled by the palm kit, placed with the palms below)
+DUNE = []
 for k in range(260):
     y = rng.uniform(ground.CITY_Y0, ground.CITY_Y1)
     if any(abs(y - g) < 3.5 for g in (-68.5, 68.2)):
         continue
     x = rng.uniform(101, 128)
-    kind = rng.choice(['seagrape', 'seagrape', 'seagrape2', 'shrub', 'shrub2'])
-    s = rng.uniform(0.55, 0.95) if kind.startswith('seagrape') else rng.uniform(0.9, 1.6)
-    props.place(kind, x, y, ground.terrain_h(x, y) - 0.15, rng.uniform(0, 6.28), ASSETS, C_PROPS, C_TPL, scale=s)
+    DUNE.append((x, y))
 
 # ------------------------------------------------------------------ palms
 rng = random.Random('palms')
 C_PALM = coll('PALMS')
+# the palm kit (foliage/palmkit.py): leaf cards from the modelled leaf atlas
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'foliage'))
+sys.modules.pop('palmkit', None)
+import palmkit
 variants = []
-for i, h in enumerate((9.5, 11.0, 12.2, 13.4, 14.6, 16.0)):
-    ob = palms.palm_variant(f'palm_{i}', random.Random(100 + i), h).build(weld=False)
+for i, h in enumerate((8.5, 9.5, 11.0, 12.2, 13.4, 14.6, 16.0, 10.2)):
+    ob = palmkit.coconut(f'palm_{i}', random.Random(100 + i), h).build(weld=False)
     move(ob, C_TPL)
     ob.hide_render = True
     variants.append(ob)
-# the park isn't all coconuts: tall skinny Mexican fan palms and Florida's own cabbage palms among them
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'downtown'))
-sys.modules.pop('flora', None)
-import flora
 others = []
 for i, h in enumerate((15.0, 18.5)):
-    ob = flora.washingtonia(f'palm_w{i}', random.Random(700 + i), h).build(weld=False)
+    ob = palmkit.washingtonia(f'palm_w{i}', random.Random(700 + i), h).build(weld=False)
     move(ob, C_TPL); ob.hide_render = True
     others.append(ob)
 for i, h in enumerate((6.5, 8.2)):
-    ob = flora.sabal(f'palm_s{i}', random.Random(800 + i), h).build(weld=False)
+    ob = palmkit.sabal(f'palm_s{i}', random.Random(800 + i), h).build(weld=False)
     move(ob, C_TPL); ob.hide_render = True
     others.append(ob)
 spots = []
@@ -245,6 +244,19 @@ for (x, y) in spots:
     o.scale = (s, s, s)
     C_PALM.objects.link(o)
 print('palms', len(spots))
+grapes = []
+for i, h in enumerate((2.4, 3.0, 3.6, 4.2)):
+    ob = palmkit.seagrape(f'palm_g{i}', random.Random(1000 + i), h).build(weld=False)
+    move(ob, C_TPL); ob.hide_render = True
+    grapes.append(ob)
+for (x, y) in DUNE:
+    o = bpy.data.objects.new('palm', rng.choice(grapes).data)
+    o.location = (x, y, ground.terrain_h(x, y) - 0.1)
+    o.rotation_euler = (0, 0, rng.uniform(0, 6.28))
+    s = rng.uniform(0.75, 1.25)
+    o.scale = (s, s, s * rng.uniform(0.8, 1.1))
+    C_PALM.objects.link(o)
+print('sea grapes', len(DUNE))
 
 # ------------------------------------------------------------------ objects
 for mb in (mb_block, mb_front2, mb_city, mb_gnear, mb_gfar):

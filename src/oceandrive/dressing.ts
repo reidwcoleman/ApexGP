@@ -579,13 +579,13 @@ export class Dressing {
     const pos: number[] = [], col: number[] = [];
     for (let b = 0; b < 16; b++) {
       const a = r() * Math.PI * 2, lean = 0.25 + r() * 0.55, h = 0.45 + r() * 0.5 + (b > 12 ? 0.5 : 0);
-      const w = b > 12 ? 0.008 : 0.022;
+      const w = b > 12 ? 0.006 : 0.016;
       const dx = Math.cos(a), dz = Math.sin(a);
       const ox = (r() - 0.5) * 0.25, oz = (r() - 0.5) * 0.25;
       let px = ox, py = 0, pz = oz;
-      const N = 3;
-      const g = 0.55 + r() * 0.25, dry = r() < 0.3 || b > 12 ? 1 : 0;
-      const c0 = dry ? [0.55, 0.48, 0.32] : [0.32 * g, 0.42 * g, 0.2 * g];
+      const N = 4;
+      const g = 0.6 + r() * 0.3, dry = r() < 0.3 || b > 12 ? 1 : 0;
+      const c0 = dry ? [0.6, 0.53, 0.36] : [0.38 * g, 0.47 * g, 0.24 * g];
       for (let i = 0; i < N; i++) {
         const t0 = i / N, t1 = (i + 1) / N;
         const nx = ox + dx * lean * h * t1 * t1, ny = h * t1, nz = oz + dz * lean * h * t1 * t1;
@@ -603,11 +603,17 @@ export class Dressing {
         px = nx; py = ny; pz = nz;
       }
       if (b > 12) {
-        // the seed head: a narrow drooping plume
-        for (let i = 0; i < 3; i++) {
-          const y0 = py - 0.06 * i;
-          pos.push(px - 0.02, y0, pz, px + 0.02, y0, pz, px + dx * 0.05, y0 - 0.12, pz + dz * 0.05);
-          col.push(0.62, 0.52, 0.34, 0.62, 0.52, 0.34, 0.55, 0.45, 0.3);
+        // the seed head: a panicle of flat, oat-like spikelets dangling off the arching stalk tip
+        for (let i = 0; i < 9; i++) {
+          const t = i / 9;
+          const sx = px + dx * (0.02 + 0.09 * t), sz = pz + dz * (0.02 + 0.09 * t), sy = py - 0.03 - 0.16 * t * t;
+          const a2 = r() * 6.28;
+          const ex = Math.cos(a2) * 0.012, ez = Math.sin(a2) * 0.012;
+          const L2 = 0.045 + 0.02 * r();
+          pos.push(sx - ex, sy, sz - ez, sx + ex, sy, sz + ez, sx + ex * 0.3, sy - L2, sz + ez * 0.3);
+          pos.push(sx - ex, sy, sz - ez, sx + ex * 0.3, sy - L2, sz + ez * 0.3, sx - ex * 0.3, sy - L2, sz - ez * 0.3);
+          const k = 0.85 + 0.3 * r();
+          for (let v = 0; v < 6; v++) col.push(0.66 * k, 0.56 * k, 0.36 * k);
         }
       }
     }
@@ -615,8 +621,22 @@ export class Dressing {
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     g.computeVertexNormals();
+    // grass lights like a soft carpet: the blades' normals lean to the sky
+    {
+      const nn = g.getAttribute('normal') as THREE.BufferAttribute;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < nn.count; i++) {
+        v.fromBufferAttribute(nn, i);
+        if (v.y < 0) v.negate();
+        v.y += 1.6;
+        v.normalize();
+        nn.setXYZ(i, v.x, v.y, v.z);
+      }
+    }
     const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, side: THREE.DoubleSide, name: 'od_seaoats' });
     m.onBeforeCompile = (sh) => {
+      // both faces of a blade keep the sky-leaning normal (no flip for the back face)
+      sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''));
       sh.uniforms.uTime = U.uTime;
       sh.uniforms.uWind = U.uWind;
       sh.vertexShader = sh.vertexShader
@@ -632,7 +652,7 @@ export class Dressing {
     };
     this.env.prep(m);
     // where: over the dune (x 100..134), denser on the crest, in clumps; not on the beach-access paths
-    const N = 11000;
+    const N = 9000;
     const im = new THREE.InstancedMesh(g, m, N);
     const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), P = new THREE.Vector3();
     let n = 0;

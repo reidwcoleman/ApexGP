@@ -143,6 +143,7 @@ MATS = {
     'od_neon':     dict(col=(0.80, 0.80, 0.80), rough=0.3),
     'od_bark':     dict(col=(0.42, 0.38, 0.32), rough=0.9),
     'od_frond':    dict(col=(0.20, 0.28, 0.10), rough=0.7, alpha='palm_frond.png'),
+    'od_palmleaf': dict(col=(1.0, 1.0, 1.0), rough=0.6, alpha='palm_atlas.png'),
     'od_frond_dry': dict(col=(0.45, 0.36, 0.22), rough=0.8, alpha='palm_frond_dry.png'),
     'od_roof':     dict(col=(0.55, 0.54, 0.52), rough=0.9),
     'od_rubber':   dict(col=(0.03, 0.03, 0.03), rough=0.8),

@@ -29,9 +29,9 @@ export interface World {
 }
 
 /** foliage: alpha-tested cards, two-sided, lit through from behind when the sun is beyond them */
-function foliage(name: string, map: THREE.Texture, normal: THREE.Texture | null, tint: number): THREE.MeshStandardMaterial {
-  const m = new THREE.MeshStandardMaterial({ name, map, normalMap: normal ?? undefined, alphaTest: 0.42, side: THREE.DoubleSide, roughness: 0.62, color: tint });
-  m.customProgramCacheKey = () => 'od-foliage';
+function foliage(name: string, map: THREE.Texture, normal: THREE.Texture | null, tint: number, atlas = false): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ name, map, normalMap: normal ?? undefined, alphaTest: atlas ? 0.38 : 0.42, side: THREE.DoubleSide, roughness: atlas ? 0.55 : 0.62, color: tint, vertexColors: atlas });
+  m.customProgramCacheKey = () => (atlas ? 'od-foliage-atlas' : 'od-foliage');
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uSunDir = U.uSunDir;
     sh.uniforms.uSunCol = U.uSunCol;
@@ -55,10 +55,21 @@ function foliage(name: string, map: THREE.Texture, normal: THREE.Texture | null,
           float gust = 0.6 + 0.4 * sin( uTime * 0.37 + ph * 0.3 );
           vec3 sway = vec3( sin( uTime * 1.1 + ph ) + 0.6, 0.0, cos( uTime * 0.9 + ph * 1.3 ) * 0.5 ) * 0.16 * uWind * gust * hgt;
           vec3 flut = vec3( sin( uTime * 7.0 + wp0.x * 3.1 + wp0.y * 2.3 ), sin( uTime * 6.1 + wp0.z * 2.7 ) * 0.6, cos( uTime * 7.7 + wp0.y * 3.3 ) ) * 0.035 * ( 0.3 + uWind ) * hgt;
+          ${atlas ? `// the atlas fronds: base (v ~ 1 in the glTF's flipped v) holds still, the tip flutters and bounces
+          float tipK = clamp( 1.0 - uv.y, 0.0, 1.0 );
+          flut *= 0.3 + 2.2 * tipK * tipK;
+          flut.y += sin( uTime * 2.3 + ph * 2.0 + tipK * 2.0 ) * 0.09 * tipK * tipK * ( 0.4 + uWind ) * hgt;` : ''}
           vec3 off = sway + flut;
           // world offset back into the model's frame (palms are only translated/rotated/scaled uniformly)
           transformed += inverse( odM ) * off;
         }`,
+      );
+    if (atlas)
+      sh.fragmentShader = sh.fragmentShader.replace(
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>
+        // a crown lights like a soft volume: every leaf's normal leans toward the sky
+        normal = normalize( normal + ( viewMatrix * vec4( 0.0, 1.0, 0.0, 0.0 ) ).xyz * 0.75 );`,
       );
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nuniform vec3 uSunDir;\nuniform vec3 uSunCol;')
@@ -118,6 +129,7 @@ export interface Shared {
   frondMat: THREE.MeshStandardMaterial;
   dryMat: THREE.MeshStandardMaterial;
   bushMat: THREE.MeshStandardMaterial;
+  leafMat: THREE.MeshStandardMaterial;
   neonMat: THREE.MeshBasicMaterial;
   neon: THREE.MeshBasicMaterial[];
   lamps: THREE.MeshStandardMaterial[];
@@ -133,6 +145,13 @@ export function shared(tl = new THREE.TextureLoader()): Shared {
   const frondN = tl.load(BASE + 'tex/palm_frond_n.webp');
   const dry = tl.load(BASE + 'tex/palm_frond_dry.webp');
   dry.colorSpace = THREE.SRGBColorSpace;
+  // the modelled leaf atlas (foliage/frond_atlas.py): glTF convention, no flip
+  const atlas = tl.load(BASE + 'tex/palm_atlas.webp');
+  atlas.colorSpace = THREE.SRGBColorSpace;
+  atlas.flipY = false;
+  atlas.anisotropy = 8;
+  const atlasN = tl.load(BASE + 'tex/palm_atlas_n.webp');
+  atlasN.flipY = false;
   const grape = tl.load(BASE + 'tex/seagrape.webp');
   grape.colorSpace = THREE.SRGBColorSpace;
   const neonMat = new THREE.MeshBasicMaterial({ name: 'od_neon', vertexColors: true, color: new THREE.Color(3.2, 3.2, 3.2), fog: true });
@@ -142,6 +161,14 @@ export function shared(tl = new THREE.TextureLoader()): Shared {
     frondMat: foliage('od_frond', frond, frondN, 0xffffff),
     dryMat: foliage('od_frond_dry', dry, null, 0xffffff),
     bushMat: foliage('od_bush', grape, null, 0xffffff),
+    leafMat: (() => {
+      const m = foliage('od_palmleaf', atlas, atlasN, 0xffffff, true);
+      // the atlas was rendered with +y toward the frond's tip; the glTF's flipped v runs the other way
+      m.normalScale.set(1, -1);
+      // sunlit Florida green: a touch warmer and brighter than the atlas
+      m.color.setRGB(1.06, 1.1, 0.94);
+      return m;
+    })(),
     neonMat,
     neon: [neonMat],
     lamps: [],
@@ -176,6 +203,7 @@ export function skin(root: THREE.Object3D, lms: LmMap, env: Env, S: Shared, spec
     else if (name === 'od_frond') mat = S.frondMat;
     else if (name === 'od_frond_dry') mat = S.dryMat;
     else if (name === 'od_bush') mat = S.bushMat;
+    else if (name === 'od_palmleaf') mat = S.leafMat;
     else if (name === 'od_awning') {
       const key = 'awning' + (lm ? lmName : '');
       mat = cache.get(key) ?? null;
@@ -205,7 +233,7 @@ export function skin(root: THREE.Object3D, lms: LmMap, env: Env, S: Shared, spec
     }
     env.prep(mat);
   });
-  for (const m of [S.frondMat, S.dryMat, S.bushMat]) env.prep(m);
+  for (const m of [S.frondMat, S.dryMat, S.bushMat, S.leafMat]) env.prep(m);
   instanceRepeats(root);
 }
 
