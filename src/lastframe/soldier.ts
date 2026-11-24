@@ -22,6 +22,8 @@ export interface Gun {
   /** the middle of the magazine in the gun's own space, and how tall it is */
   magMid: THREE.Vector3;
   magLen: number;
+  /** where a hand takes hold of the action to work it (a bolt's handle), in the gun's own space */
+  actionGrip: THREE.Vector3;
 }
 
 const PARTS: Record<WeaponId, string[]> = {
@@ -189,7 +191,14 @@ export function buildGun(id: WeaponId): Gun {
     bb.getCenter(magMid);
     magLen = bb.max.y - bb.min.y;
   }
-  return { group, id, dot, mag, action, actionRest: action?.position.clone() ?? new THREE.Vector3(), magRest: mag?.position.clone() ?? new THREE.Vector3(), magMid, magLen };
+  const actionGrip = new THREE.Vector3();
+  if (action) {
+    group.updateMatrixWorld(true);
+    // (a bolt's handle stands out to the right, at the back of it, and hangs below it)
+    const bb = new THREE.Box3().setFromObject(action);
+    actionGrip.set(bb.min.x + 0.012, bb.min.y + 0.014, bb.min.z + 0.03);
+  }
+  return { group, id, dot, mag, action, actionRest: action?.position.clone() ?? new THREE.Vector3(), magRest: mag?.position.clone() ?? new THREE.Vector3(), magMid, magLen, actionGrip };
 }
 
 export function preparePeople(): Promise<PeopleKit> {
@@ -463,6 +472,9 @@ export class Soldier {
   /** first person: the support hand is somewhere of its own, in the gun's space (changing a magazine), 0 to 1 */
   supK = 0;
   readonly supAt = new THREE.Vector3();
+  /** the same for the firing hand (working a bolt) */
+  gripK = 0;
+  readonly gripAt = new THREE.Vector3();
   /** seconds since death, -1 alive */
   dead = -1;
   private clip = '';
@@ -1004,7 +1016,9 @@ export class Soldier {
     const gq = g.getWorldQuaternion(this.gq);
     const L = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z).applyQuaternion(gq);
     // the wrists sit behind and outside what the fingers hold
-    const palm = new THREE.Vector3(-0.038, -0.03, -0.05).applyMatrix4(g.matrixWorld);
+    const palm = new THREE.Vector3(-0.038, -0.03, -0.05);
+    if (this.gripK > 0) palm.lerp(new THREE.Vector3(-0.035, -0.02, -0.03).add(this.gripAt), this.gripK);
+    palm.applyMatrix4(g.matrixWorld);
     this.reach('R', palm, right, 1);
     this.hold('R', L(0.8, 0, 0.6).normalize(), L(0, -1, 0), 1);
     const su = spec.support;

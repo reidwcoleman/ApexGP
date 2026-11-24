@@ -54,6 +54,8 @@ const RELOAD_PISTOL: number[][] = [
   [0.86, 0.22, 0.06, -0.2, -0.008, 0.01, 0.04],
   [1.0, 0, 0, 0, 0, 0, 0],
 ];
+/** how far a shot drives each gun back (metres) and throws its muzzle up (radians), as it looks in the hands */
+const KICK: Record<WeaponId, [number, number]> = { carbine: [0.021, 0.021], pistol: [0.013, 0.16], shotgun: [0.062, 0.14], rifle: [0.055, 0.095] };
 /** how far along, 0 to 1, between two moments of a reload, eased */
 const span = (t: number, a: number, b: number) => {
   const k = Math.min(1, Math.max(0, (t - a) / (b - a)));
@@ -226,6 +228,10 @@ export class LocalPlayer {
   private inY = new Sp();
   private inZ = new Sp();
   private rkZ = new Sp();
+  /** the shot itself, as it is seen: the gun driven straight back and the muzzle thrown up at once, let down after */
+  private kbZ = new Sp();
+  private kbP = new Sp();
+  private kbQ = new THREE.Quaternion();
   private rkP = new Sp();
   private rkY = new Sp();
   private rkR = new Sp();
@@ -349,7 +355,7 @@ export class LocalPlayer {
     this.stamina = 1;
     this.mantle = null;
     this.slideT = this.stun = this.climb = this.climbY = this.trauma = 0;
-    for (const q of [this.swayY, this.swayP, this.inX, this.inY, this.inZ, this.rkZ, this.rkP, this.rkY, this.rkR, this.camP, this.camR, this.jigP, this.jigR]) q.reset();
+    for (const q of [this.swayY, this.swayP, this.inX, this.inY, this.inZ, this.rkZ, this.kbZ, this.kbP, this.rkP, this.rkY, this.rkR, this.camP, this.camR, this.jigP, this.jigR]) q.reset();
     this.stress = this.fight = this.fixT = this.fixK = 0;
     this.fumble = false;
     // clipped on in a hurry: never quite level
@@ -568,6 +574,8 @@ export class LocalPlayer {
     this.inZ.step(dt, THREE.MathUtils.clamp(-aF * 0.0016, -0.03, 0.03), 90, 12);
     this.inY.step(dt, 0, 120, 13);
     this.rkZ.step(dt, 0, 420, 30);
+    this.kbZ.step(dt, 0, 230, 25);
+    this.kbP.step(dt, 0, 170, 21);
     this.rkP.step(dt, 0, 300, 25);
     this.rkY.step(dt, 0, 300, 25);
     this.rkR.step(dt, 0, 260, 22);
@@ -681,7 +689,15 @@ export class LocalPlayer {
       gy -= Math.sin(t * Math.PI) * 0.3;
       pitchG -= Math.sin(t * Math.PI) * 0.9;
     }
-    const cyc = this.cycleT > 0 ? Math.sin((1 - this.cycleT / this.cycleLen) * Math.PI) : 0;
+    // working the action by hand: the stroke back, a beat with it open, the stroke forward (the bolt takes the firing hand
+    // off the grip to do it, so it starts later)
+    const ct = this.cycleT > 0 ? 1 - this.cycleT / this.cycleLen : -1;
+    const bolt = this.weapon === 'rifle';
+    const cyc = ct < 0 ? 0 : span(ct, bolt ? 0.2 : 0.06, 0.45) * (1 - span(ct, bolt ? 0.56 : 0.5, 0.85));
+    // (what the gun does in the hands when it goes off; none of it moves where the next round goes)
+    const kz = this.kbZ.x * (1 - a * 0.4), kp = this.kbP.x * (1 - a * 0.45);
+    gz -= kz;
+    gy += kp * 0.05;
     // ---- the hands under pressure: a fast fine tremor, in bursts, worst when they have something fiddly to do
     {
       const st = this.stress;
@@ -705,6 +721,10 @@ export class LocalPlayer {
     this.q.setFromEuler(this.e);
     this.gunQuat.copy(this.bodyQ).multiply(this.q).multiply(Q180);
     this.barrel.set(0, 0, 1).applyQuaternion(this.gunQuat);
+    if (kp > 1e-5) {
+      this.e.set(pitchG + kp, yawG, rollG, 'YXZ');
+      this.gunQuat.copy(this.bodyQ).multiply(this.kbQ.setFromEuler(this.e)).multiply(Q180);
+    }
     const gun = sol.gun;
     if (gun) {
       if (gun.dot) gun.dot.visible = this.adsK > 0.72;
@@ -712,6 +732,19 @@ export class LocalPlayer {
       gun.group.quaternion.copy(this.gunQuat);
       if (gun.action) {
         let back = this.weapon === 'pistol' ? Math.max(0, this.cool / spec.cycle) * 0.03 : cyc * (this.weapon === 'rifle' ? 0.09 : 0.1);
+        if (ct >= 0 && this.reloadT <= 0) {
+          if (bolt) {
+            // the firing hand comes off the grip, up to the bolt handle, and goes back and forward with it
+            sol.gripAt.copy(gun.actionGrip);
+            sol.gripAt.z -= back;
+            sol.gripK = span(ct, 0, 0.2) * (1 - span(ct, 0.85, 1));
+          } else {
+            // the hand on the fore-end is what works it: it goes with the pump
+            const su = spec.support;
+            sol.supAt.set(su[0] + 0.04, su[1] - 0.052, su[2] - 0.06 - back);
+            sol.supK = 1;
+          }
+        }
         if (this.reloadT > 0 && this.weapon === 'rifle') {
           // the bolt stays open while the rounds go in
           const t = 1 - this.reloadT / this.reloadLen;
@@ -779,7 +812,8 @@ export class LocalPlayer {
         const t = 1 - this.reloadT / this.reloadLen;
         sol.magHand = 0.55 + 0.4 * Math.sin(t * Math.PI * 2 * this.spec.mag);
       } else sol.magHand *= Math.exp(-dt * 12);
-      if (!gun.mag) sol.supK = 0;
+      if (!gun.mag && !(ct >= 0 && !bolt && this.reloadT <= 0)) sol.supK = 0;
+      if (!(ct >= 0 && bolt && this.reloadT <= 0)) sol.gripK = 0;
     }
     sol.camHand = this.fixK;
     sol.camAt.set(-0.1, -0.13, -0.06).applyQuaternion(cam.quaternion).add(eye);
@@ -1270,6 +1304,15 @@ export class LocalPlayer {
     this.aimX += side * 1.3 * (1 - this.adsK);
     // the shot goes back through the wrists into the shoulder
     const hard = spec.kick * (1 - this.adsK * 0.35) * crouchK;
+    {
+      // what the eye sees of it: straight back into the shoulder and the muzzle up, there in the same instant; a string
+      // of shots stacks only so far
+      const [kb, kpt] = KICK[this.weapon];
+      this.kbZ.x = Math.min(kb * 1.7, this.kbZ.x + kb * crouchK);
+      this.kbZ.v = 0;
+      this.kbP.x = Math.min(kpt * 1.6, this.kbP.x + kpt * crouchK * (0.85 + Math.random() * 0.3));
+      this.kbP.v = 0;
+    }
     this.rkZ.v += 0.42 * Math.sqrt(hard);
     this.rkP.v += hard * 0.22;
     this.rkY.v += side * 16;
