@@ -164,6 +164,9 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
     side: o.side ?? THREE.FrontSide,
     alphaTest: o.alphaTest ?? 0,
     transparent: o.transparent ?? false,
+    // canvas canopies are thin shells modelled as back-to-back faces on shared vertices: smoothed
+    // normals cancel out there, so they shade by their faces
+    flatShading: o.name === 'od_fabric',
   });
   const tile = o.tile ?? 1;
   const rep = 1 / tile;
@@ -287,6 +290,13 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
       albedo = 'diffuseColor.rgb = mix( vec3( 0.86, 0.85, 0.82 ) * mix( 0.92, 1.0, sampledDiffuseColor.g ), vColor.rgb * mix( 0.92, 1.0, sampledDiffuseColor.g ), step( 0.5, sampledDiffuseColor.r ) );';
     }
     f = f.replace('#include <color_fragment>', '#include <color_fragment>\n' + (kind === 'sand' ? 'float vOdWet = 0.0;\n' : '') + albedo);
+    if (kind === 'awning' || o.name === 'od_fabric') {
+      // canvas lets the sun through: from underneath it glows in its own colour
+      f = f.replace(
+        '#include <emissivemap_fragment>',
+        '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * uSunCol * 0.16 * smoothstep( 0.1, -0.5, normalize( vOdNormalW ).y );',
+      );
+    }
     if (kind === 'sand') {
       f = f.replace('//OD_END_roughnessmap_fragment', '//OD_END_roughnessmap_fragment\nroughnessFactor = mix( roughnessFactor, 0.18, vOdWet );\n//OD_WET');
     }

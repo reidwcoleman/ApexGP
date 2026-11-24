@@ -126,7 +126,11 @@ export class Sky {
   /** what the rest of the game reads each frame */
   readonly out = { exposure: 1, fogDensity: 0.0009, fogColor: new THREE.Vector3(0.7, 0.75, 0.8), sunScatter: new THREE.Vector3(), rain: 0, wet: 0, lamps: 0, night: 0, lightsOn: false };
 
-  constructor(readonly env: Env, readonly renderer: THREE.WebGLRenderer) {}
+  /** light thrown back up off the sunlit pavement and sand: what fills the undersides (awnings, cars, palm crowns) */
+  readonly bounce = new THREE.HemisphereLight(0x000000, 0xb59a7a, 0);
+  constructor(readonly env: Env, readonly renderer: THREE.WebGLRenderer) {
+    env.scene.add(this.bounce);
+  }
 
   private load(key: keyof typeof SKY): Promise<SkyInfo> {
     const name = SKY[key];
@@ -244,6 +248,9 @@ export class Sky {
     U.uSunCol.value.copy(sunE);
     // the image light is the same photo: it takes the photo's level too
     e.scene.environmentIntensity = l.env * k;
+    // the ground's bounce: the sunlight's colour off warm pale stone, about a fifth of the direct light
+    this.bounce.groundColor.setRGB(0.71 * sunE.x, 0.6 * sunE.y, 0.48 * sunE.z).multiplyScalar(0.32 / Math.max(1e-3, Math.max(sunE.x, sunE.y, sunE.z)));
+    this.bounce.intensity = Math.max(sunE.x, sunE.y, sunE.z) * 0.9 + l.lamps * 0.05;
     U.uNight.value = l.night;
     U.uSkyK.value = k * this.skyLum(info);
     U.uLmTint.value.set(l.lm[0] + this.flash * 0.6, l.lm[1] + this.flash * 0.65, l.lm[2] + this.flash * 0.8);

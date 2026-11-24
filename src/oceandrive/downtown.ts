@@ -279,6 +279,9 @@ export function makeBay(hdr: THREE.Texture): THREE.ShaderMaterial {
         float dist = length( vW - cameraPosition );
         float detail = 1.0 - smoothstep( 40.0, 600.0, dist );
         vec2 g = chop( vW.xz, uTime, 1.0 - smoothstep( 150.0, 2500.0, dist ) * 0.85 );
+        // gusts: cat's-paws of rougher water and glassy patches drifting across the bay
+        float gust = vn( vW.xz * 0.012 + vec2( uTime * 0.015, uTime * 0.006 ) ) * 0.7 + vn( vW.xz * 0.045 - uTime * 0.02 ) * 0.3;
+        g *= 0.35 + 1.3 * gust;
         g += ripples( vW.xz, uTime ) * 0.05 * detail;
         if ( uRain > 0.0 ) g += ( vec2( vn( vW.xz * 9.0 + uTime * 3.0 ), vn( vW.xz * 9.0 - uTime * 3.3 + 5.0 ) ) - 0.5 ) * 0.4 * uRain * detail;
         vec3 N = normalize( vec3( -g.x, 1.0, -g.y ) );
@@ -291,7 +294,8 @@ export function makeBay(hdr: THREE.Texture): THREE.ShaderMaterial {
           vec2 ruv = rc.xy / rc.w + g * vec2( 0.035, 0.06 );
           if ( ruv.x > 0.0 && ruv.x < 1.0 && ruv.y > 0.0 && ruv.y < 1.0 ) {
             vec3 rf = texture2D( tRefl, ruv ).rgb;
-            sky = min( rf, vec3( 40.0 ) );
+            // the bay's own colour tints what it mirrors
+            sky = min( rf, vec3( 40.0 ) ) * vec3( 0.86, 0.95, 0.92 );
           }
         }
         float cosi = max( dot( -V, N ), 0.0 );
@@ -299,7 +303,8 @@ export function makeBay(hdr: THREE.Texture): THREE.ShaderMaterial {
         F = min( F, 0.9 );
         float sunUp = max( uSunDir.y, 0.0 );
         vec3 E = uSunCol * sunUp + uSkyE;
-        vec3 body = vec3( 0.03, 0.26, 0.27 );
+        // Biscayne Bay: a green-teal, not a pool
+        vec3 body = vec3( 0.022, 0.105, 0.09 );
         body = mix( body, vec3( dot( body, vec3( 0.3, 0.5, 0.2 ) ) ) * vec3( 0.75, 0.9, 0.95 ), uGrey * 0.75 );
         body *= E * 0.3183;
         float rs = max( dot( R, uSunDir ), 0.0 );
