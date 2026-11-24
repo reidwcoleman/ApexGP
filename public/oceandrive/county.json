@@ -72,6 +72,35 @@
    ]
   },
   {
+   "name": "edge2",
+   "label": "Edgewater",
+   "frame": "main",
+   "core": [
+    [
+     -1750,
+     800
+    ],
+    [
+     -650,
+     800
+    ],
+    [
+     -650,
+     1550
+    ],
+    [
+     -1750,
+     1550
+    ]
+   ],
+   "glb": "tile_edge2.glb",
+   "scene": "tile_edge2_scene.json",
+   "data": "tile_edge2.json",
+   "layers": [
+    "height_edge2.bin.gz"
+   ]
+  },
+  {
    "name": "west1",
    "label": "Overtown",
    "frame": "main",
@@ -127,6 +156,93 @@
    "data": "tile_brk1.json",
    "layers": [
     "height_brk1.bin.gz"
+   ]
+  },
+  {
+   "name": "brk2",
+   "label": "South Brickell",
+   "frame": "main",
+   "core": [
+    [
+     -1700,
+     -1950
+    ],
+    [
+     -420,
+     -1950
+    ],
+    [
+     -420,
+     -2650
+    ],
+    [
+     -1600,
+     -2650
+    ]
+   ],
+   "glb": "tile_brk2.glb",
+   "scene": "tile_brk2_scene.json",
+   "data": "tile_brk2.json",
+   "layers": [
+    "height_brk2.bin.gz"
+   ]
+  },
+  {
+   "name": "sobe_n",
+   "label": "South Beach, 10th to 15th",
+   "frame": "beach",
+   "core": [
+    [
+     -262,
+     420
+    ],
+    [
+     330,
+     420
+    ],
+    [
+     330,
+     1150
+    ],
+    [
+     -262,
+     1150
+    ]
+   ],
+   "glb": "tile_sobe_n.glb",
+   "scene": "tile_sobe_n_scene.json",
+   "data": "tile_sobe_n.json",
+   "layers": [
+    "height_sobe_n.bin.gz"
+   ]
+  },
+  {
+   "name": "sobe_s",
+   "label": "South of Fifth",
+   "frame": "beach",
+   "core": [
+    [
+     -262,
+     -1100
+    ],
+    [
+     330,
+     -1100
+    ],
+    [
+     330,
+     -330
+    ],
+    [
+     -262,
+     -330
+    ]
+   ],
+   "glb": "tile_sobe_s.glb",
+   "scene": "tile_sobe_s_scene.json",
+   "data": "tile_sobe_s.json",
+   "layers": [
+    "height_sobe_s.bin.gz"
    ]
   }
  ]
