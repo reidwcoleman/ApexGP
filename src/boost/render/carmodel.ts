@@ -516,6 +516,48 @@ export interface Rig {
 
 const cache = new Map<number, { g: CarGeos; rig: Rig }>();
 
+// ------------------------------------------------------------------ the Blender bodies
+// blender/boostcars.py models each body hard-surface (panels, pods, cut arches, greenhouse, carbon,
+// lights) in this same frame and writes public/boost/cars.glb: meshes named b<body>_<group>. When
+// they're loaded they replace the lofted body groups; wheels, nozzles and the rig stay as built here.
+const BLENDER = new Map<string, THREE.BufferGeometry>();
+const BODY_GROUPS = ['paint', 'glass', 'carbon', 'accent', 'grille', 'head', 'tail'] as const;
+export async function loadCarBodies(url: string): Promise<void> {
+  try {
+    const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
+    const gltf = await new GLTFLoader().loadAsync(url);
+    gltf.scene.updateMatrixWorld(true);
+    gltf.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const geo = m.geometry.clone().applyMatrix4(m.matrixWorld);
+      BLENDER.set(m.name, geo);
+    });
+    cache.clear();
+  } catch (e) {
+    console.warn('[boost] car bodies not loaded, using the lofted ones', e);
+  }
+}
+const EMPTY = () => {
+  const e = new THREE.BufferGeometry();
+  e.setAttribute('position', new THREE.Float32BufferAttribute([], 3));
+  e.setAttribute('normal', new THREE.Float32BufferAttribute([], 3));
+  return e;
+};
+function blenderGroup(b: number, k: (typeof BODY_GROUPS)[number]): THREE.BufferGeometry {
+  const src = BLENDER.get(`b${b}_${k}`);
+  if (!src) return EMPTY();
+  const o = prep(src);
+  if (k === 'grille') {
+    // the mesh texture, projected flat onto the front
+    const p = o.attributes.position;
+    const uv = new Float32Array(p.count * 2);
+    for (let i = 0; i < p.count; i++) { uv[i * 2] = p.getY(i) * 0.12; uv[i * 2 + 1] = p.getZ(i) * 0.12; }
+    o.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  }
+  return o;
+}
+
 export function carModel(body: number): { g: CarGeos; rig: Rig } {
   const b = Math.max(0, Math.min(SPECS.length - 1, body | 0));
   const hit = cache.get(b);
@@ -838,6 +880,7 @@ export function carModel(body: number): { g: CarGeos; rig: Rig } {
     ],
     antenna: [sp.antenna[0], sp.antenna[1], sp.antenna[2] + dz],
   };
+  if (BLENDER.has(`b${b}_paint`)) for (const k of BODY_GROUPS) g[k] = blenderGroup(b, k);
   const out = { g, rig };
   cache.set(b, out);
   return out;

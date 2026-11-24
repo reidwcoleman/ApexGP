@@ -774,6 +774,27 @@ function goal(sideSign: number, team: THREE.Color): THREE.Group {
   const pl = new THREE.PointLight(team, 6, 14, 2);
   pl.position.set(0, Y + sideSign * (D - 200), H * 0.6);
   g.add(pl);
+  // a goal in this net: every light on the goal strobes in the scorer's colour, then settles back
+  const base = { strip: strip.color.clone(), edge: edgeM.color.clone() };
+  const tmpC = new THREE.Color();
+  g.userData.flash = (age: number, scorer: THREE.Color | null) => {
+    if (!scorer || age > 3.2) {
+      strip.color.copy(base.strip);
+      edgeM.color.copy(base.edge);
+      pl.color.copy(team);
+      pl.intensity = 6;
+      return;
+    }
+    // fast strobe that slows and fades, with a hold-on at the start
+    const on = age < 0.35 || Math.floor(age * (8 - age * 1.5)) % 2 === 0;
+    const fade = 1 - Math.max(0, (age - 2.4) / 0.8);
+    const k = on ? 1 : 0.12;
+    tmpC.copy(scorer).multiplyScalar(5.5 * k * fade + 0.4);
+    strip.color.copy(tmpC).lerp(base.strip, 1 - fade);
+    edgeM.color.copy(scorer).multiplyScalar(4 * k * fade + 0.3).lerp(base.edge, 1 - fade);
+    pl.color.copy(scorer);
+    pl.intensity = 6 + 70 * k * fade;
+  };
   return g;
 }
 
@@ -1728,7 +1749,11 @@ export function buildArena(): ArenaView {
   root.add(centreLogo());
   const sh = shell();
   root.add(sh);
-  root.add(goal(-1, BLUE), goal(1, ORANGE));
+  const goals = { [-1]: goal(-1, BLUE), [1]: goal(1, ORANGE) } as Record<number, THREE.Group>;
+  root.add(goals[-1], goals[1]);
+  // which net last took a goal, and when
+  let lastScore: [number, number] | null = null;
+  let flashSide = 0, flashT = -99, flashCol: THREE.Color | null = null;
   const pd = pads();
   root.add(pd.group);
   // the dressing that changes with the arena: built on first use, then only shown or hidden
@@ -1818,6 +1843,15 @@ export function buildArena(): ArenaView {
       shellT.value = t;
       uEx.value = excite;
       scr.draw(score, clock, t, excite);
+      if (lastScore && (score[0] > lastScore[0] || score[1] > lastScore[1])) {
+        // blue scores in the orange net (+y), orange in the blue one
+        const blue = score[0] > lastScore[0];
+        flashSide = blue ? 1 : -1;
+        flashCol = blue ? BLUE : ORANGE;
+        flashT = t;
+      }
+      lastScore = [score[0], score[1]];
+      for (const s of [-1, 1]) goals[s].userData.flash(t - flashT, s === flashSide ? flashCol : null);
       for (const m of pd.group.userData.anim as THREE.ShaderMaterial[]) m.uniforms.uT.value = t;
       const sl = pd.sparkLive.array as Float32Array;
       const seeds = (pd.sparks.geometry.attributes.seed as THREE.BufferAttribute).array as Float32Array;
