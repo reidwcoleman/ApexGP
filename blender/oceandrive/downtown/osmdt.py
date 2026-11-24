@@ -5,19 +5,37 @@ import json, os, sys, math
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import geo
-TX, TY = 4633.0, 644.0
-_d = json.load(open(os.path.join(os.path.dirname(HERE), 'data', 'osm_downtown.json')))
+# which side of the bay: 'main' (downtown, Brickell, Edgewater... moved east by TX, TY) or 'beach' (Miami
+# Beach, in the block's own frame). OD_FRAME picks it.
+FRAME = os.environ.get('OD_FRAME', 'main')
+TX, TY = (4633.0, 644.0) if FRAME == 'main' else (0.0, 0.0)
+FILES = os.environ['OD_OSM'].split(',') if os.environ.get('OD_OSM') else (['osm_downtown.json', 'osm_north.json', 'osm_west.json'] if FRAME == 'main' else ['osm_mb.json'])
 NODES = {}
 NTAGS = {}
-for e in _d['elements']:
-    if e['type'] == 'node':
-        x, y = geo.L(geo.raw(e['lat'], e['lon']))
-        NODES[e['id']] = (x + TX, y + TY)
-        if 'tags' in e:
-            NTAGS[e['id']] = e['tags']
-WAYS = [e for e in _d['elements'] if e['type'] == 'way']
+_seen = set()
+WAYS = []
+RELS = []
+for fn in FILES:
+    p = os.path.join(os.path.dirname(HERE), 'data', fn)
+    if not os.path.exists(p):
+        continue
+    _d = json.load(open(p))
+    for e in _d['elements']:
+        k = (e['type'], e['id'])
+        if k in _seen:
+            continue
+        _seen.add(k)
+        if e['type'] == 'node':
+            x, y = geo.L(geo.raw(e['lat'], e['lon']))
+            NODES[e['id']] = (x + TX, y + TY)
+            if 'tags' in e:
+                NTAGS[e['id']] = e['tags']
+        elif e['type'] == 'way':
+            WAYS.append(e)
+        elif e['type'] == 'relation':
+            RELS.append(e)
+    del _d
 WAY = {w['id']: w for w in WAYS}
-RELS = [e for e in _d['elements'] if e['type'] == 'relation']
 
 def pts(w):
     return [NODES[i] for i in w['nodes'] if i in NODES]

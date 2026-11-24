@@ -13,13 +13,19 @@ ROOT = os.path.abspath(os.path.join(OD, '..', '..'))
 OUT = os.path.join(ROOT, 'public', 'oceandrive')
 WORK = os.path.join(OD, 'work')
 sc = bpy.context.scene
-D = json.load(open(os.path.join(WORK, 'dt.json')))
+argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
+TILE = argv[argv.index('--tile') + 1] if '--tile' in argv else 'dt'
+D = json.load(open(os.path.join(WORK, 'dt.json' if TILE == 'dt' else f'tile_{TILE}.json')))
+# the skyline lives in its own file now (downtown's first build carried it)
+for o in list(bpy.data.objects):
+    if o.name.startswith(('dt_sky', 'dt_beachsky', 'dt_land', 'dt_bay', 'dt_far')):
+        bpy.data.objects.remove(o)
 SEA = -1.5
 
 # ------------------------------------------------------------------ heightmaps
 # the ground under you is what a ray from 4 m finds (so the Metromover, the canopies and the balconies
 # overhead don't count); where it finds nothing you're inside a building: its roof (the walls block)
-OVER = [o for o in bpy.data.objects if o.type == 'MESH' and (o.name.startswith(('dt_mover', 'dt_poles', 'dt_balcony', 'dt_rail', 'dt_bay', 'dt_far', 'palm', 'lamp', 'dt_sky', 'dt_beachsky', 'dt_land', 'dt_piers')) or (o.users_collection and o.users_collection[0].name in ('PALMS', 'PROPS', 'TEMPLATES')))]
+OVER = [o for o in bpy.data.objects if o.type == 'MESH' and (o.name.endswith(('_mover', '_poles', '_balcony', '_rail', '_piers')) or o.name.startswith(('palm', 'lamp')) or (o.users_collection and o.users_collection[0].name in ('PALMS', 'PROPS', 'TEMPLATES')))]
 for o in OVER:
     o.hide_viewport = True
 dg = bpy.context.evaluated_depsgraph_get()
@@ -68,10 +74,9 @@ def layer(name, X0, X1, Y0, Y1, RES):
 
 cx = [p[0] for p in D['core']]
 cy = [p[1] for p in D['core']]
-layers = [
-    layer('dt', math.floor(min(cx)) - 2, math.ceil(max(cx)) + 2, math.floor(min(cy)) - 2, math.ceil(max(cy)) + 2, 0.5),
-    layer('br', -790.0, -262.0, -150.0, -20.0, 0.5),
-]
+layers = [layer(TILE, math.floor(min(cx)) - 2, math.ceil(max(cx)) + 2, math.floor(min(cy)) - 2, math.ceil(max(cy)) + 2, 0.5)]
+if D.get('bridge'):
+    layers.append(layer('br', -790.0, -262.0, -150.0, -20.0, 0.5))
 for o in OVER:
     o.hide_viewport = False
 
@@ -111,17 +116,18 @@ for m in bpy.data.materials:
             n.inputs['Alpha'].default_value = 1.0
 
 # ------------------------------------------------------------------ glTF
+GLB = 'downtown.glb' if TILE == 'dt' else f'tile_{TILE}.glb'
 for o in bpy.data.objects:
     o.select_set(False)
 bpy.ops.export_scene.gltf(
-    filepath=os.path.join(OUT, 'downtown.glb'), export_format='GLB', use_visible=False, use_renderable=False,
+    filepath=os.path.join(OUT, GLB), export_format='GLB', use_visible=False, use_renderable=False,
     export_apply=True, export_texcoords=True, export_normals=True, export_vertex_color='ACTIVE',
     export_all_vertex_colors=False, export_materials='EXPORT', export_image_format='WEBP', export_image_quality=82,
     export_gpu_instances=True, export_yup=True, export_lights=False, export_cameras=False,
     export_meshopt_compression_enable=True)
-print('glb', os.path.getsize(os.path.join(OUT, 'downtown.glb')) / 1e6, 'MB')
-lmf = os.path.join(WORK, 'lightmaps_dt.json')
+print('glb', os.path.getsize(os.path.join(OUT, GLB)) / 1e6, 'MB')
+lmf = os.path.join(WORK, f'lightmaps_{TILE}.json')
 baked = bpy.data.filepath.endswith('_baked.blend')
 lm = json.load(open(lmf)) if (baked and os.path.exists(lmf)) else {}
-json.dump(dict(lightmaps=lm, layers=layers, core=D['core']), open(os.path.join(OUT, 'downtown_scene.json'), 'w'), indent=1)
+json.dump(dict(lightmaps=lm, layers=layers, core=D['core']), open(os.path.join(OUT, 'downtown_scene.json' if TILE == 'dt' else f'tile_{TILE}_scene.json'), 'w'), indent=1)
 print('done')

@@ -131,7 +131,7 @@ export class Police {
     readonly sfx: Sfx,
     data: DressData,
   ) {
-    this.graph = new RoadGraph(data, null);
+    this.graph = new RoadGraph(data, []);
     this.logo = printTex('POLICE', '#e8e8e8');
     this.swatLogo = printTex('SWAT', '#e8e8e8');
   }

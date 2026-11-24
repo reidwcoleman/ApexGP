@@ -1,0 +1,67 @@
+{
+ "tiles": [
+  {
+   "name": "dt",
+   "label": "Downtown",
+   "frame": "main",
+   "core": [
+    [
+     -1300,
+     45
+    ],
+    [
+     -700,
+     45
+    ],
+    [
+     -520,
+     -400
+    ],
+    [
+     -500,
+     -1260
+    ],
+    [
+     -1090,
+     -1260
+    ]
+   ],
+   "glb": "downtown.glb",
+   "scene": "downtown_scene.json",
+   "data": "downtown.json",
+   "layers": [
+    "height_dt.bin.gz",
+    "height_br.bin.gz"
+   ]
+  },
+  {
+   "name": "brk1",
+   "label": "Brickell",
+   "frame": "main",
+   "core": [
+    [
+     -1850,
+     -1260
+    ],
+    [
+     -420,
+     -1260
+    ],
+    [
+     -420,
+     -1950
+    ],
+    [
+     -1700,
+     -1950
+    ]
+   ],
+   "glb": "tile_brk1.glb",
+   "scene": "tile_brk1_scene.json",
+   "data": "tile_brk1.json",
+   "layers": [
+    "height_brk1.bin.gz"
+   ]
+  }
+ ]
+}

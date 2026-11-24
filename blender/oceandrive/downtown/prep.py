@@ -9,6 +9,13 @@ Port Boulevard's bridge crosses the (narrowed) bay to Ocean Drive's 7th Street."
 import json, math, os, sys, random
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+# which tile: downtown/tiles.json (dt = Biscayne Boulevard, the first)
+TILE = sys.argv[sys.argv.index('--tile') + 1] if '--tile' in sys.argv else 'dt'
+CFG = json.load(open(os.path.join(HERE, 'tiles.json')))[TILE]
+os.environ['OD_FRAME'] = CFG.get('frame', 'main')
+if CFG.get('osm'):
+    os.environ['OD_OSM'] = CFG['osm']
+os.environ['OD_EXT'] = ','.join(str(v) for v in CFG.get('ext', [-3400, -2900, -300, 1500]))
 from osmdt import NODES, NTAGS, WAYS, pts, num, TX, TY, rel_polys
 from land import land_and_water
 from shapely.geometry import Polygon, MultiPolygon, LineString, Point, box, mapping
@@ -22,7 +29,9 @@ PUB = os.path.join(ROOT, 'public', 'oceandrive')
 rng = random.Random(1896)
 
 # ------------------------------------------------------------------ extents
-CORE = Polygon([(-1300, 45), (-700, 45), (-520, -400), (-500, -1260), (-1090, -1260)])
+CORE = Polygon(CFG['core'])
+BRIDGE_ON = bool(CFG.get('bridge'))
+SKYLINE_ON = bool(CFG.get('skyline'))
 SKY = box(-3400, -2900, -480, 1500)          # the skyline around it (nothing east of the bay's west shore)
 lands = land_and_water()
 LAND = max(lands, key=lambda a: a[0].area)[0]
@@ -36,6 +45,9 @@ for w in WAYS:
                 water_polys.append(p)
         except Exception:
             pass
+for g, t in rel_polys(lambda t: t.get('natural') == 'water' or t.get('waterway') == 'riverbank' or t.get('water') in ('river', 'canal')):
+    if g.area > 3000:
+        water_polys.append(g.buffer(0))
 LAND = LAND.difference(unary_union(water_polys)).buffer(0) if water_polys else LAND
 CORE_LAND = CORE.intersection(LAND).buffer(0)
 print('core land', round(CORE_LAND.area))
@@ -63,12 +75,19 @@ for w in WAYS:
     hw = t.get('highway')
     if hw not in DRIVE and not (hw == 'service' and t.get('service') == 'alley'):
         continue
-    if t.get('bridge') == 'yes' or num(t.get('layer'), 0) > 0 or t.get('tunnel') == 'yes' or num(t.get('layer'), 0) < 0:
-        continue
     p = pts(w)
     if len(p) < 2:
         continue
     ls = LineString(p)
+    over_water = False
+    if t.get('bridge') == 'yes' or num(t.get('layer'), 0) > 0 or t.get('tunnel') == 'yes' or num(t.get('layer'), 0) < 0:
+        # bridges over the river stay (at street level); overpasses and tunnels don't
+        if t.get('tunnel') == 'yes' or num(t.get('layer'), 0) > 1 or ls.intersection(LAND).length > 0.5 * ls.length:
+            continue
+        # a bridge to somewhere that isn't here (an island the map leaves out): no
+        if not (LAND.buffer(15).contains(Point(p[0])) and LAND.buffer(15).contains(Point(p[-1]))):
+            continue
+        over_water = True
     if not ls.intersects(CORE.buffer(60)):
         continue
     dl, lw = DRIVE.get(hw, (1, 3.2))
@@ -80,7 +99,7 @@ for w in WAYS:
         lanes, lw = 1, 3.6
     width = lanes * lw + (0.6 if lanes > 1 else 0.8)
     roads.append(dict(id=w['id'], name=t.get('name', ''), pts=p, nodes=[i for i in w['nodes'] if i in NODES], lanes=lanes, oneway=oneway, lw=lw, width=width, hw=hw,
-                      signals=[]))
+                      signals=[], water=over_water))
 print('roads', len(roads))
 
 # junctions: nodes shared by two or more drivable ways (or a way's interior node used twice)
@@ -99,7 +118,8 @@ for n, rs in JUNC.items():
 ROAD = unary_union([road_poly(r) for r in roads] + caps)
 # curb returns: close the concave corners
 # the bridge's approach (Port Boulevard runs to the seawall)
-ROAD = ROAD.intersection(LAND.buffer(0.5)).buffer(0)
+ROAD = ROAD.intersection(LAND.buffer(0.5)).union(unary_union([road_poly(r) for r in roads if r.get('water')] or [Polygon()])).buffer(0)
+BRIDGES = unary_union([road_poly(r) for r in roads if r.get('water')] or [Polygon()]).difference(LAND).buffer(0)
 ROAD_CORE = ROAD.intersection(CORE).buffer(0)
 
 # ------------------------------------------------------------------ buildings
@@ -209,7 +229,7 @@ for blk in polys(BLOCKS):
     o = blk.buffer(-4.5, join_style='round', quad_segs=4).buffer(4.5, join_style='round', quad_segs=4)
     _bl.append(o if o.area > 0.75 * blk.area else blk)
 BLOCKS = unary_union(_bl).buffer(0)
-ROAD_CORE = CORE_LAND.difference(BLOCKS).buffer(0)
+ROAD_CORE = CORE_LAND.difference(BLOCKS).union(BRIDGES.intersection(CORE)).buffer(0)
 greens = []
 for w in WAYS:
     t = w.get('tags', {})
@@ -438,31 +458,34 @@ PAINT_Y = PAINT_Y.difference(XWALK.buffer(0.6)).intersection(ROAD_CORE.buffer(-0
 XWALK = XWALK.intersection(ROAD_CORE.buffer(-0.2))
 
 # ------------------------------------------------------------------ the bridge to Ocean Drive's 7th Street
-# Port Boulevard's two carriageways leave the seawall by Bayside; the deck rises over the bay and lands on 7th
-pb_e = [r for r in roads if r['name'] == 'Port Boulevard' and r['oneway']]
-coast_pt = None
-best = -1e9
-for r in pb_e:
-    for p in r['pts']:
-        if p[0] > best and LAND.buffer(2).contains(Point(p)):
-            best, coast_pt = p[0], p
-print('Port Boulevard at the seawall', coast_pt)
-BX0 = coast_pt[0] - 3
-BY0 = coast_pt[1] + 7
-BX1, BY1 = -262.0, -69.0   # 7th Street's west end (centre)
-def bridge_xy(u):
-    """centreline at u in 0..1: a gentle S from Port Boulevard's line onto 7th Street"""
-    x = BX0 + (BX1 - BX0) * u
-    s = u * u * (3 - 2 * u)
-    y = BY0 + (BY1 - BY0) * s
-    return x, y
-def bridge_z(u):
-    L = BX1 - BX0
-    d = u * L
-    # rises 1:22 off each shore to 7.5 m over the channel
-    return min(7.5, d / 22.0, (L - d) / 22.0)
-BRIDGE = [[round(bridge_xy(u)[0], 3), round(bridge_xy(u)[1], 3), round(bridge_z(u), 3)] for u in np.linspace(0, 1, 121)]
-BRIDGE_W = 21.0
+if BRIDGE_ON:
+    # Port Boulevard's two carriageways leave the seawall by Bayside; the deck rises over the bay and lands on 7th
+    pb_e = [r for r in roads if r['name'] == 'Port Boulevard' and r['oneway']]
+    coast_pt = None
+    best = -1e9
+    for r in pb_e:
+        for p in r['pts']:
+            if p[0] > best and LAND.buffer(2).contains(Point(p)):
+                best, coast_pt = p[0], p
+    print('Port Boulevard at the seawall', coast_pt)
+    BX0 = coast_pt[0] - 3
+    BY0 = coast_pt[1] + 7
+    BX1, BY1 = -262.0, -69.0   # 7th Street's west end (centre)
+    def bridge_xy(u):
+        """centreline at u in 0..1: a gentle S from Port Boulevard's line onto 7th Street"""
+        x = BX0 + (BX1 - BX0) * u
+        s = u * u * (3 - 2 * u)
+        y = BY0 + (BY1 - BY0) * s
+        return x, y
+    def bridge_z(u):
+        L = BX1 - BX0
+        d = u * L
+        # rises 1:22 off each shore to 7.5 m over the channel
+        return min(7.5, d / 22.0, (L - d) / 22.0)
+    BRIDGE = [[round(bridge_xy(u)[0], 3), round(bridge_xy(u)[1], 3), round(bridge_z(u), 3)] for u in np.linspace(0, 1, 121)]
+    BRIDGE_W = 21.0
+else:
+    BRIDGE, BRIDGE_W = [], 0.0
 
 # ------------------------------------------------------------------ the lane graph (traffic and police)
 # ways split at junctions into segments; segments trimmed by the junction radius; lanes offset to the right
@@ -478,51 +501,53 @@ for r in roads:
         if ls.length < 1.0:
             continue
         segs.append(dict(r=r, a=nodes[0], b=nodes[-1], line=ls))
-# our side: 7th St (bridge to Washington, on to Collins), Washington Ave, 8th St, Collins Ave between 7th and 8th
-OURS = [
-    ('7th Street', [(-262.0, -69.0), (-220.8, -69.0)], 2, 4.5),
-    ('7th Street', [(-220.8, -69.0), (-107.4, -69.0)], 2, 4.5),
-    ('Washington Avenue', [(-220.8, -69.0), (-220.8, 68.2)], 2, 4.0),
-    ('8th Street', [(-220.8, 68.2), (-107.4, 68.2)], 2, 4.5),
-    ('Collins Avenue', [(-107.4, 68.2), (-107.4, -69.0)], 2, 5.0),
-]
 OUR_NODES = {}
-def our_node(p):
-    k = (round(p[0], 1), round(p[1], 1))
-    if k not in OUR_NODES:
-        OUR_NODES[k] = 'o%d' % len(OUR_NODES)
-        NODES[OUR_NODES[k]] = p
-    return OUR_NODES[k]
-for name, p, lanes, lw in OURS:
-    r = dict(id=0, name=name, pts=p, nodes=[], lanes=lanes, oneway=False, lw=lw, width=lanes * lw, hw='ours')
-    segs.append(dict(r=r, a=our_node(p[0]), b=our_node(p[1]), line=LineString(p)))
-# the bridge: Port Boulevard's eastbound carriageway runs on over the bay to 7th Street, the westbound comes back
-pb = [r for r in roads if r['name'] == 'Port Boulevard' and r['oneway']]
-eb_end = max((r['nodes'][-1] for r in pb), key=lambda n: NODES[n][0])
-wb_start = max((r['nodes'][0] for r in pb), key=lambda n: NODES[n][0])
-print('bridge ends', NODES[eb_end], NODES[wb_start])
-def bridge_lane(side):
-    """the deck's centreline shifted to one carriageway (side -1 south/eastbound, +1 north/westbound)"""
-    out = []
-    for u in np.linspace(0, 1, 61):
-        x, y = bridge_xy(u)
-        x2, y2 = bridge_xy(min(1, u + 0.01))
-        if u >= 1:
-            x2, y2 = x + 1, y
-        L = math.hypot(x2 - x, y2 - y) or 1
-        nx, ny = -(y2 - y) / L, (x2 - x) / L
-        off = 5.4 + (2.4 - 5.4) * (u * u * (3 - 2 * u))
-        out.append((x + nx * side * off, y + ny * side * off))
-    return out
-e_pts = [NODES[eb_end]] + bridge_lane(-1)[1:-1] + [(BX1, BY1 - 2.4)]
-w_pts = [(BX1, BY1 + 2.4)] + bridge_lane(1)[::-1][1:-1] + [NODES[wb_start]]
-for nm, p, a_, b_ in (('Port Boulevard Bridge', e_pts, eb_end, None), ('Port Boulevard Bridge', w_pts, None, wb_start)):
-    a_ = a_ or our_node((BX1, BY1))
-    b_ = b_ or our_node((BX1, BY1))
-    r = dict(id=0, name=nm, pts=p, nodes=[], lanes=2, oneway=True, lw=3.6, width=8.0, hw='bridge')
-    segs.append(dict(r=r, a=a_, b=b_, line=LineString(p)))
-for k, v in list(OUR_NODES.items()):
-    JRAD.setdefault(v, 7.0)
+if BRIDGE_ON:
+    # our side: 7th St (bridge to Washington, on to Collins), Washington Ave, 8th St, Collins Ave between 7th and 8th
+    OURS = [
+        ('7th Street', [(-262.0, -69.0), (-220.8, -69.0)], 2, 4.5),
+        ('7th Street', [(-220.8, -69.0), (-107.4, -69.0)], 2, 4.5),
+        ('Washington Avenue', [(-220.8, -69.0), (-220.8, 68.2)], 2, 4.0),
+        ('8th Street', [(-220.8, 68.2), (-107.4, 68.2)], 2, 4.5),
+        ('Collins Avenue', [(-107.4, 68.2), (-107.4, -69.0)], 2, 5.0),
+    ]
+    OUR_NODES = {}
+    def our_node(p):
+        k = (round(p[0], 1), round(p[1], 1))
+        if k not in OUR_NODES:
+            OUR_NODES[k] = 'o%d' % len(OUR_NODES)
+            NODES[OUR_NODES[k]] = p
+        return OUR_NODES[k]
+    for name, p, lanes, lw in OURS:
+        r = dict(id=0, name=name, pts=p, nodes=[], lanes=lanes, oneway=False, lw=lw, width=lanes * lw, hw='ours')
+        segs.append(dict(r=r, a=our_node(p[0]), b=our_node(p[1]), line=LineString(p)))
+    # the bridge: Port Boulevard's eastbound carriageway runs on over the bay to 7th Street, the westbound comes back
+    pb = [r for r in roads if r['name'] == 'Port Boulevard' and r['oneway']]
+    eb_end = max((r['nodes'][-1] for r in pb), key=lambda n: NODES[n][0])
+    wb_start = max((r['nodes'][0] for r in pb), key=lambda n: NODES[n][0])
+    print('bridge ends', NODES[eb_end], NODES[wb_start])
+    def bridge_lane(side):
+        """the deck's centreline shifted to one carriageway (side -1 south/eastbound, +1 north/westbound)"""
+        out = []
+        for u in np.linspace(0, 1, 61):
+            x, y = bridge_xy(u)
+            x2, y2 = bridge_xy(min(1, u + 0.01))
+            if u >= 1:
+                x2, y2 = x + 1, y
+            L = math.hypot(x2 - x, y2 - y) or 1
+            nx, ny = -(y2 - y) / L, (x2 - x) / L
+            off = 5.4 + (2.4 - 5.4) * (u * u * (3 - 2 * u))
+            out.append((x + nx * side * off, y + ny * side * off))
+        return out
+    e_pts = [NODES[eb_end]] + bridge_lane(-1)[1:-1] + [(BX1, BY1 - 2.4)]
+    w_pts = [(BX1, BY1 + 2.4)] + bridge_lane(1)[::-1][1:-1] + [NODES[wb_start]]
+    for nm, p, a_, b_ in (('Port Boulevard Bridge', e_pts, eb_end, None), ('Port Boulevard Bridge', w_pts, None, wb_start)):
+        a_ = a_ or our_node((BX1, BY1))
+        b_ = b_ or our_node((BX1, BY1))
+        r = dict(id=0, name=nm, pts=p, nodes=[], lanes=2, oneway=True, lw=3.6, width=8.0, hw='bridge')
+        segs.append(dict(r=r, a=a_, b=b_, line=LineString(p)))
+    for k, v in list(OUR_NODES.items()):
+        JRAD.setdefault(v, 7.0)
 
 def jr(n):
     return JRAD.get(n, 0.0) if (n in JUNC or isinstance(n, str)) else 0.0
@@ -883,6 +908,12 @@ coast = LAND.boundary.intersection(CORE.buffer(-0.5))
 for g in getattr(coast, 'geoms', [coast]):
     if g.geom_type == 'LineString' and g.length > 2:
         sea_lines.append([[round(x, 3), round(y, 3)] for x, y in g.simplify(0.2).coords])
+# river bridges: their edges over the water get a parapet (and the deck an edge down to the girder)
+bridge_rails = []
+_br = BRIDGES.intersection(CORE).boundary.difference(LAND.buffer(0.8))
+for g in getattr(_br, 'geoms', [_br]):
+    if g.geom_type == 'LineString' and g.length > 2:
+        bridge_rails.append([[round(x, 3), round(y, 3)] for x, y in g.simplify(0.2).coords])
 # Metromover columns: every ~28 m along the guideway, never in the road
 mover_cols = []
 for ln in mover:
@@ -939,22 +970,29 @@ dt = dict(
     bridge=BRIDGE, bridge_w=BRIDGE_W, signals=ctrl_out,
     tri=dict(road=tris(ROAD_CORE), pave=tris(inner(PAVE)), lawn=tris(inner(LAWN)), paths=tris(inner(PATHS.intersection(CORE).intersection(BLK))),
              med_grass=tris(inner(MED_GRASS)), med_pave=tris(inner(MED_PAVE)), curb=tris(CURB, 0), paint_w=tris(PAINT_W, 0.02), paint_y=tris(PAINT_Y, 0.02),
-             xwalk=tris(XWALK, 0.02), skyland=tris(LAND.intersection(SKY).difference(CORE).buffer(0), 0.5)),
-    curb_rings=curb_rings, sea_lines=sea_lines, mover_cols=mover_cols, beach_sky=beach_sky,
+             xwalk=tris(XWALK, 0.02), skyland=tris(LAND.intersection(SKY).difference(CORE).buffer(0), 0.5) if SKYLINE_ON else dict(v=[], t=[])),
+    curb_rings=curb_rings, sea_lines=sea_lines, bridge_rails=bridge_rails, mover_cols=mover_cols, beach_sky=beach_sky if SKYLINE_ON else [],
 )
-json.dump(dt, open(os.path.join(WORK, 'dt.json'), 'w'))
+if not SKYLINE_ON:
+    dt['skyline'], dt['sky_roads'], dt['land'] = [], [], []
+dt['name'] = TILE
+WOUT = 'dt.json' if TILE == 'dt' else f'tile_{TILE}.json'
+GOUT = 'downtown.json' if TILE == 'dt' else f'tile_{TILE}.json'
+json.dump(dt, open(os.path.join(WORK, WOUT), 'w'))
 game = dict(
     tx=TX, ty=TY, core=ring(CORE), bridge=BRIDGE, bridge_w=BRIDGE_W, routes=routes, signals=ctrl_out, walks=walks,
     lamps=[[p[0], p[1]] for p in lamps_l],
     graph=dict(pts=G_pts, edges=G_edges),
 )
-json.dump(game, open(os.path.join(PUB, 'downtown.json'), 'w'))
-print('wrote dt.json', os.path.getsize(os.path.join(WORK, 'dt.json')) // 1024, 'KB; downtown.json', os.path.getsize(os.path.join(PUB, 'downtown.json')) // 1024, 'KB')
+game['name'] = TILE
+json.dump(game, open(os.path.join(PUB, GOUT), 'w'))
+print('wrote', WOUT, os.path.getsize(os.path.join(WORK, WOUT)) // 1024, 'KB;', GOUT, os.path.getsize(os.path.join(PUB, GOUT)) // 1024, 'KB')
 
 # ------------------------------------------------------------------ a picture to check it
 if '--viz' in sys.argv:
     from viz import Viz
-    v = Viz(-1320, -480, -1280, 60, 1.2)
+    bx = CORE.bounds
+    v = Viz(bx[0] - 20, bx[2] + 20, bx[1] - 20, bx[3] + 20, 1.2)
     v.poly(CORE_LAND, (70, 70, 70))
     v.poly(ROAD_CORE, (45, 45, 48))
     v.poly(PAVE, (150, 148, 140))
@@ -971,4 +1009,4 @@ if '--viz' in sys.argv:
         v.d.ellipse([*(a - 1.5 for a in v.T(p)), *(a + 1.5 for a in v.T(p))], fill=(0, 255, 0))
     for c in ctrl_out:
         v.d.ellipse([*(a - 3 for a in v.T((c['x'], c['y']))), *(a + 3 for a in v.T((c['x'], c['y'])))], outline=(255, 0, 0))
-    v.save(os.path.join(WORK, 'dt_ground.png'))
+    v.save(os.path.join(WORK, f'{TILE}_ground.png'))

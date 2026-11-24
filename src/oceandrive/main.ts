@@ -27,7 +27,8 @@ import { loadGuns } from './weapons.ts';
 import { Arsenal, type Actor } from './gunplay.ts';
 import { Police } from './police.ts';
 import { drawMap } from './minimap.ts';
-import { dtScene, loadDowntown, trimHorizon } from './downtown.ts';
+import { county, loadSkyline, trimHorizon } from './downtown.ts';
+import { County } from './county.ts';
 import { RoadGraph } from './roadgraph.ts';
 import { NightLights } from './nightlights.ts';
 
@@ -65,18 +66,24 @@ async function boot() {
   setPeopleCore([...PEOPLE, 'Pilot_Male_03', 'Pilot_Female_02', 'Gardener_Male_01']);
   setPeopleRest(false);
   const peopleP = loadPeople();
-  const dtMeta = Q.get('downtown') === '0' ? null : await dtScene();
+  // the county: the tiles of Miami built so far (downtown, Brickell...) and the skyline round them
+  const tiles = Q.get('downtown') === '0' ? [] : await county();
   const [world, ground] = await Promise.all([
     loadWorld(env, renderer, (f, label) => step(label, 0.15 + f * 0.55)),
-    Ground.load(BASE + 'height.bin', dtMeta ? dtMeta.layers.map((l) => BASE + l.file) : []),
+    Ground.load(BASE + 'height.bin', tiles.flatMap((t) => t.layers.map((f) => BASE + f))),
   ]);
-  // downtown across the bay
-  const dt = dtMeta ? await loadDowntown(env, dtMeta, (f) => step('Raising downtown', 0.7 + f * 0.15)) : null;
-  if (dt) {
-    scene.add(dt.root);
+  const skyline = tiles.length ? await loadSkyline(env) : null;
+  if (skyline) {
+    scene.add(skyline.root);
     trimHorizon(world.root);
   }
-  const physP = makePhys(ground, dt ? [[-262, 300, -330, 420, 0.5], [-1310, -490, -1270, 55, 1.0], [-790, -262, -150, -20, 1.0]] : undefined);
+  const physRegions: [number, number, number, number, number][] = [[-262, 300, -330, 420, 0.5]];
+  for (const t of tiles) {
+    const xs = t.core.map((p) => p[0]), ys = t.core.map((p) => p[1]);
+    physRegions.push([Math.min(...xs) - 5, Math.max(...xs) + 5, Math.min(...ys) - 5, Math.max(...ys) + 5, 1.0]);
+    if (t.name === 'dt') physRegions.push([-790, -262, -150, -20, 1.0]);
+  }
+  const physP = makePhys(ground, physRegions);
   const gunsP = loadGuns(env);
   scene.add(world.root);
   const nets = makeNets(world.meta);
@@ -96,7 +103,8 @@ async function boot() {
   env.prepObject(player.person.root, true, true);
   fill(player.person.root);
   // on the west sidewalk outside the Colony's porch, looking up the street (or ?at=downtown: on Biscayne Boulevard)
-  if (dt && Q.get('at') === 'downtown') player.spawn(-847.2, 664.6, Math.PI);
+  if (tiles.length && Q.get('at') === 'downtown') player.spawn(-847.2, 664.6, Math.PI);
+  else if (tiles.length && Q.get('at') === 'brickell') player.spawn(-905, 1600, Math.PI);
   else player.spawn(-7.3, -6, Math.PI);
   const cars = new Cars(scene, env, ground, world.meta.sw, kit);
   const carsP = cars.load();
@@ -108,7 +116,7 @@ async function boot() {
   sky.onSwap((info) => {
     world.sea.uniforms.tSky.value = info.hdr;
     near.mat.uniforms.tSky.value = info.hdr;
-    if (dt) dt.bay.uniforms.tSky.value = info.hdr;
+    if (skyline) skyline.bay.uniforms.tSky.value = info.hdr;
   });
   // what lights the street at night: the lamps along the park, the shop windows, headlights
   const lampSpots: THREE.Vector4[] = [];
@@ -118,8 +126,6 @@ async function boot() {
   for (let x = -98; x <= -16; x += 9)
     for (const z of [-75, -61.6, 62.4, 75.6]) lampSpots.push(new THREE.Vector4(x + (z > 0 ? 4 : 0), 2.4, z, 22));
   for (let z = -92; z <= 92; z += 9) for (const x of [-98.6, -116.2]) lampSpots.push(new THREE.Vector4(x, 2.4, z, 22));
-  // downtown's street lights
-  if (dt) for (const [x, y] of (dt.data as unknown as { lamps: [number, number][] }).lamps ?? []) lampSpots.push(new THREE.Vector4(x, 6.5, -y, 150));
   const lampList: THREE.Vector4[] = [];
   const nightLights = new NightLights(scene, 8);
   nightLights.addLamps(lampSpots);
@@ -148,11 +154,25 @@ async function boot() {
   // the street furniture, signals, signs, palms down the side streets, parked cars along them
   const dress = new Dressing(scene, env, ground, (await (await fetch(BASE + 'dressing.json')).json()) as DressData, kit, world.root);
   cars.stopFor = (x, z, yaw) => dress.stopFor(x, z, yaw);
-  if (dt) {
-    dress.addSignals(dt.data.signals);
-    cars.addRoutes(dt.data.routes.map((r) => r.pts.map(([x, y]) => new THREE.Vector2(x, -y))));
-    peds.spawnWalks(dt.data.walks.map((w) => w.map(([x, y]) => new THREE.Vector2(x, -y))), Number(Q.get('dtpeds')) || 46);
-  }
+  // each tile of the county brings its traffic, signals, people and lights as it arrives
+  const tileCentre = (core: [number, number][]) => new THREE.Vector3(core.reduce((a, p) => a + p[0], 0) / core.length, 38, -core.reduce((a, p) => a + p[1], 0) / core.length);
+  let probesReady = false;
+  const countyM = new County(env, scene, tiles, skyline, {
+    arrived: (t) => {
+      dress.addSignals(t.data.signals);
+      cars.addRoutes(t.data.routes.map((r) => r.pts.map(([x, y]) => new THREE.Vector2(x, -y))));
+      peds.spawnWalks(t.data.walks.map((w) => w.map(([x, y]) => new THREE.Vector2(x, -y))), Math.round((Number(Q.get('dtpeds')) || 46) * (t.info.name === 'dt' ? 1 : 0.8)));
+      const spots = ((t.data as unknown as { lamps: [number, number][] }).lamps ?? []).map(([x, y]) => new THREE.Vector4(x, 6.5, -y, 150));
+      lampSpots.push(...spots);
+      nightLights.addLamps(spots);
+      if (probesReady) {
+        const c = tileCentre(t.info.core);
+        t.setProbe(env.probeAt(c.x, c.z));
+      }
+    },
+  });
+  await countyM.fetchData();
+  await countyM.preload(player.pos, (f) => step('Raising downtown', 0.9 + f * 0.05));
   {
     const spots: [number, number, number][] = [];
     const d = dress.data;
@@ -213,7 +233,7 @@ async function boot() {
   const sfx = new Sfx(() => sfxOut());
   const police = new Police(scene, env, kit, ground, cars, phys, fx, sfx, dress.data);
   police.witnesses = () => peds.positions();
-  if (dt) police.graph = new RoadGraph(dress.data, dt.data.graph);
+  if (countyM.datas.length) police.graph = new RoadGraph(dress.data, countyM.datas.map((d) => d.graph));
   peds.phys = phys;
   peds.fx = fx;
   peds.sfx = sfx;
@@ -343,11 +363,19 @@ async function boot() {
   // reflection probes down the street and on the sand (without the people and cars in them)
   step('Polishing the paint', 0.97);
   const PROBES = [new THREE.Vector3(0, 1.6, 50), new THREE.Vector3(0, 1.6, 0), new THREE.Vector3(0, 1.6, -50), new THREE.Vector3(-60, 1.6, 0), new THREE.Vector3(150, 1.8, 0)];
-  if (dt) PROBES.push(new THREE.Vector3(-835, 38, 640), new THREE.Vector3(-760, 1.8, 400));
+  for (const t of tiles) PROBES.push(tileCentre(t.core));
   env.bakeProbes(PROBES, [player.person.root, ...cars.list.map((c) => c.root), ...peds.list.map((p) => p.p.root), near.mesh, gulls.root]);
   cars.applyProbes();
   world.windows(env.probeAt(0, 0));
-  dt?.setProbe(env.probeAt(-835, 640));
+  const tileProbes = () => {
+    for (const t of countyM.loaded) {
+      const c = tileCentre(t.info.core);
+      t.setProbe(env.probeAt(c.x, c.z));
+    }
+    skyline?.setProbe(env.probeAt(-835, 640));
+  };
+  tileProbes();
+  probesReady = true;
   renderer.compile(scene, camera);
   await new Promise((r) => setTimeout(r, 30));
 
@@ -364,7 +392,7 @@ async function boot() {
     env.bakeProbes(PROBES, [player.person.root, ...cars.list.map((c) => c.root), ...peds.list.map((p) => p.p.root), near.mesh, gulls.root, rain.mesh]);
     cars.applyProbes();
     world.windows(env.probeAt(0, 0));
-    dt?.setProbe(env.probeAt(-835, 640));
+    tileProbes();
     post.reset();
   };
   if (time0 !== 'day' || weather0 !== 'clear') {
@@ -399,7 +427,6 @@ async function boot() {
   let driving = false;
   let frameN = 0;
   const camDir = new THREE.Vector3();
-  const downtown = dt;
   const frame = () => {
     const now = performance.now();
     const dt = Math.min(0.05, (now - last) / 1000);
@@ -469,6 +496,7 @@ async function boot() {
     }
     cars.setWalkers(peds.positions());
     cars.update(dt, driving ? null : player.pos, camera.position);
+    countyM.update(dt, camera.position);
     const yourCar = driving ? cars.yours : null;
     peds.you = {
       pos: driving ? cars.playerPos() : player.pos, driving, car: yourCar, armed: arsenal.armed && !driving,
@@ -536,7 +564,8 @@ async function boot() {
     rain.update(camera.position, o.rain, o.fogColor);
     dress.update(dt, o.night, o.lamps);
     nightLights.update(dt, camera.position, Math.min(1, o.lamps));
-    downtown?.setNight(o.lamps);
+    for (const tl of countyM.loaded) tl.setNight(o.lamps);
+    skyline?.setNight(o.lamps);
     police.night = o.lamps;
     for (const m of world.neon) m.color.setScalar(3.2 + 5.8 * o.night);
     for (const m of world.lamps) {
@@ -559,7 +588,7 @@ async function boot() {
   };
   $('#loading').classList.add('done');
   requestAnimationFrame(frame);
-  (window as unknown as { od: unknown }).od = { THREE, U, sky, dress, arsenal, police, fx, phys, input, get driving() { return driving; }, get shadowPasses() { return shadowPasses; }, renderer, scene, camera, player, cars, peds, env, post, world, ground, downtown: dt };
+  (window as unknown as { od: unknown }).od = { THREE, U, sky, dress, arsenal, police, fx, phys, input, get driving() { return driving; }, get shadowPasses() { return shadowPasses; }, renderer, scene, camera, player, cars, peds, env, post, world, ground, county: countyM, skyline };
 }
 
 boot().catch((e) => {

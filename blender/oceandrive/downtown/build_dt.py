@@ -18,7 +18,11 @@ WORK = os.path.join(OD, 'work')
 lib.GEN = os.path.join(ASSETS, 'gen')
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 PREVIEW = '--preview' in argv
-D = json.load(open(os.path.join(WORK, 'dt.json')))
+TILE = argv[argv.index('--tile') + 1] if '--tile' in argv else 'dt'
+D = json.load(open(os.path.join(WORK, 'dt.json' if TILE == 'dt' else f'tile_{TILE}.json')))
+# lightmapped objects carry the tile's name (their maps are named after them)
+TP = 'dt' if TILE == 'dt' else TILE
+BLEND = 'downtown.blend' if TILE == 'dt' else f'tile_{TILE}.blend'
 SW = towers.SW
 SEA = -1.5
 SUN_AZ = math.radians(-36.0)
@@ -64,7 +68,7 @@ def tri_layer(mb, tri, z, mat, col=WHITE):
 
 
 # ------------------------------------------------------------------ ground (lightmapped)
-mb_g = MB('lm_dtg')
+mb_g = MB(f'lm_{TP}g')
 T = D['tri']
 tri_layer(mb_g, T['road'], 0.0, 'od_asphalt')
 tri_layer(mb_g, T['pave'], SW, 'od_sidewalk')
@@ -86,7 +90,7 @@ for r in D['curb_rings']:
             continue
         mb_g.face([(a[0], a[1], 0.0), (b[0], b[1], 0.0), (b[0], b[1], SW), (a[0], a[1], SW)], 'od_curb', WHITE, n=(dy / L, -dx / L, 0))
 # the seawall, down into the bay (both faces: the coastline's direction isn't known here)
-mb_rail = MB('dt_rail')
+mb_rail = MB(f'{TP}_rail')
 for ln in D['sea_lines']:
     for i in range(len(ln) - 1):
         a, b = ln[i], ln[i + 1]
@@ -112,19 +116,33 @@ for ln in D['sea_lines']:
             t += 2.4
         s = (s + L) % 2.4
 
+# river bridges: the deck's edge down to the girder, a concrete parapet
+for ln in D.get('bridge_rails', []):
+    for i in range(len(ln) - 1):
+        a, b = ln[i], ln[i + 1]
+        q = [(a[0], a[1], 0.0), (b[0], b[1], 0.0), (b[0], b[1], -1.3), (a[0], a[1], -1.3)]
+        mb_g.face(q, 'od_curb', hexcol('#cfc8bb'))
+        mb_g.face(q[::-1], 'od_curb', hexcol('#cfc8bb'))
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        L = math.hypot(dx, dy) or 1
+        u = Vector((dx / L, dy / L, 0)); n = Vector((-u.y, u.x, 0))
+        c = Vector(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, 0.55))
+        mb_g.obox(c, u, n, (0, 0, 1), L / 2, 0.2, 0.55, 'od_curb', hexcol('#dcd6cb'))
+
 # ------------------------------------------------------------------ buildings (lightmapped, two maps north / south)
-mb_b1, mb_b2 = MB('lm_dtb1'), MB('lm_dtb2')
-mb_rails = MB('dt_balcony')
+mb_b1, mb_b2 = MB(f'lm_{TP}b1'), MB(f'lm_{TP}b2')
+YMID = sum(p[1] for p in D['core']) / len(D['core'])
+mb_rails = MB(f'{TP}_balcony')
 placements = []
 styles = {}
 for b in D['buildings']:
     cy = sum(p[1] for p in b['fp'][0]) / len(b['fp'][0])
-    B = towers.build(mb_b1 if cy > -560 else mb_b2, mb_rails, b, placements)
+    B = towers.build(mb_b1 if cy > (-560 if TILE == 'dt' else YMID) else mb_b2, mb_rails, b, placements)
     styles[B.style] = styles.get(B.style, 0) + 1
 print('buildings', len(D['buildings']), styles)
 
 # ------------------------------------------------------------------ the bridge (lightmapped)
-mb_br = MB('lm_dtbr')
+mb_br = MB(f'lm_{TP}br')
 BR = D['bridge']
 W = D['bridge_w']
 def frame(i):
@@ -173,7 +191,7 @@ for i in range(len(BR)):
             mb_br.face([a - w, b - w, b + w, a + w], mat, hexcol('#f4f4f0') if mat == 'od_paint' else WHITE, n=(0, 0, 1))
     prev = cur
 # piers in the water every ~36 m (where the deck is over the bay)
-mb_pier = MB('dt_piers')
+mb_pier = MB(f'{TP}_piers')
 acc = 0.0
 for i in range(1, len(BR)):
     acc += math.dist(BR[i][:2], BR[i - 1][:2])
@@ -189,7 +207,7 @@ for i in range(1, len(BR)):
     mb_pier.obox(p + Vector((0, 0, -2.3)), u, n, (0, 0, 1), 1.0, 8.0, 0.6, 'od_curb', hexcol('#c8c2b6'))
 
 # light poles on the bridge's median, both ways
-mb_poles = MB('dt_poles')
+mb_poles = MB(f'{TP}_poles')
 acc = 0.0
 for i in range(1, len(BR)):
     acc += math.dist(BR[i][:2], BR[i - 1][:2])
@@ -205,7 +223,7 @@ for i in range(1, len(BR)):
         mb_poles.obox(tip + Vector((0, 0, -0.1)), n * s, u, (0, 0, 1), 0.45, 0.2, 0.09, 'od_lamp', hexcol('#c9ccce'))
 
 # ------------------------------------------------------------------ the Metromover guideway
-mb_mv = MB('dt_mover')
+mb_mv = MB(f'{TP}_mover')
 ZB = 8.6
 for ln in D['mover']:
     for i in range(len(ln) - 1):
@@ -219,48 +237,6 @@ for ln in D['mover']:
 for x, y in D['mover_cols']:
     mb_mv.cyl((x, y, 0.0), 0.75, 0.65, ZB - 0.8, 12, 'od_curb', hexcol('#d2ccc1'))
     mb_mv.box(x - 1.3, y - 1.3, ZB - 1.2, x + 1.3, y + 1.3, ZB - 0.8, 'od_curb', hexcol('#d2ccc1'))
-
-# ------------------------------------------------------------------ the skyline: downtown beyond the streets, Brickell, Edgewater, Miami Beach
-mb_sky = MB('dt_sky')
-for b in D['skyline']:
-    towers.skyline(mb_sky, b, 0.0)
-mb_bsky = MB('dt_beachsky')
-for b in D['beach_sky']:
-    towers.skyline(mb_bsky, b, 0.0)
-print('skyline', len(D['skyline']), 'beach', len(D['beach_sky']))
-mb_land = MB('dt_land')
-tri_layer(mb_land, T['skyland'], -0.05, 'od_farground')
-for r in D['sky_roads']:
-    pts = r['pts']
-    z = 0.02 if not r['elev'] else 6.5 * max(1, r['layer'])
-    w = r['w'] / 2
-    for i in range(len(pts) - 1):
-        a, b = Vector((*pts[i], z)), Vector((*pts[i + 1], z))
-        L = (b - a).length
-        if L < 0.05:
-            continue
-        u = (b - a) / L
-        n = Vector((-u.y, u.x, 0)) * w
-        mb_land.face([a - n, b - n, b + n, a + n], 'od_asphalt', WHITE, n=(0, 0, 1))
-        if r['elev']:
-            dz = Vector((0, 0, -1.4))
-            mb_land.face([a + n + dz, b + n + dz, b + n, a + n], 'od_curb', hexcol('#cfc9be'))
-            mb_land.face([a - n, b - n, b - n + dz, a - n + dz], 'od_curb', hexcol('#cfc9be'))
-            mb_land.face([a + n + dz, a - n + dz, b - n + dz, b + n + dz], 'od_curb', hexcol('#b9b3a8'))
-            if i % 3 == 0:
-                mb_land.cyl((a.x, a.y, 0), 0.9, 0.9, z - 1.4, 8, 'od_curb', hexcol('#cfc9be'))
-# Miami Beach's own west shore: the seawall along x = -262 (the modelled blocks end there)
-for y0 in range(-3200, 3200, 40):
-    q = [(-262.0, y0, 0.0), (-262.0, y0 + 40, 0.0), (-262.0, y0 + 40, -2.6), (-262.0, y0, -2.6)]
-    mb_land.face(q, 'od_curb', hexcol('#cfc8bb'), n=(-1, 0, 0))
-# Miami Beach north and south of the modelled blocks: a ground plane under the skyline buildings
-for (y0, y1) in ((-6000.0, -330.0), (420.0, 6000.0)):
-    mb_land.face([(-262.0, y0, -0.03), (140.0, y0, -0.03), (140.0, y1, -0.03), (-262.0, y1, -0.03)], 'od_farground', WHITE, n=(0, 0, 1))
-mb_bay = MB('dt_bay')
-S = 9000.0
-mb_bay.face([(-S, -S, SEA), (-262.0, -S, SEA), (-262.0, S, SEA), (-S, S, SEA)], 'od_bay', WHITE, n=(0, 0, 1))
-mb_far = MB('dt_far')
-mb_far.face([(-S, -S, 0.0), (-3400.0, -S, 0.0), (-3400.0, S, 0.0), (-S, S, 0.0)], 'od_farground', WHITE, n=(0, 0, 1))
 
 # ------------------------------------------------------------------ palms
 rng = random.Random('dtpalms')
@@ -290,14 +266,13 @@ for x, y, h in D['lamps']:
 
 # ------------------------------------------------------------------ objects
 for mb in (mb_g, mb_b1, mb_b2, mb_br):
-    ob = mb.build()
-    move(ob, C_LM)
-for mb in (mb_rail, mb_rails, mb_pier, mb_poles, mb_mv, mb_sky, mb_bsky, mb_land):
-    ob = mb.build()
-    move(ob, C_STATIC)
-for mb in (mb_bay, mb_far):
-    ob = mb.build()
-    move(ob, C_NOBAKE)
+    if mb.faces:
+        ob = mb.build()
+        move(ob, C_LM)
+for mb in (mb_rail, mb_rails, mb_pier, mb_poles, mb_mv):
+    if mb.faces:
+        ob = mb.build()
+        move(ob, C_STATIC)
 
 # ------------------------------------------------------------------ world + sun (as the block's)
 world = bpy.data.worlds.new('sky')
@@ -333,7 +308,7 @@ sd.angle = math.radians(0.6)
 sun = bpy.data.objects.new('sun', sd)
 sun.rotation_euler = sun_dir.to_track_quat('Z', 'Y').to_euler()
 sc.collection.objects.link(sun)
-bpy.ops.wm.save_as_mainfile(filepath=os.path.join(WORK, 'downtown.blend'))
+bpy.ops.wm.save_as_mainfile(filepath=os.path.join(WORK, BLEND))
 print('saved')
 
 if PREVIEW:

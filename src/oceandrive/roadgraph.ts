@@ -14,7 +14,7 @@ export class RoadGraph {
   /** edge: from, to, polyline (x, z pairs, from -> to), length */
   readonly edges: { a: number; b: number; pts: number[]; len: number }[] = [];
 
-  constructor(dress: DressData, dt?: { pts: [number, number][]; edges: [number, number, [number, number][], number][] } | null) {
+  constructor(dress: DressData, dts: { pts: [number, number][]; edges: [number, number, [number, number][], number][] }[] | null) {
     // the beach block's grid: every avenue x every street
     const X = [(dress.od[0] + dress.od[1]) / 2 - 0.9, ...dress.xs.map(([a, b]) => (a + b) / 2)].sort((a, b) => a - b);
     const Z = dress.ys.map(([a, b]) => -(a + b) / 2).sort((a, b) => a - b);
@@ -28,13 +28,14 @@ export class RoadGraph {
     const odx = X[0];
     this.edge(id[0][0], this.node(odx, Z[0] - 90), [odx, Z[0], odx, Z[0] - 90]);
     this.edge(id[0][Z.length - 1], this.node(odx, Z[Z.length - 1] + 90), [odx, Z[Z.length - 1], odx, Z[Z.length - 1] + 90]);
-    if (!dt) return;
-    // downtown: its nodes merge with the grid's where they coincide
-    const map = dt.pts.map(([bx, by]) => this.node(bx, -by, 6));
-    for (const [a, b, pl] of dt.edges) {
-      const flat: number[] = [];
-      for (const [bx, by] of pl) flat.push(bx, -by);
-      this.edge(map[a], map[b], flat);
+    // the county's tiles: their nodes merge with the grid's and each other's where they coincide
+    for (const dt of dts ?? []) {
+      const map = dt.pts.map(([bx, by]) => this.node(bx, -by, 6));
+      for (const [a, b, pl] of dt.edges) {
+        const flat: number[] = [];
+        for (const [bx, by] of pl) flat.push(bx, -by);
+        this.edge(map[a], map[b], flat);
+      }
     }
   }
 

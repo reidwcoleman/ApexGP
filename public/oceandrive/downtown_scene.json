@@ -1,5 +1,26 @@
 {
- "lightmaps": {},
+ "lightmaps": {
+  "lm_dtg": {
+   "size": 4096,
+   "scale": 1.6,
+   "gamma": 2.2
+  },
+  "lm_dtb1": {
+   "size": 4096,
+   "scale": 1.6,
+   "gamma": 2.2
+  },
+  "lm_dtb2": {
+   "size": 4096,
+   "scale": 1.6,
+   "gamma": 2.2
+  },
+  "lm_dtbr": {
+   "size": 1024,
+   "scale": 1.6,
+   "gamma": 2.2
+  }
+ },
  "layers": [
   {
    "file": "height_dt.bin.gz",

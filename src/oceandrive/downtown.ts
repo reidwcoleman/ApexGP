@@ -40,10 +40,22 @@ export interface DtScene {
   core: [number, number][];
 }
 
-export interface Downtown {
+/** a built tile of the county (county.json) */
+export interface TileInfo {
+  name: string;
+  label: string;
+  frame: 'main' | 'beach';
+  core: [number, number][];
+  glb: string;
+  scene: string;
+  data: string;
+  layers: string[];
+}
+
+export interface Tile {
+  info: TileInfo;
   root: THREE.Object3D;
   data: DtData;
-  bay: THREE.ShaderMaterial;
   crowns: THREE.MeshStandardMaterial[];
   facades: THREE.MeshPhysicalMaterial[];
   /** reflections for the towers' glass */
@@ -51,31 +63,23 @@ export interface Downtown {
   /** lit crowns and the like at night (0..1) */
   setNight: (n: number) => void;
 }
+/** (the first tile, Biscayne Boulevard, as the page knew it before the county) */
+export type Downtown = Tile;
 
-export async function dtScene(): Promise<DtScene | null> {
-  const r = await fetch(BASE + 'downtown_scene.json').catch(() => null);
-  return r && r.ok ? r.json() : null;
+export async function county(): Promise<TileInfo[]> {
+  const r = await fetch(BASE + 'county.json').catch(() => null);
+  return r && r.ok ? ((await r.json()) as { tiles: TileInfo[] }).tiles : [];
 }
 
-export async function loadDowntown(env: Env, meta: DtScene, progress: (f: number) => void): Promise<Downtown> {
-  const tl = new THREE.TextureLoader();
-  const [data, lms] = await Promise.all([fetch(BASE + 'downtown.json').then((r) => r.json() as Promise<DtData>), loadLightmaps(meta.lightmaps, tl)]);
-  const loader = new GLTFLoader();
-  loader.setMeshoptDecoder(MeshoptDecoder);
-  const gltf = await loader.loadAsync(BASE + 'downtown.glb', (e) => {
-    if (e.total) progress(e.loaded / e.total);
-  });
-  const root = gltf.scene;
-  root.name = 'downtown';
-  const S = shared(tl);
-  const bay = makeBay(env.hdr!);
+/** the materials downtown-built scenes need beyond the block's: facades, crowns, railings, far ground, the bay */
+function dtSkin(env: Env, bay: THREE.ShaderMaterial | null) {
   const crowns: THREE.MeshStandardMaterial[] = [];
   const facades: THREE.MeshPhysicalMaterial[] = [];
   const fcache = new Map<string, THREE.Material>();
   const rail = new THREE.MeshPhysicalMaterial({ name: 'od_rail', color: 0x9fb8b4, roughness: 0.06, metalness: 0.1, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide });
   const farGround = odMaterial({ name: 'od_farground', diff: 'concrete_pavement_diff.webp', nor: 'concrete_pavement_nor.webp', tile: 4.0, kind: 'ground', grime: 0.6, vertexColors: false, color: 0x8f8d88, roughness: 0.95 }, null);
-  skin(root, lms, env, S, (name, mesh, lm) => {
-    if (name === 'od_bay') {
+  const special = (name: string, mesh: THREE.Mesh, lm: { tex: THREE.Texture; info: LightmapInfo } | null): THREE.Material | null => {
+    if (name === 'od_bay' && bay) {
       mesh.renderOrder = 2;
       return bay;
     }
@@ -102,13 +106,8 @@ export async function loadDowntown(env: Env, meta: DtScene, progress: (f: number
       return m;
     }
     return null;
-  });
-  // the skyline's far facades fade into the haze: no shadows to cast from 2 km off
-  root.traverse((o) => {
-    const m = o as THREE.Mesh;
-    if (!m.isMesh) return;
-    if (/^dt_(sky|beachsky|land|far)/.test(m.name) || /^dt_(sky|beachsky|land|far)/.test(m.parent?.name ?? '')) m.castShadow = /sky/.test(m.name) ? true : false;
-  });
+  };
+  void env;
   const setProbe = (t: THREE.Texture | null) => {
     for (const m of facades) {
       m.envMap = t;
@@ -119,7 +118,55 @@ export async function loadDowntown(env: Env, meta: DtScene, progress: (f: number
   const setNight = (n: number) => {
     for (const m of crowns) m.emissiveIntensity = n > 0.02 ? 5.5 * n : 0;
   };
-  return { root, data, bay, crowns, facades, setProbe, setNight };
+  return { special, crowns, facades, setProbe, setNight };
+}
+
+export async function loadTile(env: Env, info: TileInfo, progress: (f: number) => void = () => {}): Promise<Tile> {
+  const tl = new THREE.TextureLoader();
+  const meta = (await (await fetch(BASE + info.scene)).json()) as DtScene;
+  const [data, lms] = await Promise.all([fetch(BASE + info.data).then((r) => r.json() as Promise<DtData>), loadLightmaps(meta.lightmaps, tl)]);
+  const loader = new GLTFLoader();
+  loader.setMeshoptDecoder(MeshoptDecoder);
+  const gltf = await loader.loadAsync(BASE + info.glb, (e) => {
+    if (e.total) progress(e.loaded / e.total);
+  });
+  const root = gltf.scene;
+  root.name = 'tile_' + info.name;
+  const k = dtSkin(env, null);
+  skin(root, lms, env, shared(tl), k.special);
+  return { info, root, data, crowns: k.crowns, facades: k.facades, setProbe: k.setProbe, setNight: k.setNight };
+}
+
+/** the county's skyline: every group sky_<tile> / skyland_<tile> (hidden while that tile is in), the bay, the far land */
+export interface Skyline {
+  root: THREE.Object3D;
+  bay: THREE.ShaderMaterial;
+  groups: Map<string, THREE.Object3D[]>;
+  setProbe: (t: THREE.Texture | null) => void;
+  setNight: (n: number) => void;
+}
+export async function loadSkyline(env: Env): Promise<Skyline | null> {
+  const r = await fetch(BASE + 'skyline.glb', { method: 'HEAD' }).catch(() => null);
+  if (!r || !r.ok) return null;
+  const loader = new GLTFLoader();
+  loader.setMeshoptDecoder(MeshoptDecoder);
+  const gltf = await loader.loadAsync(BASE + 'skyline.glb');
+  const root = gltf.scene;
+  root.name = 'skyline';
+  const bay = makeBay(env.hdr!);
+  const k = dtSkin(env, bay);
+  skin(root, new Map(), env, shared(), k.special);
+  const groups = new Map<string, THREE.Object3D[]>();
+  root.traverse((o) => {
+    const m = /^sky(?:land)?_(.+?)(?:_\d+)?$/.exec(o.name);
+    if (!m || !(o as THREE.Mesh).isMesh && !o.children.length) return;
+    const g = m[1];
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g)!.push(o);
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh) mesh.castShadow = /^sky_/.test(o.name) && !/bay|far|beach|seawall/.test(g);
+  });
+  return { root, bay, groups, setProbe: k.setProbe, setNight: k.setNight };
 }
 
 /** the beach block's horizon plane ran west to the edge of the world: the bay is there now */

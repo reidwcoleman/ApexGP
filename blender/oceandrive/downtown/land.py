@@ -4,7 +4,7 @@ from osmdt import *
 from shapely.geometry import LineString, Polygon, box, Point
 from shapely.ops import unary_union, polygonize
 # working extent (final coords): downtown + Brickell + Edgewater, the bay to the east of it
-EXT = box(-3400, -2900, -300, 1500)
+EXT = box(*[float(v) for v in os.environ.get('OD_EXT', '-3400,-2900,-300,1500').split(',')])
 def land_and_water():
     lines = [LineString(pts(w)) for w in WAYS if w.get('tags', {}).get('natural') == 'coastline' and len(pts(w)) > 1]
     lines.append(EXT.exterior)
