@@ -333,11 +333,11 @@ export class Cars {
   }
 
   /** more traffic loops (downtown's, over the bridge): three x, z; a car every ~110 m of loop */
-  addRoutes(loops: THREE.Vector2[][], max = 34) {
+  addRoutes(loops: THREE.Vector2[][], max = 50) {
     // a car every ~380 m of loop, no more than max for the tile (the busy look comes from where you are)
     const Rs = loops.map((poly) => makeRoute(poly, true));
     const tot = Rs.reduce((a, R) => a + R.pts.length, 0);
-    const per = Math.max(380, tot / max);
+    const per = Math.max(220, tot / max);
     for (const R of Rs) {
       this.routes.push(R);
       const n = Math.max(1, Math.round(R.pts.length / per));
@@ -1033,8 +1033,50 @@ export class Cars {
   }
 
   private flash = 0;
+  private recycleT = 0;
+  /**
+   * Traffic lives around you: a car that's wandered off past ~330 m is lifted out and put down again on
+   * some street 140-300 m away (out of the way of the others), so the streets you're on stay busy with a
+   * pool of a couple of hundred cars across the whole county.
+   */
+  private recycle(eye: THREE.Vector3) {
+    if (this.routes.length < 3) return;
+    let moved = 0;
+    for (const c of this.list) {
+      if (moved > 6) break;
+      if (!c.route || c.police || c.ai || c.wreck || c.burnT > 0 || c === this.driven || c.hp < 100) continue;
+      const d2 = (c.x - eye.x) ** 2 + (c.z - eye.z) ** 2;
+      if (d2 < 330 * 330) continue;
+      for (let k = 0; k < 30; k++) {
+        const R = this.routes[Math.floor(this.rnd() * this.routes.length)];
+        const i = Math.floor(this.rnd() * R.pts.length);
+        const p = R.pts[i];
+        const dd = (p.x - eye.x) ** 2 + (p.y - eye.z) ** 2;
+        if (dd < 140 * 140 || dd > 300 * 300) continue;
+        if (this.list.some((o) => o !== c && (o.x - p.x) ** 2 + (o.z - p.y) ** 2 < 14 * 14)) continue;
+        c.route = R;
+        c.s = i;
+        c.x = p.x;
+        c.z = p.y;
+        c.yaw = R.head[i];
+        c.v = c.cruise * 0.6;
+        c.vx = Math.sin(c.yaw) * c.v;
+        c.vz = Math.cos(c.yaw) * c.v;
+        c.w = 0;
+        this.place(c, 0);
+        moved++;
+        break;
+      }
+    }
+  }
+
   update(dt: number, walker: THREE.Vector3 | null, eye: THREE.Vector3) {
     this.flash += dt;
+    this.recycleT += dt;
+    if (this.recycleT > 0.4) {
+      this.recycleT = 0;
+      this.recycle(eye);
+    }
     for (const c of this.list) {
       // a car half a mile off is a speck: don't draw it
       c.root.visible = (c.x - eye.x) ** 2 + (c.z - eye.z) ** 2 < 650 * 650 || c === this.driven;
