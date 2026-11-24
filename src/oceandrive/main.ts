@@ -29,6 +29,8 @@ import { Police } from './police.ts';
 import { drawMap } from './minimap.ts';
 import { county, loadSkyline, trimHorizon } from './downtown.ts';
 import { County } from './county.ts';
+import { PlanarReflection, reflectable, REFLECT } from './reflection.ts';
+import { Boats } from './boats.ts';
 import { RoadGraph } from './roadgraph.ts';
 import { NightLights } from './nightlights.ts';
 
@@ -73,9 +75,16 @@ async function boot() {
     Ground.load(BASE + 'height.bin', tiles.flatMap((t) => t.layers.map((f) => BASE + f))),
   ]);
   const skyline = tiles.length ? await loadSkyline(env) : null;
-  if (skyline) {
+  // the bay mirrors the sky, the skyline, the towers and the beach's hotels
+  const mirror = skyline ? new PlanarReflection(-1.45) : null;
+  if (skyline && mirror) {
     scene.add(skyline.root);
     trimHorizon(world.root);
+    reflectable(skyline.root, (m) => !/bay|far|land|seawall|beach/.test(m.name));
+    reflectable(world.root, (m) => /lm_(block|city|front2)|gl_/.test(m.name + (m.parent?.name ?? '')));
+    env.dome.layers.enable(REFLECT);
+    skyline.bay.uniforms.tRefl.value = mirror.rt.texture;
+    skyline.bay.uniforms.uReflMat.value = mirror.texMatrix;
   }
   const physRegions: [number, number, number, number, number][] = [[-262, 300, -330, 420, 0.5]];
   for (const t of tiles) {
@@ -165,12 +174,19 @@ async function boot() {
       const spots = ((t.data as unknown as { lamps: [number, number][] }).lamps ?? []).map(([x, y]) => new THREE.Vector4(x, 6.5, -y, 150));
       lampSpots.push(...spots);
       nightLights.addLamps(spots);
+      reflectable(t.root, (m) => /lm_\w+(b[12]|br)|gl_/.test(m.name + (m.parent?.name ?? '')));
       if (probesReady) {
         const c = tileCentre(t.info.core);
         t.setProbe(env.probeAt(c.x, c.z));
       }
     },
   });
+  // boats in the marinas and out on the bay
+  const boats = skyline ? new Boats(env) : null;
+  if (boats) {
+    await boats.load().catch((e) => console.warn('[boats]', e));
+    scene.add(boats.root);
+  }
   await countyM.fetchData();
   await countyM.preload(player.pos, (f) => step('Raising downtown', 0.9 + f * 0.05));
   {
@@ -352,6 +368,7 @@ async function boot() {
     const s = new THREE.Vector2();
     renderer.getDrawingBufferSize(s);
     post.setSize(innerWidth, innerHeight);
+    mirror?.setSize(s.x, s.y);
     env.resize();
   };
   addEventListener('resize', resize);
@@ -497,6 +514,7 @@ async function boot() {
     cars.setWalkers(peds.positions());
     cars.update(dt, driving ? null : player.pos, camera.position);
     countyM.update(dt, camera.position);
+    boats?.update(dt);
     const yourCar = driving ? cars.yours : null;
     peds.you = {
       pos: driving ? cars.playerPos() : player.pos, driving, car: yourCar, armed: arsenal.armed && !driving,
@@ -581,6 +599,12 @@ async function boot() {
       sky.setLamps(camera.position, lampList);
     }
     env.update();
+    if (mirror && skyline) {
+      // only near the bay (or high up): the west of the beach block and beyond
+      const want = camera.position.x < -150 || camera.position.y > 40;
+      mirror.update(renderer, scene, camera, want);
+      skyline.bay.uniforms.uReflOn.value = mirror.active ? 1 : 0;
+    }
     post.render(t);
     adapt(dt);
     input.endFrame();

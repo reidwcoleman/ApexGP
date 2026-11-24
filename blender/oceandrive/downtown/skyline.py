@@ -139,6 +139,24 @@ for g, t in O.rel_polys(lambda t: t.get('natural') == 'water' or t.get('waterway
     if g.area > 3000:
         water.append(g.buffer(0))
 LAND = LAND.difference(unary_union(water)).buffer(0)
+# the coastline doesn't close everywhere once the map files are joined: along the bay side, land with
+# nothing on it (no building, street or footpath within 50 m) is taken for water
+urban = []
+for w in O.WAYS:
+    t = w.get('tags', {})
+    p = O.pts(w)
+    if len(p) < 2:
+        continue
+    xs = [q[0] for q in p]
+    if min(xs) < -1100:
+        continue
+    if 'building' in t or t.get('highway') in ('footway', 'pedestrian', 'path', 'cycleway', 'service', 'primary', 'secondary', 'tertiary', 'residential', 'unclassified', 'trunk', 'motorway'):
+        if t.get('bridge') == 'yes':
+            continue
+        urban.append(LineString(p).buffer(50))
+URB = unary_union(urban)
+edge = LAND.intersection(box(-1100, -3200, -300, 3300))
+LAND = LAND.difference(edge.difference(URB)).buffer(0)
 SKY = box(-3600, -3200, -480, 3300)
 LAND = LAND.intersection(SKY).buffer(0)
 mtiles = {k: Polygon(v['core']) for k, v in TILES.items() if v.get('frame', 'main') == 'main'}

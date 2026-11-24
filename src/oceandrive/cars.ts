@@ -303,11 +303,14 @@ export class Cars {
   }
 
   /** more traffic loops (downtown's, over the bridge): three x, z; a car every ~110 m of loop */
-  addRoutes(loops: THREE.Vector2[][]) {
-    for (const poly of loops) {
-      const R = makeRoute(poly, true);
+  addRoutes(loops: THREE.Vector2[][], max = 34) {
+    // a car every ~380 m of loop, no more than max for the tile (the busy look comes from where you are)
+    const Rs = loops.map((poly) => makeRoute(poly, true));
+    const tot = Rs.reduce((a, R) => a + R.pts.length, 0);
+    const per = Math.max(380, tot / max);
+    for (const R of Rs) {
       this.routes.push(R);
-      const n = Math.max(1, Math.round(R.pts.length / 110));
+      const n = Math.max(1, Math.round(R.pts.length / per));
       for (let i = 0; i < n; i++) this.addTraffic(R, ((i + this.rnd() * 0.5) / n) * R.pts.length);
     }
     for (const c of this.list) if (c.route && loops.length) this.place(c, 0);
@@ -1074,7 +1077,12 @@ export class Cars {
       c.aL = c.v * c.w;
       c.vx = Math.sin(c.yaw) * c.v;
       c.vz = Math.cos(c.yaw) * c.v;
-      this.place(c, dt);
+      // out of sight: just keep it on the ground (the ride and the wheels can wait)
+      if (c.root.visible) this.place(c, dt);
+      else {
+        const h = this.ground.height(c.x, c.z);
+        if (!Number.isNaN(h)) c.y = h;
+      }
     }
     this.collide();
   }

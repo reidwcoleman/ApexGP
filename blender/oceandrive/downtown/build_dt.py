@@ -249,8 +249,25 @@ for i, h in enumerate((9.0, 10.8, 12.5, 14.0)):
     ob = flora.coconut(f'dtpalm_c{i}', random.Random(400 + i), h).build(weld=False)
     move(ob, C_TPL); ob.hide_render = True
     variants['coco'].append(ob)
+variants['fan'] = []
+variants['sabal'] = []
+for i, h in enumerate((16.0, 19.0, 22.0)):
+    ob = flora.washingtonia(f'dtpalm_w{i}', random.Random(500 + i), h).build(weld=False)
+    move(ob, C_TPL); ob.hide_render = True
+    variants['fan'].append(ob)
+for i, h in enumerate((6.5, 8.0)):
+    ob = flora.sabal(f'dtpalm_s{i}', random.Random(600 + i), h).build(weld=False)
+    move(ob, C_TPL); ob.hide_render = True
+    variants['sabal'].append(ob)
 for x, y, kind in D['palms']:
-    v = rng.choice(variants['royal'] if kind == 'royal' or (kind == 'sidewalk' and rng.random() < 0.55) else variants['coco'])
+    r_ = rng.random()
+    if kind == 'royal':
+        pool = variants['royal']
+    elif kind == 'sidewalk':
+        pool = variants['royal'] if r_ < 0.35 else variants['fan'] if r_ < 0.65 else variants['sabal'] if r_ < 0.8 else variants['coco']
+    else:
+        pool = variants['coco'] if r_ < 0.5 else variants['sabal'] if r_ < 0.8 else variants['fan']
+    v = rng.choice(pool)
     o = bpy.data.objects.new('palm', v.data)
     o.location = (x, y, SW - 0.05)
     o.rotation_euler = (0, 0, rng.uniform(0, 6.28))
@@ -260,16 +277,53 @@ for x, y, kind in D['palms']:
 print('palms', len(D['palms']))
 
 # ------------------------------------------------------------------ street lamps (the block's scanned lamp)
-for x, y, h in D['lamps']:
+mb_furn = MB(f'{TP}_furniture')
+rngf = random.Random('furniture' + TILE)
+NEWS = ['#c8102e', '#1d4f91', '#f2c200', '#0a7d3b', '#f4f4f0']
+for k, (x, y, h) in enumerate(D['lamps']):
     # face the road: the lamp arm points along -y in its own frame; h is the sidewalk line's heading
     props.place('lamp', x, y, SW, -h + math.pi, ASSETS, C_PROPS, C_TPL)
+    # the street's clutter along the curb line, a few metres either side of the lamp
+    ux, uy = math.sin(h), math.cos(h)          # along the sidewalk
+    nx, ny = -uy, ux                           # across (toward the buildings or the road: either)
+    r = rngf.random()
+    at = lambda d, o=0.0: (x + ux * d + nx * o, y + uy * d + ny * o)
+    if k % 2 == 0:
+        px, py = at(rngf.uniform(2.5, 4.0))
+        props.place('trash', px, py, SW, rngf.uniform(0, 6.28), ASSETS, C_PROPS, C_TPL)
+    if k % 4 == 1:
+        px, py = at(-rngf.uniform(3, 6))
+        props.place('hydrant', px, py, SW, rngf.uniform(0, 6.28), ASSETS, C_PROPS, C_TPL)
+    if k % 6 == 3:
+        px, py = at(6.5)
+        props.place('utility', px, py, SW, -h, ASSETS, C_PROPS, C_TPL)
+    if k % 5 == 2:
+        # a row of newspaper boxes
+        for j in range(rngf.randint(2, 4)):
+            cx, cy = at(-8 - j * 0.55)
+            c = hexcol(rngf.choice(NEWS))
+            mb_furn.obox((cx, cy, SW + 0.55), (ux, uy, 0), (nx, ny, 0), (0, 0, 1), 0.24, 0.22, 0.55, 'od_metal', c)
+            mb_furn.obox((cx, cy, SW + 0.85), (ux, uy, 0), (nx, ny, 0), (0, 0, 1), 0.2, 0.23, 0.15, 'od_glass', WHITE)
+    if k % 9 == 4:
+        # a bus shelter: a glass back, a roof, a bench, an ad panel at the end
+        cx, cy = at(10)
+        L, Dp = 4.2, 1.6
+        for sgn in (-1, 1):
+            mb_furn.obox((cx + ux * sgn * L / 2, cy + uy * sgn * L / 2, SW + 1.25), (ux, uy, 0), (nx, ny, 0), (0, 0, 1), 0.05, Dp / 2, 1.25, 'od_metal', hexcol('#5b6066'))
+        mb_furn.obox((cx - nx * Dp / 2, cy - ny * Dp / 2, SW + 1.2), (ux, uy, 0), (nx, ny, 0), (0, 0, 1), L / 2, 0.03, 1.05, 'od_rail', WHITE)
+        mb_furn.obox((cx, cy, SW + 2.55), (ux, uy, 0), (nx, ny, 0), (0, 0, 1), L / 2 + 0.2, Dp / 2 + 0.2, 0.08, 'od_metal', hexcol('#8b9198'))
+        mb_furn.obox((cx - nx * 0.5, cy - ny * 0.5, SW + 0.45), (ux, uy, 0), (nx, ny, 0), (0, 0, 1), L / 2 - 0.4, 0.22, 0.04, 'od_metal', hexcol('#6b7178'))
+        mb_furn.obox((cx + ux * (L / 2 + 0.05), cy + uy * (L / 2 + 0.05), SW + 1.3), (ux, uy, 0), (nx, ny, 0), (0, 0, 1), 0.04, Dp / 2 - 0.1, 0.9, 'od_neon', hexcol(rngf.choice(['#9fd8ff', '#ffd27a', '#ff9fc8'])))
+    if k % 7 == 5:
+        px, py = at(-4.5, 0.0)
+        props.place('bench', px, py, SW, -h + (math.pi / 2 if rngf.random() < 0.5 else -math.pi / 2), ASSETS, C_PROPS, C_TPL)
 
 # ------------------------------------------------------------------ objects
 for mb in (mb_g, mb_b1, mb_b2, mb_br):
     if mb.faces:
         ob = mb.build()
         move(ob, C_LM)
-for mb in (mb_rail, mb_rails, mb_pier, mb_poles, mb_mv):
+for mb in (mb_rail, mb_rails, mb_pier, mb_poles, mb_mv, mb_furn):
     if mb.faces:
         ob = mb.build()
         move(ob, C_STATIC)

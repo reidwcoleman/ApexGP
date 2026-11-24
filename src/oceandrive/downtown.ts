@@ -77,7 +77,7 @@ function dtSkin(env: Env, bay: THREE.ShaderMaterial | null) {
   const facades: THREE.MeshPhysicalMaterial[] = [];
   const fcache = new Map<string, THREE.Material>();
   const rail = new THREE.MeshPhysicalMaterial({ name: 'od_rail', color: 0x9fb8b4, roughness: 0.06, metalness: 0.1, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide });
-  const farGround = odMaterial({ name: 'od_farground', diff: 'concrete_pavement_diff.webp', nor: 'concrete_pavement_nor.webp', tile: 4.0, kind: 'ground', grime: 0.6, vertexColors: false, color: 0x8f8d88, roughness: 0.95 }, null);
+  const farGround = odMaterial({ name: 'od_farground', diff: 'concrete_pavement_diff.webp', nor: 'concrete_pavement_nor.webp', tile: 4.0, kind: 'ground', grime: 0.6, vertexColors: false, color: 0xb9b6ae, roughness: 0.95 }, null);
   const special = (name: string, mesh: THREE.Mesh, lm: { tex: THREE.Texture; info: LightmapInfo } | null): THREE.Material | null => {
     if (name === 'od_bay' && bay) {
       mesh.renderOrder = 2;
@@ -209,6 +209,9 @@ export function makeBay(hdr: THREE.Texture): THREE.ShaderMaterial {
       {
         tSky: { value: hdr },
         uSeaZ: { value: -1.5 },
+        tRefl: { value: null },
+        uReflMat: { value: new THREE.Matrix4() },
+        uReflOn: { value: 0 },
       },
     ]),
     vertexShader: /* glsl */ `
@@ -225,6 +228,9 @@ export function makeBay(hdr: THREE.Texture): THREE.ShaderMaterial {
       }`,
     fragmentShader: /* glsl */ `
       uniform sampler2D tSky;
+      uniform sampler2D tRefl;
+      uniform mat4 uReflMat;
+      uniform float uReflOn;
       uniform vec3 uSunCol;
       uniform vec3 uSunDir;
       uniform float uNight;
@@ -276,6 +282,15 @@ export function makeBay(hdr: THREE.Texture): THREE.ShaderMaterial {
         vec3 R = reflect( V, N );
         R.y = abs( R.y ) + 0.02;
         vec3 sky = min( texture2D( tSky, eqUv( normalize( R ) ) ).rgb * uSkyPhotoK, vec3( 40.0 ) );
+        // the mirror: the skyline and the sky above the water, bent by the chop
+        if ( uReflOn > 0.5 ) {
+          vec4 rc = uReflMat * vec4( vW, 1.0 );
+          vec2 ruv = rc.xy / rc.w + g * vec2( 0.035, 0.06 );
+          if ( ruv.x > 0.0 && ruv.x < 1.0 && ruv.y > 0.0 && ruv.y < 1.0 ) {
+            vec3 rf = texture2D( tRefl, ruv ).rgb;
+            sky = min( rf, vec3( 40.0 ) );
+          }
+        }
         float cosi = max( dot( -V, N ), 0.0 );
         float F = 0.02 + 0.98 * pow( 1.0 - cosi, 5.0 );
         F = min( F, 0.9 );

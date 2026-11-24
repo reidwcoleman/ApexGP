@@ -81,7 +81,7 @@ for o in OVER:
     o.hide_viewport = False
 
 # ------------------------------------------------------------------ props to game budgets, templates out
-for mname, ratio in {'ph_lamp': 0.12}.items():
+for mname, ratio in {'ph_lamp': 0.12, 'ph_trash': 0.3, 'ph_hydrant': 0.04, 'ph_bench': 0.4, 'ph_utility': 0.3}.items():
     me = bpy.data.meshes.get(mname)
     if not me:
         continue

@@ -70,3 +70,81 @@ def coconut(name, rng, height):
         d = Vector((math.cos(az) * 0.35, math.sin(az) * 0.35, -0.94))
         frond(mb, crown - Vector((0, 0, 0.35)), d, rng.uniform(2.4, 3.2), 0.02, 'od_frond_dry', rng, fold=60)
     return mb
+
+
+def fan_leaf(mb, base, d, L, R, rng, mat='od_frond'):
+    """a palmate leaf: a petiole out along d, then a fan of ~22 drooping segments radiating from its tip"""
+    up = Vector((0, 0, 1))
+    tip = base + d * L
+    mb.cyl(tuple(base), 0.025, 0.018, L, 4, 'od_bark', hexcol('#7d8a4a'), caps=False, axis=tuple(d))
+    side = d.cross(up)
+    if side.length < 1e-3:
+        side = Vector((1, 0, 0))
+    side.normalize()
+    nrm = side.cross(d).normalized()
+    n = 22
+    for k in range(n):
+        a = -1.25 + 2.5 * k / (n - 1)
+        dirk = (d * math.cos(a) + side * math.sin(a)).normalized()
+        steps = 4
+        prev_c = tip
+        w0 = 0.07
+        for i in range(steps):
+            t0, t1 = i / steps, (i + 1) / steps
+            droop = (t1 ** 2) * 0.45 * R
+            c1 = tip + dirk * (R * t1) - nrm * droop * 0.3 - up * droop
+            w1 = 0.09 * (1 - t1) + 0.02
+            sd = dirk.cross(up).normalized() if dirk.cross(up).length > 1e-3 else side
+            q = [prev_c - sd * w0, c1 - sd * w1, c1 + sd * w1, prev_c + sd * w0]
+            mb.face([tuple(p) for p in q], mat, WHITE, uvs=[(0.45, t0), (0.45, t1), (0.55, t1), (0.55, t0)])
+            prev_c, w0 = c1, w1
+
+
+def washingtonia(name, rng, height):
+    """Mexican fan palm: a very tall slim trunk, a small round head of fan leaves over a skirt of dead ones"""
+    mb = MB(name)
+    seg, rad = 18, 8
+    lean = Vector((rng.uniform(-0.6, 0.6), rng.uniform(-0.6, 0.6), 0))
+    rings = []
+    for i in range(seg + 1):
+        t = i / seg
+        p = lean * t * t + Vector((0, 0, height * t))
+        r = 0.2 - 0.07 * t + 0.12 * max(0, 1 - t * 12) ** 2
+        rings.append([p + Vector((math.cos(2 * math.pi * k / rad) * r, math.sin(2 * math.pi * k / rad) * r, 0)) for k in range(rad + 1)])
+    for i in range(seg):
+        v0, v1 = height * i / seg, height * (i + 1) / seg
+        for k in range(rad):
+            mb.face([rings[i][k], rings[i][k + 1], rings[i + 1][k + 1], rings[i + 1][k]], 'od_bark', hexcol('#9c8d78'),
+                    uvs=[(k / rad, v0), ((k + 1) / rad, v0), ((k + 1) / rad, v1), (k / rad, v1)])
+    top = lean + Vector((0, 0, height))
+    # the skirt of dead fronds hanging down the trunk
+    mb.cyl(tuple(top - Vector((0, 0, 2.2))), 0.42, 0.34, 2.0, 10, 'od_frond_dry', WHITE)
+    for f in range(14):
+        az = 2 * math.pi * f / 14 + rng.uniform(-0.2, 0.2)
+        el = math.radians(rng.uniform(-10, 55))
+        d = Vector((math.cos(az) * math.cos(el), math.sin(az) * math.cos(el), math.sin(el)))
+        fan_leaf(mb, top, d, rng.uniform(0.6, 1.0), rng.uniform(0.9, 1.25), rng)
+    return mb
+
+
+def sabal(name, rng, height):
+    """cabbage palm (Florida's own): a rough trunk with the old leaf bases criss-crossed, a dense round crown"""
+    mb = MB(name)
+    seg, rad = 12, 8
+    rings = []
+    for i in range(seg + 1):
+        t = i / seg
+        r = 0.24 + 0.03 * math.sin(t * 40)
+        rings.append([Vector((math.cos(2 * math.pi * k / rad) * r, math.sin(2 * math.pi * k / rad) * r, height * t)) for k in range(rad + 1)])
+    for i in range(seg):
+        v0, v1 = height * i / seg, height * (i + 1) / seg
+        for k in range(rad):
+            mb.face([rings[i][k], rings[i][k + 1], rings[i + 1][k + 1], rings[i + 1][k]], 'od_bark', hexcol('#8a7e6a'),
+                    uvs=[(k / rad, v0), ((k + 1) / rad, v0), ((k + 1) / rad, v1), (k / rad, v1)])
+    top = Vector((0, 0, height))
+    for f in range(26):
+        az = 2 * math.pi * f / 26 + rng.uniform(-0.15, 0.15)
+        el = math.radians(rng.uniform(-35, 70))
+        d = Vector((math.cos(az) * math.cos(el), math.sin(az) * math.cos(el), math.sin(el)))
+        fan_leaf(mb, top, d, rng.uniform(0.8, 1.4), rng.uniform(0.9, 1.3), rng)
+    return mb
