@@ -29,6 +29,7 @@ import { Police } from './police.ts';
 import { drawMap } from './minimap.ts';
 import { dtScene, loadDowntown, trimHorizon } from './downtown.ts';
 import { RoadGraph } from './roadgraph.ts';
+import { NightLights } from './nightlights.ts';
 
 const BASE = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'oceandrive/';
 const Q = new URLSearchParams(location.search);
@@ -57,7 +58,7 @@ async function boot() {
   const env = new Env(renderer, scene, camera);
   const sky = new Sky(env, renderer);
   const time0 = (TIMES as string[]).includes(Q.get('time') ?? '') ? (Q.get('time') as TimeOfDay) : 'day';
-  const weather0 = (WEATHERS as string[]).includes(Q.get('weather') ?? '') ? (Q.get('weather') as Weather) : 'clear';
+  const weather0 = (WEATHERS as string[]).includes(Q.get('weather') ?? '') ? (Q.get('weather') as Weather) : 'clouds';
   await sky.init(time0, weather0);
   step('Painting the hotels', 0.15);
   // the street clothes, and the uniforms (police polo, SWAT kit)
@@ -120,6 +121,9 @@ async function boot() {
   // downtown's street lights
   if (dt) for (const [x, y] of (dt.data as unknown as { lamps: [number, number][] }).lamps ?? []) lampSpots.push(new THREE.Vector4(x, 6.5, -y, 150));
   const lampList: THREE.Vector4[] = [];
+  const nightLights = new NightLights(scene, 8);
+  nightLights.addLamps(lampSpots);
+  nightLights.addNeon(world.root);
   // the beach rental's umbrella poles (too thin to survive the export's decimation)
   {
     const spots: [number, number][] = [];
@@ -531,6 +535,7 @@ async function boot() {
     (post.air.u('uSunScat').value as THREE.Vector3).copy(o.sunScatter);
     rain.update(camera.position, o.rain, o.fogColor);
     dress.update(dt, o.night, o.lamps);
+    nightLights.update(dt, camera.position, Math.min(1, o.lamps));
     downtown?.setNight(o.lamps);
     police.night = o.lamps;
     for (const m of world.neon) m.color.setScalar(3.2 + 5.8 * o.night);

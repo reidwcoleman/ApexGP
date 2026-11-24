@@ -97,8 +97,8 @@ const LOOKS: Record<TimeOfDay, Record<Weather, Look>> = {
     rain: L({ sky: 'overcast', k: 0.035, sun: 0, lm: [0.14, 0.14, 0.2], env: 1, night: 1, exposure: 2.9, wet: 1, rain: 1, sea: 2.3, grey: 1, fog: 0.006, haze: 0.5, lamps: 1.1, wind: 1.3, lightning: 1 }),
   },
   night: {
-    clear: L({ sky: 'dusk', k: 0.022, sun: 0, moon: 1, lm: [0.055, 0.055, 0.095], env: 0.8, night: 1, exposure: 3.6, stars: 1, fog: 0.0009, lamps: 1.35 }),
-    clouds: L({ sky: 'dusk', k: 0.02, sun: 0, moon: 0.6, lm: [0.05, 0.05, 0.085], env: 0.8, night: 1, exposure: 3.6, stars: 0.35, clouds: 0.55, cloudLit: [0, 0, 0], cloudAmb: [0.014, 0.011, 0.012], fog: 0.0011, lamps: 1.35, wind: 0.6 }),
+    clear: L({ sky: 'dusk', k: 0.022, sun: 0, moon: 1, lm: [0.055, 0.055, 0.095], env: 0.8, night: 1, exposure: 3.6, stars: 1, fog: 0.0009, lamps: 1.35, wet: 0.3 }),
+    clouds: L({ sky: 'dusk', k: 0.02, sun: 0, moon: 0.6, lm: [0.05, 0.05, 0.085], env: 0.8, night: 1, exposure: 3.6, stars: 0.35, clouds: 0.55, cloudLit: [0, 0, 0], cloudAmb: [0.014, 0.011, 0.012], fog: 0.0011, lamps: 1.35, wind: 0.6, wet: 0.3 }),
     rain: L({ sky: 'overcast', k: 0.022, sun: 0, lm: [0.05, 0.05, 0.075], env: 0.9, night: 1, exposure: 3.8, wet: 1, rain: 1, sea: 2.3, grey: 1, fog: 0.0055, haze: 0.5, lamps: 1.4, wind: 1.3, lightning: 1 }),
   },
 };

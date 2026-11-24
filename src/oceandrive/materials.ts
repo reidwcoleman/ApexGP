@@ -237,6 +237,18 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
         diffuseColor.rgb *= mix( 0.94, 1.03, fade );
         diffuseColor.rgb *= 1.0 - uGrime * 0.08 * smoothstep( 0.55, 0.8, streak );
       }`;
+    } else if (kind === 'grass') {
+      albedo = /* glsl */ `
+      {
+        // a mown lawn: broad stripes from the mower, drier and lusher patches, darker under the palms' feet
+        float v = odFbm( vOdWorld.xz * 0.045 );
+        float dry = smoothstep( 0.45, 0.75, odFbm( vOdWorld.xz * 0.11 + 7.0 ) );
+        float stripe = step( 0.5, fract( ( vOdWorld.x * 0.86 + vOdWorld.z * 0.5 ) / 3.2 ) );
+        vec3 lush = vec3( 0.86, 0.95, 0.7 );
+        vec3 hay = vec3( 1.1, 1.0, 0.62 );
+        diffuseColor.rgb *= mix( lush, hay, dry * 0.8 );
+        diffuseColor.rgb *= mix( 0.95, 1.03, stripe ) * mix( 0.8, 1.08, v );
+      }`;
     } else if (kind === 'ground') {
       albedo = /* glsl */ `
       {
@@ -273,8 +285,8 @@ export function odMaterial(o: OdOpts, lm: { tex: THREE.Texture; info: LightmapIn
     // and the sidewalk (flat, mirror-like, rippled by the drops); walls get wet only near the ground
     // and in streaks
     const roughEnd = kind === 'sand' ? '//OD_WET' : '//OD_END_roughnessmap_fragment';
-    if (kind === 'ground' || kind === 'sand' || kind === 'wall' || kind === 'far') {
-      const horiz = kind === 'ground' || kind === 'sand';
+    if (kind === 'ground' || kind === 'grass' || kind === 'sand' || kind === 'wall' || kind === 'far') {
+      const horiz = kind === 'ground' || kind === 'grass' || kind === 'sand';
       f = f.replace(
         roughEnd,
         roughEnd +
@@ -508,7 +520,7 @@ export const TABLE: Record<string, OdOpts> = {
   od_paint: { name: 'od_paint', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.4, vertexColors: true, color: 0xd8d6cf, roughness: 1 },
   od_paintyel: { name: 'od_paintyel', nor: 'asphalt_02_nor.webp', tile: 3.5, kind: 'ground', color: 0xd9a21b, roughness: 0.6 },
   od_bikelane: { name: 'od_bikelane', diff: 'asphalt_02_diff.webp', nor: 'asphalt_02_nor.webp', rough: 'asphalt_02_rough.webp', tile: 3.5, kind: 'ground', grime: 0.9, color: 0x648a6c, vertexColors: false },
-  od_grass: { name: 'od_grass', diff: 'leafy_grass_diff.webp', nor: 'leafy_grass_nor.webp', rough: 'leafy_grass_rough.webp', tile: 2.2, kind: 'ground', vertexColors: false, color: 0xe6f0d6 },
+  od_grass: { name: 'od_grass', diff: 'leafy_grass_diff.webp', nor: 'leafy_grass_nor.webp', rough: 'leafy_grass_rough.webp', tile: 2.2, kind: 'grass', vertexColors: false, color: 0xbcd0a6 },
   od_sand: { name: 'od_sand', diff: 'coast_sand_01_diff.webp', nor: 'coast_sand_01_nor.webp', rough: 'coast_sand_01_rough.webp', tile: 3.6, kind: 'sand', vertexColors: false, color: 0xfff4e4 },
   od_coral: { name: 'od_coral', diff: 'coral_stone_wall_diff.webp', nor: 'coral_stone_wall_nor.webp', rough: 'coral_stone_wall_rough.webp', tile: 1.6, kind: 'wall', grime: 0.5, vertexColors: false },
   od_wood: { name: 'od_wood', diff: 'weathered_planks_diff.webp', nor: 'weathered_planks_nor.webp', rough: 'weathered_planks_rough.webp', tile: 2.0, kind: 'ground', vertexColors: false },
