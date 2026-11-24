@@ -58,15 +58,15 @@ export class NightLights {
         // saturate: neon light reads as pure colour
         const hsl = { h: 0, s: 0, l: 0 };
         c.getHSL(hsl);
-        c.setHSL(hsl.h, Math.min(1, hsl.s * 1.2 + 0.1), 0.5);
-        this.spots.push({ p: q.s.divideScalar(q.n), c, i: 9, r: 13 });
+        c.setHSL(hsl.h, Math.min(1, hsl.s * 1.05 + 0.05), 0.55);
+        this.spots.push({ p: q.s.divideScalar(q.n), c, i: 26, r: 20 });
       }
       void box;
     });
   }
 
   addLamps(list: THREE.Vector4[], warm = new THREE.Color(1.0, 0.72, 0.45)) {
-    for (const l of list) if (l.w >= 100) this.spots.push({ p: new THREE.Vector3(l.x, l.y, l.z), c: warm.clone(), i: 34, r: 22 });
+    for (const l of list) if (l.w >= 100) this.spots.push({ p: new THREE.Vector3(l.x, l.y, l.z), c: warm.clone(), i: 40, r: 26 });
   }
 
   /** k: how dark it is (0 day .. 1 night) */

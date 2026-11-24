@@ -136,7 +136,7 @@ async function boot() {
     for (const z of [-75, -61.6, 62.4, 75.6]) lampSpots.push(new THREE.Vector4(x + (z > 0 ? 4 : 0), 2.4, z, 22));
   for (let z = -92; z <= 92; z += 9) for (const x of [-98.6, -116.2]) lampSpots.push(new THREE.Vector4(x, 2.4, z, 22));
   const lampList: THREE.Vector4[] = [];
-  const nightLights = new NightLights(scene, 8);
+  const nightLights = new NightLights(scene, 10);
   nightLights.addLamps(lampSpots);
   nightLights.addNeon(world.root);
   // the beach rental's umbrella poles (too thin to survive the export's decimation)
