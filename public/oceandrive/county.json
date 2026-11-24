@@ -14,8 +14,16 @@
      45
     ],
     [
+     -640,
+     -80
+    ],
+    [
      -520,
-     -400
+     -160
+    ],
+    [
+     -520,
+     -420
     ],
     [
      -500,
@@ -32,6 +40,64 @@
    "layers": [
     "height_dt.bin.gz",
     "height_br.bin.gz"
+   ]
+  },
+  {
+   "name": "edge1",
+   "label": "Museum Park",
+   "frame": "main",
+   "core": [
+    [
+     -1750,
+     45
+    ],
+    [
+     -650,
+     45
+    ],
+    [
+     -650,
+     800
+    ],
+    [
+     -1750,
+     800
+    ]
+   ],
+   "glb": "tile_edge1.glb",
+   "scene": "tile_edge1_scene.json",
+   "data": "tile_edge1.json",
+   "layers": [
+    "height_edge1.bin.gz"
+   ]
+  },
+  {
+   "name": "west1",
+   "label": "Overtown",
+   "frame": "main",
+   "core": [
+    [
+     -2050,
+     45
+    ],
+    [
+     -1300,
+     45
+    ],
+    [
+     -1090,
+     -1260
+    ],
+    [
+     -1850,
+     -1260
+    ]
+   ],
+   "glb": "tile_west1.glb",
+   "scene": "tile_west1_scene.json",
+   "data": "tile_west1.json",
+   "layers": [
+    "height_west1.bin.gz"
    ]
   },
   {
