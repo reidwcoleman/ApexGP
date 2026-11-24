@@ -105,6 +105,8 @@ export class Police {
   heli: Heli | null = null;
   /** busted: you stood still for the cuffs */
   onBust: (() => void) | null = null;
+  /** a shot fired: the street hears it */
+  onNoise: ((x: number, z: number, r: number) => void) | null = null;
   private bustT = 0;
   private spawnT = 0;
   private sayT = 0;
@@ -663,7 +665,7 @@ export class Police {
           if (you.speed < 1.2) this.bustT += dt;
         }
         if (td > 2.2) this.bustT = Math.max(0, this.bustT - dt * 2);
-        o.aimK += ((td < 12 ? 1 : 0.3) - o.aimK) * Math.min(1, dt * 6);
+        o.aimK += ((td < 25 ? 1 : 0.7) - o.aimK) * Math.min(1, dt * 6);
         if (o.lineT <= 0 && td < 15) {
           o.lineT = 4;
           this.say('Officer', LINES.arrest, o.p.root.position);
@@ -702,6 +704,7 @@ export class Police {
 
   /** an officer fires at you: hits by distance, your speed, cover; misses strike near you */
   private shoot(o: Officer, you: You, dist: number, chest: THREE.Vector3) {
+    this.onNoise?.(o.x, o.z, 45);
     const spec = GUNS[o.gunId];
     if (o.burst <= 0) {
       o.burst = o.gunId === 'rifle' ? 3 + Math.floor(this.rnd() * 3) : o.gunId === 'shotgun' ? 1 : 2 + Math.floor(this.rnd() * 2);

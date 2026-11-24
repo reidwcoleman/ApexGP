@@ -345,6 +345,7 @@ async function boot() {
     playerRag = phys.ragdoll(player.person, dir.clone().multiplyScalar(2), 1, dir, 40);
   };
   let playerRag: ReturnType<typeof phys.ragdoll> | null = null;
+  police.onNoise = (x, z, r) => peds.panic(x, z, r);
   police.onBust = () => {
     if (downT >= 0) return;
     downT = 0;

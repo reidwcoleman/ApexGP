@@ -139,20 +139,25 @@ export class Peds {
     this.rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
   }
 
-  private look(): Look {
+  private look(x = NaN, z = NaN): Look {
     const r = this.rnd;
     const names = PEOPLE.filter((n) => n !== 'Male_Adult_08');
-    const body = names[Math.floor(r() * names.length)];
+    // the body least worn within 25 m (two strangers in the same outfit side by side give the crowd away)
+    const near = new Map<string, number>();
+    if (!Number.isNaN(x)) for (const d of this.list) if (Math.abs(d.x - x) < 25 && Math.abs(d.z - z) < 25) near.set(d.p.look.body ?? '', (near.get(d.p.look.body ?? '') ?? 0) + 1);
+    const least = Math.min(...names.map((n) => near.get(n) ?? 0));
+    const pool = names.filter((n) => (near.get(n) ?? 0) === least);
+    const body = pool[Math.floor(r() * pool.length)];
     const female = body.startsWith('Female') || body.includes('Female');
     return {
       female, tone: r(), body, hair: 'none', hairColor: HAIR[Math.floor(r() * HAIR.length)],
-      top: 'tshirt', topColor: COLS[Math.floor(r() * COLS.length)], tint: r() < 0.5 ? 0 : 0.7 + r() * 0.3,
+      top: 'tshirt', topColor: COLS[Math.floor(r() * COLS.length)], tint: r() < 0.2 ? 0 : 0.65 + r() * 0.35,
       bottom: 'jeans', bottomColor: 0x2d3f63, height: 0.95 + r() * 0.1, build: 0.97 + r() * 0.07,
     };
   }
 
   private add(x: number, z: number, lane: number, dir: number, z0: number, z1: number, sit = false, yaw = 0, clip = sit ? 'sit' : 'walk', person?: Person): Ped {
-    const p = person ?? new Person(this.kit, this.look());
+    const p = person ?? new Person(this.kit, this.look(x, z));
     if (!person) {
       this.scene.add(p.root);
       this.env.prepObject(p.root, true, true);

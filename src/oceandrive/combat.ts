@@ -252,7 +252,7 @@ class Flashes {
     }
     const tg = new THREE.PlaneGeometry(1, 1);
     tg.translate(0, 0.5, 0);
-    const tm = new THREE.MeshBasicMaterial({ map: SOFT, color: new THREE.Color(5, 3.6, 1.8), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
+    const tm = new THREE.MeshBasicMaterial({ map: SOFT, color: new THREE.Color(4, 2.9, 1.5), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
     for (let i = 0; i < 24; i++) {
       const m = new THREE.Mesh(tg, tm);
       m.visible = false;
@@ -293,7 +293,7 @@ class Flashes {
       t.t += dt;
       const L = t.a.distanceTo(t.b);
       const speed = 900; // m/s along the line
-      const head = Math.min(L, t.t * speed), tail = Math.max(0, head - Math.min(14, L * 0.5));
+      const head = Math.min(L, t.t * speed), tail = Math.max(0, head - Math.min(2.6, L * 0.5));
       if (tail >= L - 0.01 || t.t > 0.25) {
         t.m.visible = false;
         continue;
@@ -307,7 +307,10 @@ class Flashes {
       const side = new THREE.Vector3().crossVectors(d, toCam).normalize();
       const nrm = new THREE.Vector3().crossVectors(side, d);
       t.m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(side, d, nrm));
-      t.m.scale.set(0.025, len, 1);
+      // (a streak passing the lens would fill the screen)
+      const near = new THREE.Line3(p0, p0.clone().addScaledVector(d, len)).closestPointToPoint(cp, true, new THREE.Vector3()).distanceTo(cp);
+      t.m.visible = near > 2.5;
+      t.m.scale.set(0.014, len, 1);
     }
   }
 }
@@ -371,11 +374,12 @@ export class Fx {
   /** a bullet strikes: what it struck decides the puff */
   impact(p: THREE.Vector3, n: THREE.Vector3, kind: 'ground' | 'wall' | 'metal' | 'flesh' | 'glass', dir: THREE.Vector3) {
     if (kind === 'flesh') {
-      for (let i = 0; i < 10; i++) {
-        const v = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.6, Math.random() - 0.5).multiplyScalar(2.2).addScaledVector(dir, 2.5);
-        this.soft.emit(p, v, [0.38 + Math.random() * 0.1, 0.02, 0.02], 0.05 + Math.random() * 0.05, 0.5 + Math.random() * 0.4, { grav: 6, drag: 1.2, grow: 1.5, alpha: 0.9 });
+      // fine droplets thrown out the far side, and a brief dark mist
+      for (let i = 0; i < 22; i++) {
+        const v = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.7, Math.random() - 0.5).multiplyScalar(2.6).addScaledVector(dir, 2 + Math.random() * 3);
+        this.soft.emit(p, v, [0.2 + Math.random() * 0.08, 0.008, 0.008], 0.008 + Math.random() * 0.012, 0.35 + Math.random() * 0.3, { grav: 9.8, drag: 0.6, grow: 0.2, alpha: 0.95 });
       }
-      this.soft.emit(p, dir.clone().multiplyScalar(0.6), [0.45, 0.04, 0.04], 0.16, 0.35, { grow: 2.5, drag: 3, alpha: 0.5 });
+      for (let i = 0; i < 3; i++) this.soft.emit(p, dir.clone().multiplyScalar(0.8 + i * 0.4), [0.26, 0.02, 0.02], 0.07, 0.22, { grow: 3.5, drag: 4, alpha: 0.28 });
       return;
     }
     if (kind === 'metal' || kind === 'glass') {

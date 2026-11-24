@@ -25,7 +25,7 @@ export class Hud {
       #odhud .loc b { display: block; font-size: 30px; font-weight: 800; font-style: italic; letter-spacing: .02em; text-transform: uppercase; }
       #odhud .loc span { font-size: 15px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; opacity: .8; }
       #odhud .help { position: absolute; left: 30px; top: 46px; font-size: 14px; font-weight: 600; letter-spacing: .05em; opacity: .8; line-height: 1.65; text-shadow: 0 1px 8px rgba(0,0,0,.6); transition: opacity 1s; }
-      #odhud .help.fade { opacity: 0; }
+      #odhud .help.fade, #odhud .credit.fade { opacity: 0; }
       #odhud .help kbd { display: inline-block; min-width: 18px; padding: 0 6px; margin-right: 4px; border: 1px solid rgba(255,255,255,.55); border-radius: 4px; font: 700 12px/18px "Barlow Condensed", sans-serif; text-align: center; }
       #odhud .prompt { position: absolute; left: 50%; bottom: 22%; transform: translateX(-50%); font-size: 20px; font-weight: 700; letter-spacing: .06em; padding: 8px 16px; background: rgba(8,10,14,.55); border-radius: 6px; opacity: 0; transition: opacity .2s; }
       #odhud .prompt.on { opacity: 1; }
@@ -36,7 +36,7 @@ export class Hud {
       #odhud .sky.on { opacity: 1; }
       #odhud .sky b { display: block; font-size: 34px; font-weight: 800; font-style: italic; text-transform: uppercase; letter-spacing: .03em; }
       #odhud .sky span { font-size: 15px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; opacity: .85; }
-      #odhud .credit { position: absolute; left: 30px; top: 22px; font-size: 12px; opacity: .45; letter-spacing: .04em; }
+      #odhud .credit { position: absolute; left: 30px; top: 22px; font-size: 12px; opacity: .45; letter-spacing: .04em; transition: opacity 1s; }
       #odhud .stars { position: absolute; right: 30px; top: 26px; display: flex; gap: 3px; }
       #odhud .stars svg { width: 30px; height: 30px; filter: drop-shadow(0 1px 3px rgba(0,0,0,.7)); transition: transform .2s; }
       #odhud .stars svg path { fill: rgba(255,255,255,.14); stroke: rgba(0,0,0,.55); stroke-width: 1.3; }
@@ -146,6 +146,7 @@ export class Hud {
     if (driving) this.speed.firstChild!.textContent = String(Math.round(kmh));
     this.helpT += dt;
     this.help.classList.toggle('fade', this.helpT > 25);
+    this.help.previousElementSibling?.parentElement?.querySelector('.credit')?.classList.toggle('fade', this.helpT > 25);
     this.hurtV = Math.max(0, this.hurtV - dt * 1.4);
     this.hurtEl.style.opacity = String(this.hurtV);
     this.crossT -= dt;

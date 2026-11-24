@@ -91,7 +91,7 @@ export interface Car {
 }
 
 const lampHead = () => new THREE.MeshStandardMaterial({ color: 0xc9ced4, emissive: 0xfff4e0, emissiveIntensity: 0.02, metalness: 0.7, roughness: 0.08, vertexColors: true });
-const lampTail = () => new THREE.MeshStandardMaterial({ color: 0x7a0804, emissive: 0xff0600, emissiveIntensity: 0.12, roughness: 0.12, vertexColors: true });
+const lampTail = () => new THREE.MeshStandardMaterial({ color: 0x7a0804, emissive: 0xc00300, emissiveIntensity: 0.12, roughness: 0.12, vertexColors: true });
 
 /** paint: the white vertex colour takes the paint, the dark trim and chrome keep their own */
 function paintMaterial(color: number, flake: boolean): THREE.MeshPhysicalMaterial {
@@ -129,7 +129,9 @@ export class Cars {
   private walkers: { x: number; z: number }[] = [];
   private nightSet = false;
   /** the red and the blue that wash over the street from the nearest light bar (always in the scene: no recompiles) */
-  private beacons = [new THREE.PointLight(0xff1a10, 0, 26, 1.6), new THREE.PointLight(0x2050ff, 0, 26, 1.6)];
+  private beacons = [new THREE.PointLight(0xff1a10, 0, 24, 2), new THREE.PointLight(0x2050ff, 0, 24, 2)];
+  /** 0 day .. 1 night: the beacons are dimmer when nothing competes with them */
+  beaconNight = 0;
 
   constructor(readonly scene: THREE.Scene, readonly env: Env, readonly ground: Ground, readonly sw: number, readonly kit: PeopleKit) {
     let s = 4242;
@@ -987,10 +989,11 @@ export class Cars {
     if (this.lightsOn === n > 0 && this.nightSet) return;
     this.nightSet = true;
     this.lightsOn = n > 0;
+    this.beaconNight = Math.min(1, n);
     for (const c of this.list) {
       const [h, t] = c.lamps;
-      if (h) h.emissiveIntensity = 0.02 + n * 6;
-      if (t) t.emissiveIntensity = 0.12 + n * 2.2;
+      if (h) h.emissiveIntensity = 0.02 + n * 3;
+      if (t) t.emissiveIntensity = 0.12 + n * 0.9;
     }
   }
 
@@ -1013,7 +1016,7 @@ export class Cars {
     }
     // brake lights
     const [, tl] = c.lamps;
-    if (tl) tl.emissiveIntensity = (this.lightsOn ? 2.2 : 0.12) + (brk > 0 && sF > 0.3 ? (this.lightsOn ? 5 : 4) : 0);
+    if (tl) tl.emissiveIntensity = (this.lightsOn ? 0.9 : 0.12) + (brk > 0 && sF > 0.3 ? (this.lightsOn ? 1.6 : 2.5) : 0);
     // physics in small steps (stable at any frame rate)
     const n = Math.max(1, Math.ceil(dt / 0.008));
     for (let i = 0; i < n; i++) this.stepBody(c, dt / n, thr, brk, -mv.x, hand);
@@ -1099,8 +1102,11 @@ export class Cars {
         const y = best.y + (MODELS[best.kind as ModelId]?.H ?? 1.5) + 0.3;
         r.position.set(best.x + c_ * 0.6, y, best.z - s_ * 0.6);
         b.position.set(best.x - c_ * 0.6, y, best.z + s_ * 0.6);
-        r.intensity = ph < 2 ? 90 : 4;
-        b.intensity = ph >= 2 ? 110 : 4;
+        const k = 1 - this.beaconNight * 0.8;
+        // a strobe: on, off, on, then the other side
+        const strobe = Math.floor(this.flash * 28) % 4 !== 1;
+        r.intensity = ph < 2 && strobe ? 120 * k : 0;
+        b.intensity = ph >= 2 && strobe ? 150 * k : 0;
       } else r.intensity = b.intensity = 0;
     }
     for (const c of this.list) {
