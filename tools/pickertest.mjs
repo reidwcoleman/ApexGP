@@ -22,7 +22,7 @@ await key('ArrowLeft', 400); await shot('05b_add');
 await key('ArrowRight', 300);
 await key('Enter', 1500); await shot('06_home');
 await key('ArrowRight', 650); await shot('07_boost');
-await key('ArrowRight', 650); await shot('08_oceandrive');
+await key('ArrowRight', 650); await shot('08_palmera');
 await key('ArrowRight', 650); await shot('09_wobble');
 await key('ArrowRight', 650); await shot('10_mogul');
 await key('ArrowRight', 650); await shot('11_ts');

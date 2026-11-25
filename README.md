@@ -5,7 +5,7 @@ A Formula 1 racing game in the browser. Three.js + WebGL2, TypeScript, Vite.
 **▶ Play: https://reidwcoleman.github.io/ApexGP/** (desktop Chrome/Safari/Edge; keyboard or gamepad)
 
 The site opens like a console: logo, the lit stage, press any button, who's playing, then a home screen with one row of tiles, the selected game's art filling the screen and activity cards under it. It's measured off real PS5 footage at 1280x720 (`--u` in `index.html`). The games are **Apex GP** (this racing game), **Boostball** (car soccer),
-**Last Frame** (a bodycam shooter, online with friends or against bots), **Ocean Drive** (one block of Miami Beach), **Wobble Mania** (a jelly-bean knockout party, online with friends), **Mogul** and **Tracksmith**, and only the game you pick is loaded: the racing game's loader, pictures and bundle
+**Last Frame** (a bodycam shooter, online with friends or against bots), **Palmera** (an open-world city sandbox), **Wobble Mania** (a jelly-bean knockout party, online with friends), **Mogul** and **Tracksmith**, and only the game you pick is loaded: the racing game's loader, pictures and bundle
 wait behind the picker (`src/boot.ts`); the others are pages of their own. Links with parameters, the test tools and the desktop build skip it. Coming back in the same tab goes straight home, `?pick` does too, and `?pick&boot` forces the startup. Settings can turn the startup off. `tools/pickertest.mjs <dir>` walks it with real keys.
 
 Every push to `main` is built and deployed to GitHub Pages by `.github/workflows/pages.yml`.
@@ -650,84 +650,22 @@ npm run check    # tsc --noEmit
   learn, and a slow development over the races they drive, is kept in localStorage (`apexgp.ailearn`), capped by
   the difficulty so the AI stays beatable.
 
-## Ocean Drive
+## Palmera
 
-**▶ https://reidwcoleman.github.io/ApexGP/oceandrive.html** (or the Ocean Drive tile in the picker)
+**▶ https://reidwcoleman.github.io/ApexGP/palmera.html** (or the Palmera tile in the picker)
 
-One block of Miami Beach made as real as a browser allows: Ocean Drive from 7th to 8th Street, the
-Art Deco hotels on it (Avalon, Beacon, Colony, Boulevard, Starlite, News Cafe; Park Central to the
-south, the Pelican to the north), the streets behind, Lummus Park, the dunes, the beach and the
-Atlantic. Walk it, sit the camera on a café porch, or take any car (a driver gets out) and drive.
-Traffic loops the block with drivers at the wheel and stops at the signals on Collins; about 80
-people walk, jog and stand about, step out of the way of cars and get knocked flat by them.
+An original open-world sandbox set in Port Palmera, a made-up Florida-style coastal city: a palm-lined
+beach strip of pastel hotels, a downtown of glass towers on the bay, a causeway bridge, a marina,
+suburbs and the swampy edge of town. Everything is generated in code (no model or audio files).
 
-The streets are dressed from the same map (`dressing.ts`, laid out from `dressing.json`, which the
-Blender build writes): a sign over every shopfront (lit at night) and striped awnings on about half,
-mast-arm signals on Collins that cycle, green street-name blades, pay stations, newspaper boxes, bike
-racks and scooters, manholes and storm drains, café string lights, palms down the side streets with
-cars parked along them, sunbathers on the beach.
+- On foot: WASD + mouse, Shift sprint, Space jump, left click punch/shoot, right click aim, R reload, Q/E weapons.
+- Cars: F to take any parked or traffic car, Space handbrake, H horn; six car types and a boat.
+- A living city: traffic on a road graph that stops at lights, pedestrians who flee, day/night with lit windows.
+- Wanted level: 1-5 stars, police cars and officers; break line of sight until the stars clear.
+- Three jobs on the map (M), cash rewards, a minimap and synthesized engine, siren and gun sounds.
 
-Driving: weight transfer (the nose dips braking and squats accelerating, the body rolls in turns),
-a spring under the body on curbs, grip that runs out (the handbrake breaks the rear loose; wet
-roads, the lawn and the sand grip less), and crashes that trade momentum by mass with a twist from
-where they touched; traffic knocked off its route waits, then rejoins. F while moving brakes to a
-stop and you step out by the door (or wherever is clear). The ground map covers the whole city
-(`height_far.bin`, 50 cm), so you can walk and drive anywhere the streets go.
-
-Four times of day (afternoon, golden hour, blue hour, night under the moon) and three weathers
-(clear, clouds, tropical storm) make twelve looks (`sky.ts`). Each starts from a real sky photo
-(Poly Haven), measured on load (sun position and irradiance, sky light, horizon colour) and turned
-so its sun sits where the game's does; drawn over it are a sunlit cloud layer, stars, the moon,
-rain and lightning. The storm wets everything (glossy streets, puddles ringing with drops, lamp
-glints), raises the sea and pulls the haze in; at night the lamps, shopfronts and headlights light
-the ground. The haze is a depth-based height fog that glows toward the sun (`post.ts`).
-
-How it's made (`blender/oceandrive/`, `./make.sh build` reruns all of it):
-
-- **Map data**: every footprint, street, sidewalk, path, volleyball court, palm and lifeguard tower
-  from OpenStreetMap (`data/osm.json`), in a local frame along Ocean Drive (`geo.py`).
-- **Blender** (`build.py`): the frontage becomes Tropical Deco hotels (`hotels.py`: porches and
-  loggias, recessed windows with frames and sills, eyebrow ledges, racing stripes, stepped crowns,
-  pylons carrying neon tube lettering, parapets, bulkheads and downspouts); every building behind
-  gets recessed windows by floor and bay, shopfronts where it faces a street, cornices, parapets,
-  AC units and roof clutter (`city_building`); the streets get curbs, crosswalks and the bike lane, the
-  park its coral rock wall and serpentine beachwalk (`ground.py`), 150 procedural coconut palms
-  (`palms.py`), café tables, parasols, lamps and dune planting (`props.py`, Poly Haven scans).
-- **Cycles bake** (`bake.py`): sky light and the sun's bounce light into lightmaps (4096² for the
-  block and the street, 2048² beyond), islands dilated into the padding so thin strips don't fade
-  to black in the mips; the browser adds the sun itself with cascaded shadows (the far cascades skip
-  small props: three culls shadow casters by the view camera's layers, so `main.ts` draws each
-  cascade with its own mask).
-- **Export** (`export.py`): GLB with GPU instancing (then quantized and meshopt-packed with
-  gltf-transform, ~18 MB), a 25 cm walk heightmap ray-cast from the scene, the lightmaps as WebP.
-- **In the browser** (`src/oceandrive/`): scanned PBR surfaces with anti-tiling, weathering and
-  specular occlusion from the bake; interior-mapped windows (rooms, curtains, blinds); a sky-lit
-  sea with swell, glints, surf and swash; contact AO, TAA, bloom, AgX and a grade.
-
-Crime and the police (`gunplay.ts`, `weapons.ts`, `police.ts`, `combat.ts`): a pistol, a pump
-shotgun and a carbine (Last Frame's models, held by IK over whatever the legs are doing), fists. Shots
-are marched through the city's heightmap and tested against everyone's capsule and every car's box:
-dust, sparks, blood, bullet holes, pools of blood, ragdolls (Last Frame's Rapier ragdolls over a 50 cm
-copy of the heightmap, with the nearby cars as boxes). Cars take damage, smoke, burn and explode.
-People flee gunfire, duck, put their hands up when a gun's on them, and die; a driver you rear-end
-gets out and has words (and fists), then drives off; one you pull out shouts or runs. Crimes raise a
-wanted level of one to six stars: patrol cars route through the street grid, officers get out and
-arrest you at one star and shoot above it, ram you from three, SWAT come at four, the helicopter
-(searchlight by night, a marksman at six) at five. Stay out of sight and they lose you; die and you
-wake up hospitalized, get caught and you're arrested.
-
-Keys: W A S D move, Shift sprint, C stroll, Space jump, mouse look (click to capture), F get in /
-out of a car (pulls a driver out; W/S throttle and brake, A/D steer, Space handbrake), 1-4 fists,
-pistol, shotgun, carbine (Q/Tab cycles), right mouse aim, left mouse fire / punch, R reload, T time
-of day, Y weather, H hides the HUD. Flags: `?time=day|sunset|dusk|night`, `?weather=clear|clouds|rain`, `?ev=`
-exposure, `?dpr=` render scale.
-
-Note: three r186's CSM installs an older copy of `lights_fragment_begin` that skips the DFG
-lookup, which zeroes every image-based reflection; `env.ts` puts the lookup back.
-
-Credits: map data © OpenStreetMap contributors (ODbL); textures, skies and props from Poly Haven
-(CC0); people from Microsoft Rocketbox (MIT); Ferrari 458 Italia model by vicent091036 (CC BY 4.0)
-via the three.js examples.
+Built with Craft Anything (`~/Documents/Craft Anything/Palmera`), then moved here as `src/palmera/` +
+`palmera.html`. Test hooks: `?test=foot`, `?test=drive`, `?selftest`, and `window.palmera`.
 
 ## Wobble Mania
 

@@ -623,12 +623,12 @@ export class Menu {
     }
     // the open world: its own page, so none of the race world loads with it
     const ow = el('div', 'home-ow', p);
-    el('div', 'eyebrow', ow, 'Miami Beach');
-    el('div', 'ow-title', ow, 'Ocean Drive');
-    el('div', 'meta', ow, 'One block of South Beach, built from the map: the Art Deco hotels, Lummus Park and the sea.');
-    const drive = el('div', 'home-quick', ow, 'Walk Ocean Drive ›');
+    el('div', 'eyebrow', ow, 'Open world');
+    el('div', 'ow-title', ow, 'Palmera');
+    el('div', 'meta', ow, 'Port Palmera: beach strip, downtown towers and the bay. Take any car, outrun the police, work three jobs.');
+    const drive = el('div', 'home-quick', ow, 'Play Palmera ›');
     this.action(drive, () => {
-      location.href = './oceandrive.html';
+      location.href = './palmera.html';
     });
     this.sel = 0;
   }
