@@ -9,6 +9,7 @@ import {
 import * as T from './textures';
 import { addDetail as D } from '../render/detail';
 import { palmKit } from './palms';
+import { Grass, blossomGeometry, hedgeGeometry, placePlants, shrubGeometry } from './vegetation';
 import { furnitureGeometry, placeFurniture, type FurnitureKind } from './furniture';
 
 // ------------------------------------------------------------ simple mesh builder
@@ -742,6 +743,7 @@ export class City {
 
   /** what gives a box a building's silhouette: cornices and parapets, balconies, rooftop plant, awnings */
   /** towers reshaped (twisted, set back): no box cornice or parapet on them */
+  grass: Grass | null = null;
   private landmarks = new Set<BuildingSpec>();
   private helipads = new Set<BuildingSpec>();
   private ledges: Inst[] = [];
@@ -906,7 +908,14 @@ export class City {
     void palmMat;
     chunked(this.scene, this.chunks, groups.get('tree') ?? [], treeGeometry(true), std(), { far: 420, shadow: true, lodGeo: treeGeometry(false), lodDist: 120 });
     chunked(this.scene, this.chunks, groups.get('cypress') ?? [], cypressGeometry(), std(), { far: 420, shadow: true });
-    chunked(this.scene, this.chunks, groups.get('bush') ?? [], bushGeometry(), std(), { far: 250, shadow: false });
+    chunked(this.scene, this.chunks, groups.get('bush') ?? [], shrubGeometry(), std(), { far: 250, shadow: false });
+    // shrubs, hedges and flower beds round houses and parks; the grass field
+    const pl = placePlants(this.map);
+    chunked(this.scene, this.chunks, pl.shrubs, shrubGeometry(), std({ roughness: 0.9 }), { far: 260, shadow: true, lodGeo: bushGeometry(), lodDist: 90 });
+    chunked(this.scene, this.chunks, pl.hedges, hedgeGeometry(), std({ roughness: 0.9 }), { far: 220, shadow: true });
+    chunked(this.scene, this.chunks, pl.mounds, hedgeGeometry(), std({ roughness: 0.9 }), { far: 140, shadow: false });
+    chunked(this.scene, this.chunks, pl.blossoms, blossomGeometry(), new THREE.MeshStandardMaterial({ roughness: 0.7 }), { far: 140, shadow: false });
+    this.grass = new Grass(this.scene, this.map);
     chunked(this.scene, this.chunks, groups.get('lamp') ?? [], lampGeometry(), std({ roughness: 0.5, metalness: 0.5 }), { far: 380, shadow: true });
     chunked(this.scene, this.chunks, lampHeads, new THREE.BoxGeometry(1, 1, 1), this.lampHeadMat, { far: 600, shadow: false, receive: false });
     const poolGeo = new THREE.PlaneGeometry(1, 1);
@@ -1053,6 +1062,7 @@ export class City {
 
   update(cam: THREE.Vector3, night: number, elapsed: number) {
     this.chunks.update(cam);
+    this.grass?.update(cam, elapsed);
     cityUniforms.uNight.value = night;
     cityUniforms.uTime.value = elapsed;
     const k = 0.55 + night * 2.4;
