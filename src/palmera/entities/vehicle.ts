@@ -83,6 +83,8 @@ export class Vehicle {
   ai: CarAI | null = null;
   police = false;
   siren = false;
+  /** driving like there's a siren behind it (a getaway car): traffic pulls over for it too */
+  urgent = false;
   persistent = false;
   missionTag = '';
   lastPlayerHit = 0;

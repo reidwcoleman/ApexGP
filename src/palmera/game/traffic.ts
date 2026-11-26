@@ -148,7 +148,7 @@ export class TrafficAI implements CarAI {
     let pull = 0;
     if (this.panic <= 0) {
       for (const u of g.vehicles) {
-        if (u === v || !u.siren || u.wrecked) continue;
+        if (u === v || !(u.siren || u.urgent) || u.wrecked) continue;
         const ox = u.pos.x - v.pos.x, oz = u.pos.z - v.pos.z;
         if (Math.abs(ox) > 70 || Math.abs(oz) > 70) continue;
         const along = ox * v.fwdX() + oz * v.fwdZ();

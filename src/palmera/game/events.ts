@@ -4,11 +4,44 @@
 // it and he's gone in under a minute.
 import * as THREE from 'three';
 import type { Human } from '../entities/humans';
+import { Vehicle } from '../entities/vehicle';
+import { FleeAI } from './traffic';
 import { groundAt } from '../world/map';
 import type { Blip } from './missions';
 import type { Game } from './game';
 
 type Stage = 'approach' | 'run' | 'dropped' | 'carry';
+
+/** the getaway car: picks its own turns (not just away from you) and leaves a trail of them */
+class GetawayAI extends FleeAI {
+  trail: Map<number, number> | undefined;
+  choose(at: number, came: number): number {
+    const p = this.panic;
+    this.panic = 0;
+    const n = super.choose(at, came);
+    this.panic = p;
+    this.trail?.set(at, n);
+    return n;
+  }
+}
+
+/** the squad car: takes the same turns the getaway car took */
+class ChaserAI extends FleeAI {
+  trail: Map<number, number> | undefined;
+  choose(at: number, came: number): number {
+    const n = this.trail?.get(at);
+    if (n !== undefined && n !== came) return n;
+    return super.choose(at, came);
+  }
+}
+
+interface Chase {
+  car: Vehicle;
+  cop: Vehicle;
+  t: number;
+  seen: boolean;
+  stall: number;
+}
 
 const REWARD = 250;
 
@@ -21,6 +54,7 @@ export class StreetEvents {
   gap = 0;
   private readonly bag: THREE.Mesh;
   private readonly bagPos = new THREE.Vector3();
+  chase: Chase | null = null;
 
   constructor(private game: Game) {
     const g = new THREE.BoxGeometry(0.34, 0.26, 0.14);
@@ -32,10 +66,104 @@ export class StreetEvents {
   }
 
   get active() {
-    return this.stage !== null;
+    return this.stage !== null || this.chase !== null;
+  }
+
+  /**
+   * A police chase: a getaway car and a squad car with its siren going, on a road 80-150 m away
+   * heading your way. Both run red lights at speed; everyone else pulls over for the siren.
+   */
+  triggerChase(): boolean {
+    const g = this.game;
+    const map = g.map;
+    const f = g.player.vehicle ? g.player.vehicle.pos : g.player.pos;
+    const near = map.nodes.filter((n) => {
+      const d = Math.hypot(n.x - f.x, n.z - f.z);
+      return d > 80 && d < 150 && n.edges.length >= 2;
+    });
+    for (let k = 0; k < 20 && near.length; k++) {
+      const A = near[Math.floor(Math.random() * near.length)];
+      // the road out of A that heads closest towards you
+      let best = -1, bd = 1e9;
+      for (const eid of A.edges) {
+        const o = map.nodes[map.otherEnd(map.edges[eid], A.id)];
+        const d = Math.hypot(o.x - f.x, o.z - f.z);
+        if (d < bd) (bd = d), (best = o.id);
+      }
+      const B = map.nodes[best];
+      const len = Math.hypot(B.x - A.x, B.z - A.z);
+      if (len < 45 || bd > Math.hypot(A.x - f.x, A.z - f.z)) continue;
+      const dx = (B.x - A.x) / len, dz = (B.z - A.z) / len;
+      const lane = (t: number) => ({ x: A.x + dx * t - dz * 3, z: A.z + dz * t + dx * 3 });
+      const p1 = lane(30), p0 = lane(12);
+      if (g.vehicles.some((u) => Math.hypot(u.pos.x - p1.x, u.pos.z - p1.z) < 8 || Math.hypot(u.pos.x - p0.x, u.pos.z - p0.z) < 8)) continue;
+      const trail = new Map<number, number>();
+      const car = new Vehicle(Math.random() < 0.5 ? 'sports' : 'sedan');
+      car.place(p1.x, p1.z, Math.atan2(dx, dz));
+      car.driver = 'npc';
+      const ai = new GetawayAI(g, A.id, B.id, 21);
+      ai.trail = trail;
+      trail.set(B.id, ai.next);
+      car.ai = ai;
+      car.urgent = true;
+      const cop = new Vehicle('police');
+      cop.place(p0.x, p0.z, Math.atan2(dx, dz));
+      cop.driver = 'npc';
+      cop.occupants = 2;
+      const cai = new ChaserAI(g, A.id, B.id, 21);
+      cai.trail = trail;
+      cai.next = trail.get(B.id) ?? cai.next;
+      cop.ai = cai;
+      cop.siren = true;
+      for (const v of [car, cop]) {
+        v.persistent = true;
+        v.vx = dx * 16;
+        v.vz = dz * 16;
+        g.addVehicle(v);
+      }
+      this.chase = { car, cop, t: 70, seen: false, stall: 0 };
+      return true;
+    }
+    return false;
+  }
+
+  private endChase() {
+    const c = this.chase;
+    if (!c) return;
+    c.car.persistent = c.cop.persistent = false;
+    c.car.urgent = false;
+    if (!c.cop.wrecked) c.cop.siren = false;
+    this.chase = null;
+    this.t = 70 + Math.random() * 60;
+  }
+
+  private updateChase(dt: number) {
+    const g = this.game;
+    const c = this.chase!;
+    c.t -= dt;
+    const me = g.player.vehicle ? g.player.vehicle.pos : g.player.pos;
+    const d = Math.hypot(c.car.pos.x - me.x, c.car.pos.z - me.z);
+    if (!c.seen && d < 60) c.seen = true;
+    // you stopped the getaway car: a reward from a grateful police department
+    if ((c.car.wrecked || c.car.health < c.car.spec.health * 0.25) && d < 50) {
+      g.addCash(400);
+      g.hud.bigMessage('GETAWAY STOPPED', '+$400 from Palmera PD', '#4da6ff');
+      g.audio.cue('pass');
+      return this.endChase();
+    }
+    if (c.t <= 0 || !g.vehicles.includes(c.car) || !g.vehicles.includes(c.cop) || (c.seen && d > 260)) return this.endChase();
+    // stopped for good (boxed in behind traffic, crashed): the squad car has it, the chase is over
+    c.stall = Math.abs(c.car.speed) < 1.5 ? c.stall + dt : 0;
+    if (c.stall > 6) {
+      if (d < 70) g.hud.toast('The police have the getaway car boxed in');
+      return this.endChase();
+    }
+    // you took one of the cars: the chase is off
+    if (g.player.vehicle === c.car || g.player.vehicle === c.cop) return this.endChase();
   }
 
   get blips(): Blip[] {
+    if (this.chase) return [{ x: this.chase.car.pos.x, z: this.chase.car.pos.z, color: '#ff4d4d', label: '', kind: 'car' }];
     if (!this.stage) return [];
     if (this.stage === 'run' && this.thief) return [{ x: this.thief.pos.x, z: this.thief.pos.z, color: '#ff4d4d', label: '', kind: 'car' }];
     if (this.stage === 'dropped') return [{ x: this.bagPos.x, z: this.bagPos.z, color: '#ffd23f', label: '', kind: 'dest' }];
@@ -87,11 +215,14 @@ export class StreetEvents {
   update(dt: number) {
     const g = this.game;
     const p = g.player;
+    if (this.chase) return this.updateChase(dt);
     if (!this.stage) {
       this.t -= dt;
       if (this.t > 0) return;
-      const free = !g.missions.active && g.wanted.level === 0 && !p.dead && !g.interiors.inside && !g.chopper.camera() && g.sky.day > 0.3;
-      if (!free || !this.trigger()) this.t = 12;
+      const free = !g.missions.active && g.wanted.level === 0 && !p.dead && !g.interiors.inside && !g.chopper.camera();
+      // by day either; after dark only chases
+      const snatch = g.sky.day > 0.3 && Math.random() < 0.5;
+      if (!free || !(snatch ? this.trigger() : this.triggerChase())) this.t = 12;
       return;
     }
     const th = this.thief!, vi = this.victim!;
