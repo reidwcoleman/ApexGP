@@ -141,6 +141,9 @@ export const cityUniforms = {
   /** the offices and flats rendered in Blender (tools/palmera/rooms.py) */
   uRooms: { value: new THREE.Texture() as THREE.Texture },
   uRoomsOn: { value: 0 },
+  /** shed / warehouse facade bays rendered in Blender (tools/palmera/shed.py): siding | roller door */
+  uShed: { value: new THREE.Texture() as THREE.Texture },
+  uShedOn: { value: 0 },
 };
 
 // the shop atlas: 4 shops x (back wall, wall at x = 0, wall at x = W, floor); until it arrives the
@@ -160,6 +163,13 @@ export const cityUniforms = {
     cityUniforms.uRooms.value = t;
     cityUniforms.uRoomsOn.value = 1;
   });
+  new THREE.TextureLoader().load(base + 'shed.webp', (t) => {
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+    cityUniforms.uShed.value = t;
+    cityUniforms.uShedOn.value = 1;
+  });
 }
 
 function buildingMaterial(): THREE.MeshStandardMaterial {
@@ -171,6 +181,8 @@ function buildingMaterial(): THREE.MeshStandardMaterial {
     sh.uniforms.uShopsOn = cityUniforms.uShopsOn;
     sh.uniforms.uRooms = cityUniforms.uRooms;
     sh.uniforms.uRoomsOn = cityUniforms.uRoomsOn;
+    sh.uniforms.uShed = cityUniforms.uShed;
+    sh.uniforms.uShedOn = cityUniforms.uShedOn;
     sh.vertexShader = sh.vertexShader
       .replace(
         '#include <common>',
@@ -199,7 +211,7 @@ vStyle = aStyle;`,
       .replace(
         '#include <common>',
         `#include <common>
-uniform float uNight; uniform float uTime; uniform sampler2D uShops; uniform float uShopsOn; uniform sampler2D uRooms; uniform float uRoomsOn;
+uniform float uNight; uniform float uTime; uniform sampler2D uShops; uniform float uShopsOn; uniform sampler2D uRooms; uniform float uRoomsOn; uniform sampler2D uShed; uniform float uShedOn;
 varying vec3 vBN; varying vec3 vLP; varying vec3 vBS; varying vec2 vStyle; varying vec3 vBW;
 float bhash(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719)))*43758.5453); }
 // a person in a room: a cut-out figure standing at depth zp, centred on x = px, scale sc, legs
@@ -510,6 +522,26 @@ if (bn.y > 0.5) {
   if (bStyle > 2.5 && v < 0.7) diffuseColor.rgb *= 0.55;
   // grime toward the ground, a little lighter up high
   diffuseColor.rgb *= mix(0.78, 1.0, smoothstep(0.0, 2.5, v)) * mix(1.0, 1.04, smoothstep(10.0, 40.0, v));
+} else if (bn.y > -0.5 && bStyle > 3.5 && bStyle < 4.5 && uShedOn > 0.5) {
+  // sheds and warehouses (the marina boat sheds, swamp shacks, rooftop plant rooms): corrugated
+  // siding in 4 m bays with a clerestory strip, and roller doors in some ground-floor bays of a
+  // wide wall - bays modelled and rendered in Blender, tinted by the building's colour
+  bool sideX = abs(bn.x) > 0.5;
+  float u = sideX ? vLP.z : vLP.x;
+  float halfW = sideX ? vBS.z * 0.5 : vBS.x * 0.5;
+  float v = vLP.y;
+  if (halfW > 1.2) {
+    float s = (u + halfW) / 4.0;
+    float bay = floor(s), fu = fract(s);
+    float storey = floor(v / 4.0), fv = fract(v / 4.0);
+    float nb = floor(2.0 * halfW / 4.0);
+    float door = (storey < 0.5 && halfW > 4.0 && bay > 0.5 && bay < nb - 0.5 && fract(sin(bay * 12.9898 + vStyle.y * 78.233) * 43758.5453) < 0.55) ? 1.0 : 0.0;
+    vec3 t = texture2D(uShed, vec2((clamp(fu, 0.004, 0.996) + door) * 0.5, clamp(fv, 0.004, 0.996))).rgb;
+    // the ribs catch the light a little
+    float rib = 0.94 + 0.06 * cos(u / 0.15 * 6.2832);
+    diffuseColor.rgb *= t * 1.02 * mix(rib, 1.0, door * step(fv, 0.75));
+  }
+  diffuseColor.rgb *= mix(0.8, 1.0, smoothstep(0.0, 2.5, v));
 }`,
       )
       .replace(
@@ -536,7 +568,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v10';
+  mat.customProgramCacheKey = () => 'palmera-building-v11';
   return mat;
 }
 
