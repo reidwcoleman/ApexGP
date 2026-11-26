@@ -43,6 +43,7 @@ import { Garages } from './garage';
 import { StreetEvents } from './events';
 import { PhotoMode } from './photo';
 import { Club } from './club';
+import { Wakes } from './wakes';
 import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
@@ -121,6 +122,7 @@ export class Game {
   private speedBlurW = 0;
   photo!: PhotoMode;
   club!: Club;
+  wakes!: Wakes;
   interiors!: Interiors;
   saveGame!: SaveGame;
   phone!: Phone;
@@ -181,6 +183,7 @@ export class Game {
     Marker.camera = this.camera;
     this.photo = new PhotoMode(this);
     this.club = new Club(this);
+    this.wakes = new Wakes(this);
     this.street = new StreetEvents(this);
     this.interiors = new Interiors(this);
     this.saveGame = new SaveGame(this);
@@ -973,6 +976,7 @@ export class Game {
       this.garages.update(sdt);
       this.street.update(sdt);
       this.club.update(sdt);
+      this.wakes.update(sdt);
       this.reactions.update(sdt);
       this.activities.update(sdt);
       this.robbery.update(sdt);
