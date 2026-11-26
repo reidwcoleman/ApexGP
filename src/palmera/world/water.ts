@@ -95,22 +95,27 @@ void main() {
   col += vec3(0.7, 0.78, 0.95) * (pow(md2, 300.0) * 2.0 + pow(md2, 30.0) * 0.05) * uNight;
   float foamBand = smoothstep(0.38, 0.62, mask) * (1.0 - smoothstep(0.75, 0.95, mask));
   float foam = foamBand * (0.55 + 0.45 * sin(dot(p, vec2(0.06, 0.9)) * 0.7 + uTime * 1.6 + mask * 9.0));
-  col = mix(col, vec3(0.92, 0.95, 0.95) * light, clamp(foam, 0.0, 1.0) * 0.55);
+  col = mix(col, vec3(0.92, 0.95, 0.95) * light, clamp(foam, 0.0, 1.0) * 0.35);
   // the surf on the beach: the sand shelves down evenly, so the depth here is known exactly
   if (p.x > ${ISLAND.x1.toFixed(1)} && p.y > ${(ISLAND.z0 + 4).toFixed(1)} && p.y < ${(ISLAND.z1 - 4).toFixed(1)}) {
     float depth = -0.8 + 3.2 * (p.x - ${ISLAND.x1.toFixed(1)}) / 88.0;
     if (depth < 3.0) {
       float nz = wNoise(vec2(p.y * 0.05, 0.0)) * 6.0 + wNoise(vec2(p.y * 0.19, 3.0)) * 1.6;
       float ph = (p.x - 734.0) * 0.38 + uTime * 1.2 + nz;
-      float crest = pow(max(sin(ph), 0.0), 10.0);
-      float breakZone = smoothstep(2.1, 0.6, depth);
+      float crest = pow(max(sin(ph), 0.0), 14.0);
+      // waves break over the bar, not across 60 m of sea
+      float breakZone = smoothstep(1.6, 0.8, depth) * smoothstep(0.12, 0.4, depth);
       float lace = wNoise(vec2(p.x * 1.3 - uTime * 0.4, p.y * 0.45)) * 0.6 + wNoise(p * 3.1 + uTime * 0.3) * 0.4;
-      float surf = crest * breakZone * smoothstep(0.32, 0.62, lace) * 1.3;
-      // churned water behind the breakers, thinning to lace
-      float wash = smoothstep(1.2, 0.05, depth) * smoothstep(0.36, 0.7, lace) + smoothstep(0.45, 0.0, depth) * (0.5 + 0.5 * lace);
-      float sandy = smoothstep(1.1, 0.0, depth);
-      col = mix(col, vec3(0.38, 0.62, 0.56) * light + sky * 0.08, sandy * 0.45);
-      col = mix(col, vec3(0.93, 0.96, 0.96) * light, clamp(surf + wash * 0.7, 0.0, 0.95));
+      float surf = crest * breakZone * smoothstep(0.4, 0.68, lace) * 1.25;
+      // the swash: a thin lacy sheet over the last few metres, and a moving foam line where it meets the sand
+      float swash = smoothstep(0.3, 0.02, depth) * smoothstep(0.42, 0.78, lace);
+      float run = 0.06 + 0.07 * sin(uTime * 0.7 + nz * 0.8);
+      float edge = exp(-abs(depth - run) * 30.0) * (0.55 + 0.45 * lace);
+      // clear shallows: sand showing through, turquoise further out
+      float clear = smoothstep(1.5, 0.0, depth);
+      vec3 seen = mix(vec3(0.16, 0.5, 0.48), vec3(0.6, 0.58, 0.42), smoothstep(0.6, 0.0, depth));
+      col = mix(col, seen * light + sky * 0.05, clear * 0.62);
+      col = mix(col, vec3(0.93, 0.96, 0.96) * light, clamp(surf + swash * 0.5 + edge, 0.0, 0.9));
     }
   }
   gl_FragColor = vec4(col, 1.0);
