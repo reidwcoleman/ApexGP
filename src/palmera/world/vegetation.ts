@@ -2,6 +2,7 @@
 // (masked by a 1 px-per-metre map of where grass actually grows, so none comes up through roads,
 // sidewalks, drives, pools or houses), plus shrubs, hedges and flower beds round houses and parks.
 import * as THREE from 'three';
+const ni = (g: THREE.BufferGeometry) => (g.index ? g.toNonIndexed() : g);
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MAIN, SIDEWALK, type CityMap } from './map';
 
@@ -170,7 +171,7 @@ function lobed(lobes: number, seed: number, cols: [number, number]): THREE.Buffe
   const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
   const lo = new THREE.Color(cols[0]), hi = new THREE.Color(cols[1]);
   for (let i = 0; i < lobes; i++) {
-    const g = new THREE.IcosahedronGeometry(0.32 + r() * 0.2, 1).toNonIndexed();
+    const g = new THREE.IcosahedronGeometry(0.32 + r() * 0.2, 1);
     const a = (i / lobes) * Math.PI * 2 * 2.3 + r();
     const d = i === 0 ? 0 : 0.25 + r() * 0.45;
     g.translate(Math.cos(a) * d, 0.35 + r() * 0.45 + (i === 0 ? 0.3 : 0) - d * 0.3, Math.sin(a) * d);
@@ -211,7 +212,7 @@ export function blossomGeometry(): THREE.BufferGeometry {
   let s = 3;
   const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
   for (let i = 0; i < 30; i++) {
-    const g = new THREE.OctahedronGeometry(0.04 + r() * 0.03, 0).toNonIndexed();
+    const g = new THREE.OctahedronGeometry(0.04 + r() * 0.03, 0);
     g.deleteAttribute('uv');
     g.scale(1, 0.55, 1);
     const a = r() * Math.PI * 2, d = Math.sqrt(r()) * 0.5;
@@ -403,7 +404,7 @@ export function crownGeometry(o: CrownOpts): THREE.BufferGeometry {
   const fc = new Float32Array(fu.count * 3);
   for (let i = 0; i < fu.count; i++) fc.set([tint.r * 0.6, tint.g * 0.6, tint.b * 0.6], i * 3);
   f.setAttribute('color', new THREE.BufferAttribute(fc, 3));
-  return mergeGeometries([g.toNonIndexed(), f.index ? f.toNonIndexed() : f])!;
+  return mergeGeometries([ni(g), f.index ? ni(f) : f])!;
 }
 
 /** a trunk splitting into branches that reach up into the canopy */
@@ -418,7 +419,7 @@ export function trunkGeometry(h: number, r0: number, branches: number, seed: num
     g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize()));
     g.translate(a.x, a.y, a.z);
     g.deleteAttribute('uv');
-    parts.push(g.toNonIndexed());
+    parts.push(ni(g));
   };
   const top = new THREE.Vector3((r() - 0.5) * 0.3, h, (r() - 0.5) * 0.3);
   seg(new THREE.Vector3(0, -0.2, 0), top, r0, r0 * 0.7);

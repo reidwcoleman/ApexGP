@@ -444,6 +444,24 @@ export class Game {
         else if (o.ai instanceof TrafficAI) {
           o.ai.panic = 8;
           if (speed > 8) this.wanted.crime('vehicle', o.pos.x, o.pos.z, false);
+          // some drivers get out to have a word
+          else if (speed > 3 && !o.persistent && Math.random() < 0.25) {
+            const oo = o;
+            setTimeout(() => {
+              if (oo.driver !== 'npc' || oo.wrecked) return;
+              this.ejectDriver(oo, true);
+              const h = this.npcs[this.npcs.length - 1];
+              if (h && h.kind === 'ped') {
+                h.down = 0;
+                h.state = 'fight';
+                h.clip = '';
+                h.stateT = 14;
+                h.fireT = 0.8;
+                h.rage = true;
+                this.hud.subtitle(['DRIVER: Hey! Are you blind?!', 'DRIVER: You just hit my car!', 'DRIVER: Get out here, right now!', 'DRIVER: Unbelievable. Unbelievable!'][Math.floor(Math.random() * 4)], 3);
+              }
+            }, 900);
+          }
         }
       }
     }
@@ -740,6 +758,7 @@ export class Game {
       if (v.isBoat && v.speed > 4 && Math.random() < dt * 20) this.effects.puff(v.pos.x - v.fwdX() * 3.6, WATER_Y + 0.1, v.pos.z - v.fwdZ() * 3.6, 'splash');
       // LOD: shadows and wheels by distance
       const d = Math.hypot(v.pos.x - cam.x, v.pos.z - cam.z);
+      v.updateLights(d < 140, this.elapsed);
       v.body.castShadow = d < 70;
       const showWheels = d < 110;
       for (const w of v.wheels) w.visible = showWheels;

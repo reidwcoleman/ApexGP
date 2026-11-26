@@ -112,7 +112,27 @@ export class Reactions {
         const dx = p.pos.x - h.pos.x, dz = p.pos.z - h.pos.z, d = Math.hypot(dx, dz) || 1;
         h.yaw = Math.atan2(dx, dz);
         const armed = p.weapon !== 'fist' && p.weapon !== 'bat';
+        if (p.vehicle && h.rage && h.stateT > 0 && d < 25 && !armed) {
+          // bang on the window
+          const car = p.vehicle;
+          const ex = car.pos.x - h.pos.x, ez = car.pos.z - h.pos.z, ed = Math.hypot(ex, ez) || 1;
+          h.yaw = Math.atan2(ex, ez);
+          const reach = car.spec.wid / 2 + 0.8;
+          if (ed > reach) g.setDesired(h, (ex / ed) * 3.6, (ez / ed) * 3.6);
+          else {
+            g.setDesired(h, 0, 0);
+            if (h.fireT <= 0) {
+              h.fireT = 0.7 + Math.random() * 0.4;
+              h.punchT = 0.38;
+              g.audio.punch();
+              g.cameraKick += 0.006;
+              if (Math.random() < 0.3) g.honkAt(car);
+            }
+          }
+          return true;
+        }
         if (h.stateT <= 0 || p.vehicle || p.dead || armed || d > 25) {
+          h.rage = false;
           g.peds.scare(h, p.pos.x, p.pos.z, 8, true);
           return true;
         }

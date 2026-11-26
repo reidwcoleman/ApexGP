@@ -31,6 +31,28 @@ export interface VehicleEvents {
 const tmpBoxes: Box[] = [];
 let nextId = 1;
 
+// tail-light glows, shared by every car
+let glowGeo: THREE.BufferGeometry | null = null;
+function lampGlowGeo() {
+  if (!glowGeo) glowGeo = new THREE.PlaneGeometry(0.42, 0.26);
+  return glowGeo;
+}
+function glowTex(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const x = c.getContext('2d')!;
+  const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.35, 'rgba(255,255,255,0.75)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+const gt = glowTex();
+const brakeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 0.25, 0.15), map: gt, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+const blinkMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 1.6, 0.1), map: gt, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+
 export class Vehicle {
   id = nextId++;
   spec: CarSpec;
@@ -177,6 +199,43 @@ export class Vehicle {
     pos.needsUpdate = true;
     nor.needsUpdate = true;
     this.crumple += push;
+  }
+
+  /** -1 left, 0 none, 1 right (set by the AI before a turn) */
+  signal = 0;
+  private lights: { brake: THREE.Mesh; l: THREE.Mesh; r: THREE.Mesh } | null = null;
+
+  /** brake lights and indicators: glows on the tail, made when the car first comes near */
+  updateLights(show: boolean, t: number) {
+    if (this.isBoat) return;
+    if (!show) {
+      if (this.lights) this.lights.brake.visible = this.lights.l.visible = this.lights.r.visible = false;
+      return;
+    }
+    if (!this.lights) {
+      const s = this.spec;
+      const mk = (mat: THREE.Material, x: number, w: number) => {
+        const m = new THREE.Mesh(lampGlowGeo(), mat);
+        m.position.set(x, s.hgt * 0.42, -s.len / 2 - 0.06);
+        m.scale.set(w, 1, 1);
+        m.rotation.y = Math.PI;
+        m.renderOrder = 4;
+        this.root.add(m);
+        return m;
+      };
+      const brakeGroup = new THREE.Group();
+      const bl = mk(brakeMat, s.wid * 0.36, 1), br = mk(brakeMat, -s.wid * 0.36, 1);
+      this.root.remove(bl, br);
+      brakeGroup.add(bl, br);
+      this.root.add(brakeGroup);
+      this.lights = { brake: brakeGroup as unknown as THREE.Mesh, l: mk(blinkMat, s.wid * 0.47, 0.6), r: mk(blinkMat, -s.wid * 0.47, 0.6) };
+    }
+    const fs = this.forwardSpeed;
+    const braking = this.driver !== null && !this.wrecked && ((fs > 0.5 && this.input.thr < -0.05) || (fs < -0.5 && this.input.thr > 0.05) || (this.input.hand && Math.abs(fs) < 1 && this.driver === 'npc'));
+    this.lights.brake.visible = braking;
+    const on = Math.floor(t * 2.6) % 2 === 0 && !this.wrecked;
+    this.lights.l.visible = on && this.signal < 0;
+    this.lights.r.visible = on && this.signal > 0;
   }
 
   get isBoat() {

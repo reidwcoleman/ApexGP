@@ -100,6 +100,30 @@ export class TrafficAI implements CarAI {
     }
     const cruise = this.panic > 0 ? 21 : this.cruise;
     let target = cruise;
+    // indicate before a turn
+    const An = map.nodes[this.from], Bt = map.nodes[this.to], Cn = map.nodes[this.next];
+    const cr = (Bt.x - An.x) * (Cn.z - Bt.z) - (Bt.z - An.z) * (Cn.x - Bt.x);
+    v.signal = L.turnDot < 0.6 && L.remaining < 38 && this.panic <= 0 ? (cr > 0 ? 1 : -1) : 0;
+    // a siren coming up behind: pull to the curb and wait for it to pass
+    let pull = 0;
+    if (this.panic <= 0) {
+      for (const u of g.vehicles) {
+        if (u === v || !u.siren || u.wrecked) continue;
+        const ox = u.pos.x - v.pos.x, oz = u.pos.z - v.pos.z;
+        if (Math.abs(ox) > 70 || Math.abs(oz) > 70) continue;
+        const along = ox * v.fwdX() + oz * v.fwdZ();
+        const lat = ox * -v.fwdZ() + oz * v.fwdX();
+        if (along < 6 && along > -65 && Math.abs(lat) < 7) {
+          pull = 1;
+          break;
+        }
+      }
+    }
+    if (pull) {
+      L = { ...L, tx: L.tx - L.dz * 2.6, tz: L.tz + L.dx * 2.6 };
+      target = Math.min(target, 1.5);
+      v.signal = 1;
+    }
     const Bn = map.nodes[this.to];
     if (L.turnDot < 0.5 && L.remaining < 30) target = Math.min(target, 6 + Math.max(0, L.remaining - 8) * 0.35);
     // traffic lights

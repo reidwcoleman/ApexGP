@@ -1,5 +1,6 @@
 // Builds all static city meshes from the CityMap: ground, roads, buildings, props, bridge and docks.
 import * as THREE from 'three';
+const ni = (g: THREE.BufferGeometry) => (g.index ? g.toNonIndexed() : g);
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { box, cyl, merge, prep } from '../core/geo';
 import { Rng, clamp } from '../core/math';
@@ -918,7 +919,7 @@ export class City {
     chunked(this.scene, this.chunks, cyp, trunkGeometry(5.5, 0.3, 5, 21, 7.2, 1.6, 0x6a5c4b), std({ roughness: 0.95 }), { far: 420, shadow: true });
     const cypCrown = () => {
       const parts = [crownGeometry({ cy: 6.6, rx: 1.7, ry: 1.6, cards: 34, size: 1.4, seed: 31, tint: 0xc4d4a4, filler: true }), crownGeometry({ cy: 8.6, rx: 1.3, ry: 1.4, cards: 26, size: 1.3, seed: 57, tint: 0xc4d4a4, filler: true })];
-      const side = crownGeometry({ cy: 6.0, rx: 1.0, ry: 0.9, cards: 14, size: 1.2, seed: 83, tint: 0xc4d4a4, filler: false }).toNonIndexed();
+      const side = ni(crownGeometry({ cy: 6.0, rx: 1.0, ry: 0.9, cards: 14, size: 1.2, seed: 83, tint: 0xc4d4a4, filler: false }));
       side.translate(1.3, 0, 0.4);
       parts.push(side);
       return mergeGeometries(parts)!;

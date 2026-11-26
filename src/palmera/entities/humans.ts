@@ -23,6 +23,8 @@ export class Human {
   swimming = false;
   health = 100;
   maxHealth = 100;
+  /** a driver you hit: keeps after you even in your car */
+  rage = false;
   armor = 0;
   dead = false;
   down = 0; // seconds left lying down
