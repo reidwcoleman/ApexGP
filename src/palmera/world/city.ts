@@ -9,6 +9,7 @@ import {
 import * as T from './textures';
 import { addDetail as D } from '../render/detail';
 import { palmKit } from './palms';
+import { furnitureGeometry, placeFurniture, type FurnitureKind } from './furniture';
 
 // ------------------------------------------------------------ simple mesh builder
 class MB {
@@ -513,6 +514,7 @@ export class City {
     this.buildFlats();
     this.buildBuildings();
     this.buildProps();
+    this.buildFurniture();
     this.buildBridge();
     this.buildDocks();
     this.buildLandmarks();
@@ -741,6 +743,41 @@ export class City {
           }
         }
       }
+      // deco: eyebrow sunshades over each window row, and a fin up the middle rising past the roof
+      if (b.style === 1 && b.y0 === 0 && b.h > 8 && len > 8) {
+        const off = (alongZ ? b.w : b.d) / 2;
+        const accent = base.clone().offsetHSL(0.02, 0.15, -0.12);
+        for (const sgn of [-1, 1]) {
+          for (let k = 1; 1.2 + (k + 1) * 3.3 < b.h - 0.8; k++) {
+            const y = 1.2 + k * 3.3 + 3.3 * 0.5 + 3.3 * 0.28 + 0.12;
+            if (alongZ) put(trim, b.x + sgn * (off + 0.28), y, b.z, 0.56, 0.09, len * 0.96, light);
+            else put(trim, b.x, y, b.z + sgn * (off + 0.28), len * 0.96, 0.09, 0.56, light);
+          }
+          if (len > 14 && rng.chance(0.7)) {
+            const fh = b.h + 2.5 + rng.next() * 3;
+            if (alongZ) put(trim, b.x + sgn * (off + 0.3), fh / 2, b.z, 0.6, fh, 1.3, accent);
+            else put(trim, b.x, fh / 2, b.z + sgn * (off + 0.3), 1.3, fh, 0.6, accent);
+          }
+        }
+      }
+      // apartments: window air conditioners here and there
+      if (b.style === 3 && b.y0 === 0 && b.h > 7) {
+        const cell = 3.6, cy = 3.2, y0 = 0.8;
+        for (const [axisZ, sgn] of [[true, 1], [true, -1], [false, 1], [false, -1]] as [boolean, number][]) {
+          const half = (axisZ ? b.d : b.w) / 2, off = (axisZ ? b.w : b.d) / 2;
+          const nCols = Math.max(0, Math.floor((2 * half - 1.2) / cell));
+          const o = (2 * half - nCols * cell) / 2;
+          for (let k = 1; y0 + (k + 1) * cy < b.h - 0.9; k++) {
+            for (let i = 0; i < nCols; i++) {
+              if (!rng.chance(0.18)) continue;
+              const u = -half + o + (i + 0.5) * cell;
+              const y = y0 + (k + 0.5) * cy - cy * 0.25 - 0.2;
+              if (axisZ) put(plant, b.x + sgn * (off + 0.25), y, b.z + u, 0.5, 0.42, 0.68, white);
+              else put(plant, b.x + u, y, b.z + sgn * (off + 0.25), 0.68, 0.42, 0.5, white);
+            }
+          }
+        }
+      }
       // shop awnings over the street floor
       if ((b.style === 3 || b.style === 1) && b.y0 === 0 && len > 6) {
         const c = new THREE.Color(rng.pick(awnCols));
@@ -814,6 +851,21 @@ export class City {
     chunked(this.scene, this.chunks, groups.get('umbrella') ?? [], umbrellaGeometry(), std({ side: THREE.DoubleSide }), { far: 300, shadow: true });
     chunked(this.scene, this.chunks, groups.get('lounger') ?? [], loungerGeometry(), std(), { far: 160, shadow: false });
     chunked(this.scene, this.chunks, groups.get('tower') ?? [], lifeguardGeometry(), std(), { far: 600, shadow: true });
+  }
+
+  private buildFurniture() {
+    const items = placeFurniture(this.map);
+    const by = new Map<FurnitureKind, Inst[]>();
+    for (const it of items) {
+      let l = by.get(it.kind);
+      if (!l) by.set(it.kind, (l = []));
+      l.push({ m: it.m });
+    }
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.15 });
+    const glassy = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.9 });
+    for (const [kind, list] of by) {
+      chunked(this.scene, this.chunks, list, furnitureGeometry(kind), kind === 'shelter' ? glassy : mat, { far: kind === 'shelter' || kind === 'sign' ? 380 : 220, shadow: true });
+    }
   }
 
   private buildBridge() {
