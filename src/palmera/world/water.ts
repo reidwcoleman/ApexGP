@@ -96,6 +96,23 @@ void main() {
   float foamBand = smoothstep(0.38, 0.62, mask) * (1.0 - smoothstep(0.75, 0.95, mask));
   float foam = foamBand * (0.55 + 0.45 * sin(dot(p, vec2(0.06, 0.9)) * 0.7 + uTime * 1.6 + mask * 9.0));
   col = mix(col, vec3(0.92, 0.95, 0.95) * light, clamp(foam, 0.0, 1.0) * 0.55);
+  // the surf on the beach: the sand shelves down evenly, so the depth here is known exactly
+  if (p.x > ${ISLAND.x1.toFixed(1)} && p.y > ${(ISLAND.z0 + 4).toFixed(1)} && p.y < ${(ISLAND.z1 - 4).toFixed(1)}) {
+    float depth = -0.8 + 3.2 * (p.x - ${ISLAND.x1.toFixed(1)}) / 88.0;
+    if (depth < 3.0) {
+      float nz = wNoise(vec2(p.y * 0.05, 0.0)) * 6.0 + wNoise(vec2(p.y * 0.19, 3.0)) * 1.6;
+      float ph = (p.x - 734.0) * 0.38 + uTime * 1.2 + nz;
+      float crest = pow(max(sin(ph), 0.0), 10.0);
+      float breakZone = smoothstep(2.1, 0.6, depth);
+      float lace = wNoise(vec2(p.x * 1.3 - uTime * 0.4, p.y * 0.45)) * 0.6 + wNoise(p * 3.1 + uTime * 0.3) * 0.4;
+      float surf = crest * breakZone * smoothstep(0.32, 0.62, lace) * 1.3;
+      // churned water behind the breakers, thinning to lace
+      float wash = smoothstep(1.2, 0.05, depth) * smoothstep(0.36, 0.7, lace) + smoothstep(0.45, 0.0, depth) * (0.5 + 0.5 * lace);
+      float sandy = smoothstep(1.1, 0.0, depth);
+      col = mix(col, vec3(0.38, 0.62, 0.56) * light + sky * 0.08, sandy * 0.45);
+      col = mix(col, vec3(0.93, 0.96, 0.96) * light, clamp(surf + wash * 0.7, 0.0, 0.95));
+    }
+  }
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -123,8 +140,57 @@ export function makeLandMask(): THREE.CanvasTexture {
   return t;
 }
 
+// ---------------------------------------------------------------- swash: the film that runs up the sand
+const swashVert = /* glsl */ `
+varying vec3 vWPos;
+#include <fog_pars_vertex>
+void main() {
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWPos = wp.xyz;
+  vec4 mvPosition = viewMatrix * wp;
+  gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
+}`;
+const swashFrag = /* glsl */ `
+uniform float uTime;
+uniform float uDay;
+uniform vec3 uHorizon;
+varying vec3 vWPos;
+float wHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float wNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
+  return mix(mix(wHash(i), wHash(i+vec2(1,0)), f.x), mix(wHash(i+vec2(0,1)), wHash(i+vec2(1,1)), f.x), f.y); }
+#include <fog_pars_fragment>
+void main() {
+  float x = vWPos.x, z = vWPos.z;
+  float off = wNoise(vec2(z * 0.025, 0.0)) * 1.7;
+  float u = fract(uTime / 7.0 + off);
+  float cyc = floor(uTime / 7.0 + off);
+  float up = smoothstep(0.0, 0.2, u) * (1.0 - smoothstep(0.2, 1.0, u));
+  float A = 4.5 + 3.0 * wNoise(vec2(z * 0.07, cyc * 3.1));
+  float edge = 734.0 - A * up - (wNoise(vec2(z * 0.5, cyc)) - 0.5) * 0.9;
+  float reach = 734.0 - 7.6 - wNoise(vec2(z * 0.05, 7.0)) * 1.2;
+  float light = 0.08 + 0.92 * uDay;
+  vec4 c = vec4(0.0);
+  if (x > edge) {
+    // the thin water: clear over the sand, foam at the leading edge and in lace behind it
+    float k = x - edge;
+    float lace = wNoise(vec2(x * 2.2 + uTime * 0.6 * (u < 0.2 ? -1.0 : 1.0), z * 1.6));
+    float foam = smoothstep(0.9, 0.0, k) * (0.55 + 0.45 * lace) + smoothstep(0.62, 0.85, lace) * 0.5 * smoothstep(3.0, 0.5, k);
+    vec3 wcol = mix(vec3(0.3, 0.5, 0.46), uHorizon * 0.9, 0.35) * light;
+    c = vec4(mix(wcol, vec3(0.95, 0.97, 0.97) * light, clamp(foam * 1.2, 0.0, 1.0)), clamp(0.45 + k * 0.1 + foam * 0.7, 0.0, 0.9));
+  } else if (x > reach) {
+    // wet sand where the last waves reached, drying toward the top
+    float w = smoothstep(reach, reach + 1.2, x) * (0.55 + 0.45 * smoothstep(edge - 4.0, edge, x));
+    c = vec4(vec3(0.05, 0.04, 0.02), 0.45 * w);
+  }
+  if (c.a < 0.005) discard;
+  gl_FragColor = c;
+  #include <fog_fragment>
+}`;
+
 export class Water {
   mesh: THREE.Mesh;
+  swash: THREE.Mesh;
   uniforms: Record<string, THREE.IUniform>;
   constructor(scene: THREE.Scene, sky: SkySystem) {
     this.uniforms = THREE.UniformsUtils.merge([
@@ -150,6 +216,32 @@ export class Water {
     this.mesh.position.y = WATER_Y;
     this.mesh.receiveShadow = false;
     scene.add(this.mesh);
+    // swash strip lying on the sand slope
+    const x0 = 724, x1 = 741, nx = 17;
+    const sg = new THREE.PlaneGeometry(x1 - x0, ISLAND.z1 - ISLAND.z0 - 8, nx, 1);
+    sg.rotateX(-Math.PI / 2);
+    const sp = sg.getAttribute('position') as THREE.BufferAttribute;
+    for (let i = 0; i < sp.count; i++) {
+      const x = sp.getX(i) + (x0 + x1) / 2;
+      sp.setXYZ(i, x, (-3.2 * (x - ISLAND.x1)) / 88 + 0.025, sp.getZ(i) + (ISLAND.z0 + ISLAND.z1) / 2);
+    }
+    sg.computeBoundingSphere();
+    const smat = new THREE.ShaderMaterial({
+      vertexShader: swashVert,
+      fragmentShader: swashFrag,
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]),
+      fog: true,
+      transparent: true,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    });
+    smat.uniforms.uTime = this.uniforms.uTime;
+    smat.uniforms.uDay = this.uniforms.uDay;
+    smat.uniforms.uHorizon = this.uniforms.uHorizon;
+    this.swash = new THREE.Mesh(sg, smat);
+    this.swash.renderOrder = 1;
+    scene.add(this.swash);
   }
   update(elapsed: number, sky: SkySystem, cam: THREE.Vector3) {
     this.uniforms.uTime.value = elapsed;
