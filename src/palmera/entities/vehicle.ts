@@ -143,7 +143,7 @@ export class Vehicle {
     if (kitM) {
       model.sirenRed && (this.sirenPos = [new THREE.Vector3(-0.3, kitM.roofY + 0.07, -0.25), new THREE.Vector3(0.3, kitM.roofY + 0.07, -0.25)]);
     }
-    const wheelGeo = kitM ? wheelFor(kitM.wheelR, this.spec.wid) : model.wheelGeo;
+    const wheelGeo = kitM ? (kitM.wheelGeo ?? wheelFor(kitM.wheelR, this.spec.wid)) : model.wheelGeo;
     if (wheelGeo) {
       for (const w of kitM ? kitM.wheels : model.wheels) {
         const m = new THREE.Mesh(wheelGeo, carMats.wheel);
