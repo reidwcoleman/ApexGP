@@ -104,6 +104,8 @@ export class Vehicle {
   private sirenPos: THREE.Vector3[] | null = null;
   /** the driver's seat in the car's frame (null: nobody shown) */
   seat: THREE.Vector3 | null = null;
+  /** top of the cabin roof in the car frame (kit cars) */
+  roofY = 0;
   vid = Math.floor(Math.random() * 1e9);
 
   constructor(type: CarType, color?: number) {
@@ -119,6 +121,7 @@ export class Vehicle {
     this.body.receiveShadow = true;
     this.root.add(this.body);
     if (kitM) this.seat = kitM.seat;
+    if (kitM) this.roofY = kitM.roofY;
     // a jet ski's rider sits astride, out in the open
     if (type === 'jetski') this.seat = new THREE.Vector3(0, 0.62, -0.3);
     if (kitM) {

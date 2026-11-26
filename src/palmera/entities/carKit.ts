@@ -59,6 +59,7 @@ export async function loadCarKit(): Promise<void> {
   } catch (e) {
     console.warn('palmera: cars.glb failed, using the blocky cars', e);
   }
+  for (const parts of kit.values()) splitSmallParts(parts);
   // the van's own size, measured
   const van = kit.get('van');
   if (van) {
@@ -160,6 +161,73 @@ function busParts(): Parts {
 export function hasKit(type: CarType): boolean {
   const v = VARIANTS[type];
   return !!v && v.every((id) => kit.has(id));
+}
+
+/**
+ * The kit bodies carry their number plates and exhaust tips as little boxes inside the body mesh, so
+ * they took the paint colour (the exhausts hung under the rear bumper like painted blocks). Move them
+ * into the trim: plates off-white, pipes dark metal.
+ */
+function splitSmallParts(parts: Parts) {
+  const g = parts.body.index ? parts.body.toNonIndexed() : parts.body;
+  const p = g.getAttribute('position');
+  const nt = p.count / 3;
+  const parent = new Int32Array(nt);
+  for (let t = 0; t < nt; t++) parent[t] = t;
+  const find = (a: number): number => {
+    while (parent[a] !== a) a = parent[a] = parent[parent[a]];
+    return a;
+  };
+  const owner = new Map<string, number>();
+  for (let t = 0; t < nt; t++)
+    for (let j = 0; j < 3; j++) {
+      const i = t * 3 + j;
+      const k = p.getX(i).toFixed(4) + ',' + p.getY(i).toFixed(4) + ',' + p.getZ(i).toFixed(4);
+      const o = owner.get(k);
+      if (o === undefined) owner.set(k, t);
+      else parent[find(t)] = find(o);
+    }
+  const comps = new Map<number, { tris: number[]; b: THREE.Box3 }>();
+  const v = new THREE.Vector3();
+  for (let t = 0; t < nt; t++) {
+    const r = find(t);
+    let c = comps.get(r);
+    if (!c) comps.set(r, (c = { tris: [], b: new THREE.Box3() }));
+    c.tris.push(t);
+    for (let j = 0; j < 3; j++) c.b.expandByPoint(v.fromBufferAttribute(p, t * 3 + j));
+  }
+  g.computeBoundingBox();
+  const bb = g.boundingBox!;
+  const plates: number[] = [], pipes: number[] = [], keep: number[] = [];
+  const size = new THREE.Vector3(), mid = new THREE.Vector3();
+  for (const c of comps.values()) {
+    c.b.getSize(size);
+    c.b.getCenter(mid);
+    const end = Math.abs(mid.z) > Math.max(-bb.min.z, bb.max.z) - 0.2;
+    if (c.tris.length <= 24 && end && size.x > 0.3 && size.x < 0.9 && size.z < 0.1) plates.push(...c.tris);
+    else if (c.tris.length <= 24 && end && size.x < 0.16 && size.y < 0.16 && c.b.min.y < bb.min.y + 0.2) pipes.push(...c.tris);
+    else keep.push(...c.tris);
+  }
+  if (!plates.length && !pipes.length) return;
+  const pick = (tris: number[]) => {
+    const out = new THREE.BufferGeometry();
+    for (const name of Object.keys(g.attributes)) {
+      const a = g.getAttribute(name);
+      const arr = new Float32Array(tris.length * 3 * a.itemSize);
+      tris.forEach((t, k) => {
+        for (let j = 0; j < 3; j++) for (let c = 0; c < a.itemSize; c++) arr[(k * 3 + j) * a.itemSize + c] = a.getComponent(t * 3 + j, c);
+      });
+      out.setAttribute(name, new THREE.BufferAttribute(arr, a.itemSize));
+    }
+    return out;
+  };
+  parts.body = pick(keep);
+  const trim = [];
+  if (plates.length) trim.push(withColor(pick(plates), [0.9, 0.9, 0.84]));
+  // up into the curve of the rear valance (they sat below it) and a little in
+  if (pipes.length) trim.push(withColor(pick(pipes).translate(0, 0.1, 0.05), [0.16, 0.16, 0.17]));
+  if (parts.trim) trim.push(withColor(parts.trim, null));
+  parts.trim = mergeColored(trim);
 }
 
 function withColor(g: THREE.BufferGeometry, rgb: [number, number, number] | null): THREE.BufferGeometry {
