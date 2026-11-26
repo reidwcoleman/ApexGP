@@ -29,6 +29,7 @@ import { Heli } from './heli';
 import { Reactions } from './reactions';
 import { Activities } from './activities';
 import { Robbery } from './robbery';
+import { Interiors } from './interiors';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
 
@@ -92,6 +93,7 @@ export class Game {
   reactions!: Reactions;
   activities!: Activities;
   robbery!: Robbery;
+  interiors!: Interiors;
   rain!: Rain;
   wet = 0;
   private ambLight = new THREE.Color();
@@ -135,6 +137,7 @@ export class Game {
     this.reactions = new Reactions(this);
     this.activities = new Activities(this);
     this.robbery = new Robbery(this);
+    this.interiors = new Interiors(this);
     this.rain = new Rain(this.scene);
     this.missions = new Missions(this);
     this.hud = new Hud(this);
@@ -637,7 +640,7 @@ export class Game {
           h.vy = 0;
           h.onGround = true;
         }
-        if (g < WATER_Y - 1.2 && h.pos.y < WATER_Y - 0.9) {
+        if (g < WATER_Y - 1.2 && h.pos.y < WATER_Y - 0.9 && groundBase(h.pos.x, h.pos.z) < WATER_Y - 0.5) {
           h.swimming = true;
           h.pos.y = WATER_Y - 1.35;
           this.effects.puff(h.pos.x, WATER_Y, h.pos.z, 'splash');
@@ -893,6 +896,7 @@ export class Game {
       this.reactions.update(sdt);
       this.activities.update(sdt);
       this.robbery.update(sdt);
+      this.interiors.update(sdt);
       this.missions.update(sdt);
       this.playerCtl.updateCamera(dt);
       if (p.health <= 0 && !this.overlayKind) this.die();

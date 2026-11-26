@@ -81,9 +81,16 @@ export function groundAt(x: number, z: number, refY = 1e9): number {
     const d = bridgeDeckY(x);
     if (refY > d - 2.2) g = Math.max(g, d);
   }
+  const base = g;
   for (let i = 0; i < platforms.length; i++) {
     const p = platforms[i];
-    if (x >= p.x0 && x <= p.x1 && z >= p.z0 && z <= p.z1 && refY > p.y - 1.6) g = Math.max(g, p.y);
+    if (x < p.x0 || x > p.x1 || z < p.z0 || z > p.z1 || refY <= p.y - 1.6) continue;
+    // a floor below the street (the walk-in stores) counts only for someone already down there
+    if (p.y < base - 2) {
+      if (refY < base - 2) return p.y;
+      continue;
+    }
+    g = Math.max(g, p.y);
   }
   return g;
 }

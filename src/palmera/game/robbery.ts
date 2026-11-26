@@ -58,7 +58,9 @@ export class Robbery {
       if (s.clerk && (!g.npcs.includes(s.clerk) || s.clerk.dead)) s.clerk = null;
       if (!s.clerk && d < 90 && d > 30 && s.cooldown <= 0) {
         const h = new Human('ped');
-        h.pos.set(s.pos.x, groundAt(s.pos.x, s.pos.z), s.pos.z);
+        // beside the door, not in it
+        const sx = s.pos.x + Math.cos(s.face) * 1.8, sz = s.pos.z - Math.sin(s.face) * 1.8;
+        h.pos.set(sx, groundAt(sx, sz), sz);
         h.yaw = s.face;
         h.state = 'wait';
         h.clip = 'idle';

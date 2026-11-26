@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { clamp, damp, lerp, wrapAngle } from '../core/math';
 import type { Vehicle } from '../entities/vehicle';
-import { WATER_Y, groundAt } from '../world/map';
+import { WATER_Y, groundAt, groundBase } from '../world/map';
 import type { Game } from './game';
 import { WEAPONS, WEAPON_ORDER } from './weapons';
 
@@ -268,7 +268,8 @@ export class PlayerController {
     const hit = g.map.colliders.raycast(px, py, pz, -lx, -ly, -lz, d + 0.3);
     if (hit) d = Math.max(0.6, hit.t - 0.3);
     this.camPos.set(px - lx * d, py - ly * d, pz - lz * d);
-    const gy = Math.max(groundAt(this.camPos.x, this.camPos.z, this.camPos.y), WATER_Y) + 0.35;
+    // keep the camera out of the sea (but not out of the walk-in stores below the street)
+    const gy = Math.max(groundAt(this.camPos.x, this.camPos.z, this.camPos.y), groundBase(this.camPos.x, this.camPos.z) < WATER_Y - 0.5 ? WATER_Y : -1e9) + 0.35;
     if (this.camPos.y < gy) this.camPos.y = gy;
     cam.position.copy(this.camPos);
     cam.lookAt(px + lx * 10, py + ly * 10, pz + lz * 10);
