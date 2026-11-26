@@ -42,6 +42,8 @@ export const VARIANTS: Partial<Record<CarType, string[]>> = {
 
 type Parts = { body: THREE.BufferGeometry; glass: THREE.BufferGeometry; heads: THREE.BufferGeometry; tails: THREE.BufferGeometry; trim?: THREE.BufferGeometry };
 const kit = new Map<string, Parts>();
+/** the decimated distance versions, by the same ids */
+const kitLod = new Map<string, Parts>();
 
 export async function loadCarKit(): Promise<void> {
   try {
@@ -60,7 +62,23 @@ export async function loadCarKit(): Promise<void> {
   } catch (e) {
     console.warn('palmera: cars.glb failed, using the blocky cars', e);
   }
+  try {
+    const gl = await new GLTFLoader().loadAsync(BASE + 'cars_lod.glb');
+    gl.scene.updateMatrixWorld(true);
+    gl.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      const r = /^car_(\w+?)_(body|glass|heads|tails|trim)$/.exec(o.name);
+      if (!m.isMesh || !r) return;
+      const g = m.geometry.clone();
+      g.applyMatrix4(m.matrixWorld);
+      if (!kitLod.has(r[1])) kitLod.set(r[1], {} as Parts);
+      (kitLod.get(r[1]) as Record<string, THREE.BufferGeometry>)[r[2]] = g;
+    });
+  } catch (e) {
+    console.warn('palmera: cars_lod.glb failed, cars stay full detail at range', e);
+  }
   for (const parts of kit.values()) splitSmallParts(parts);
+  for (const parts of kitLod.values()) if (parts.body) splitSmallParts(parts);
   // the van's own size, measured
   const van = kit.get('van');
   if (van) {
@@ -399,6 +417,35 @@ export interface KitModel {
   tail: { y: number; x: number; z: number } | null;
   /** a wheel of its own (the Blender motorbike's), else the alloy wheel */
   wheelGeo?: THREE.BufferGeometry;
+  /** the decimated version for cars further than ~55 m (same groups) */
+  lodGeo?: THREE.BufferGeometry;
+}
+
+/** one car geometry from its part groups (0 paint, 1 trim/detail, 2 lamps, 3 glass), scaled to the spec */
+function assemble(groups: (THREE.BufferGeometry | null)[], sx: number, sy: number, m4: THREE.Matrix4): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry();
+  const pos: number[] = [], nor: number[] = [], col: number[] = [], luv: number[] = [];
+  let start = 0;
+  groups.forEach((g, gi) => {
+    if (!g) return;
+    const pp = g.getAttribute('position'), nn = g.getAttribute('normal'), cc = g.getAttribute('color'), ll = g.getAttribute('lampUv');
+    for (let i = 0; i < pp.count; i++) {
+      pos.push(pp.getX(i), pp.getY(i), pp.getZ(i));
+      nor.push(nn.getX(i), nn.getY(i), nn.getZ(i));
+      col.push(cc.getX(i), cc.getY(i), cc.getZ(i));
+      if (ll) luv.push(ll.getX(i), ll.getY(i), ll.getZ(i) * sx, ll.getW(i) * sy);
+      else luv.push(0, 0, 0, 0);
+    }
+    geo.addGroup(start, pp.count, gi);
+    start += pp.count;
+  });
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setAttribute('lampUv', new THREE.Float32BufferAttribute(luv, 4));
+  geo.applyMatrix4(m4);
+  geo.computeBoundingSphere();
+  return geo;
 }
 
 const cache = new Map<string, KitModel>();
@@ -466,29 +513,15 @@ export function kitModel(type: CarType, spec: CarSpec, variant: number): KitMode
     boxAt(b.W * 0.7, 0.1, 0.34, 0, b.H + 0.03, b.L * 0.12, [0.85, 0.85, 0.85]);
   }
   const detail = (id === 'bus' || id === 'bike') && p.trim ? p.trim : p.trim ? mergeColored([...cab, p.trim]) : mergeColored(cab);
-  const groups = [body, detail, lamps, glass] as (THREE.BufferGeometry | null)[];
-  const geo = new THREE.BufferGeometry();
-  const pos: number[] = [], nor: number[] = [], col: number[] = [], luv: number[] = [];
-  let start = 0;
-  groups.forEach((g, gi) => {
-    if (!g) return;
-    const pp = g.getAttribute('position'), nn = g.getAttribute('normal'), cc = g.getAttribute('color'), ll = g.getAttribute('lampUv');
-    for (let i = 0; i < pp.count; i++) {
-      pos.push(pp.getX(i), pp.getY(i), pp.getZ(i));
-      nor.push(nn.getX(i), nn.getY(i), nn.getZ(i));
-      col.push(cc.getX(i), cc.getY(i), cc.getZ(i));
-      if (ll) luv.push(ll.getX(i), ll.getY(i), ll.getZ(i) * sx, ll.getW(i) * sy);
-      else luv.push(0, 0, 0, 0);
-    }
-    geo.addGroup(start, pp.count, gi);
-    start += pp.count;
-  });
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  geo.setAttribute('lampUv', new THREE.Float32BufferAttribute(luv, 4));
-  geo.applyMatrix4(m4);
-  geo.computeBoundingSphere();
+  const geo = assemble([body, detail, lamps, glass], sx, sy, m4);
+  // the distance version (tools/palmera/cars_lod.py): decimated body, glass, lamps and trim, no cabin
+  let lodGeo: THREE.BufferGeometry | undefined;
+  const lp = kitLod.get(id);
+  if (lp && lp.body && lp.glass && lp.heads && lp.tails) {
+    const lh = withColor(lp.heads, [1, 0.96, 0.88], true), lt = withColor(lp.tails, [0.85, 0.03, 0.02], true);
+    const lamps2 = extra.length ? mergeColored([lh, lt, ...extra.map((g) => g.clone())]) : mergeColored([lh, lt]);
+    lodGeo = assemble([withColor(lp.body, null), lp.trim ? mergeColored([lp.trim]) : null, lamps2, withColor(lp.glass, [0.02, 0.025, 0.03])], sx, sy, m4);
+  }
   const wx = (b.W / 2 - 0.12) * sx, wz = (b.wb / 2) * sz, r = b.r * sy;
   const wheels = id === 'bike' ? [new THREE.Vector3(0, r, wz), new THREE.Vector3(0, r, -wz)] : [new THREE.Vector3(wx, r, wz), new THREE.Vector3(-wx, r, wz), new THREE.Vector3(wx, r, -wz), new THREE.Vector3(-wx, r, -wz)];
   const seat = id === 'bike' ? new THREE.Vector3(0, 0.58, -0.18) : id === 'bus' ? new THREE.Vector3(0.7, 1.05, b.L / 2 - 1.5) : new THREE.Vector3(b.W * 0.2 * sx, b.H * sy - 1.36, -b.L * 0.07 * sz);
@@ -499,7 +532,7 @@ export function kitModel(type: CarType, spec: CarSpec, variant: number): KitMode
     const tb = p.tails.boundingBox!;
     if (Number.isFinite(tb.min.y)) tail = { y: ((tb.min.y + tb.max.y) / 2) * sy, x: Math.max(0.2, (tb.max.x - (tb.max.x - Math.max(0, tb.min.x)) * 0.25) * sx * 0.92), z: tb.min.z * sz };
   }
-  const out: KitModel = { geo, wheels, wheelR: r, roofY: b.H * sy, seat, tail };
+  const out: KitModel = { geo, wheels, wheelR: r, roofY: b.H * sy, seat, tail, lodGeo };
   const ow = ownWheel.get(id);
   if (ow) out.wheelGeo = ow;
   cache.set(key, out);

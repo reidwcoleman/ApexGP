@@ -6,6 +6,28 @@ import { SPECS, carMats, carModel, paintMat, type CarSpec, type CarType } from '
 import { alloyWheel, kitModel } from './carKit';
 
 const wheelCache = new Map<string, THREE.BufferGeometry>();
+const lowWheels = new Map<number, THREE.BufferGeometry>();
+/** a plain wheel for cars at range: a 12-sided tyre with a grey hub face on both sides */
+function lowWheel(r: number) {
+  const k = Math.round(r * 1000);
+  let g = lowWheels.get(k);
+  if (g) return g;
+  const t = new THREE.CylinderGeometry(r, r, 0.24, 12, 1);
+  t.rotateZ(Math.PI / 2);
+  const tn = t.toNonIndexed();
+  const n = tn.getAttribute('position').count;
+  const c = new Float32Array(n * 3);
+  const p = tn.getAttribute('position');
+  // the caps' inner part reads as the rim
+  for (let i = 0; i < n; i++) {
+    const rim = Math.abs(p.getX(i)) > 0.11 && Math.hypot(p.getY(i), p.getZ(i)) < r * 0.7;
+    c.set(rim ? [0.55, 0.56, 0.58] : [0.04, 0.04, 0.045], i * 3);
+  }
+  tn.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  lowWheels.set(k, (g = tn));
+  return g;
+}
+
 function wheelFor(r: number, wid: number) {
   const k = r.toFixed(3) + ':' + wid;
   let g = wheelCache.get(k);
@@ -125,6 +147,10 @@ export class Vehicle {
     this.body.receiveShadow = true;
     this.root.add(this.body);
     if (kitM) this.seat = kitM.seat;
+    if (kitM?.lodGeo) {
+      this.fullGeo = kitM.geo;
+      this.lodGeo = kitM.lodGeo;
+    }
     if (kitM) this.roofY = kitM.roofY;
     if (kitM) this.tail = kitM.tail;
     // a jet ski's rider sits astride, out in the open
@@ -170,6 +196,33 @@ export class Vehicle {
   private dented = false;
   /** the body as built, kept while it's dented so a repair can put it back */
   private baseGeo: THREE.BufferGeometry | null = null;
+  /** the full body and the decimated one for range (kit cars), and which is showing */
+  private fullGeo: THREE.BufferGeometry | null = null;
+  private lodGeo: THREE.BufferGeometry | null = null;
+  private fullWheel: THREE.BufferGeometry | null = null;
+  private far = false;
+
+  /**
+   * past ~55 m a kit car shows its decimated body and plain wheels; past 120 m it stops casting a
+   * shadow. A dented car keeps its own dented body, and the car you drive is always full detail.
+   */
+  updateLod(cam: THREE.Vector3, mine: boolean) {
+    if (!this.lodGeo || this.dented) return;
+    const d2 = this.pos.distanceToSquared(cam);
+    const far = !mine && (this.far ? d2 > 50 * 50 : d2 > 60 * 60);
+    this.body.castShadow = mine || d2 < 120 * 120;
+    if (far === this.far) return;
+    this.far = far;
+    this.body.geometry = far ? this.lodGeo : this.fullGeo!;
+    if (this.wheels.length) {
+      if (!this.fullWheel) this.fullWheel = this.wheels[0].geometry;
+      const g = far ? lowWheel(this.spec.wheelR) : this.fullWheel;
+      for (const w of this.wheels) {
+        w.geometry = g;
+        w.castShadow = !far;
+      }
+    }
+  }
 
   /** a new colour (the paint materials are shared per colour, so swap rather than recolour) */
   /** garage upgrades: engine 0-3, brakes 0-2, armour 0-2, underglow colour, tinted glass */
@@ -236,10 +289,17 @@ export class Vehicle {
 
   private ensureOwnGeometry() {
     if (!this.dented) {
+      if (this.far && this.fullGeo) this.restoreFull();
       this.baseGeo = this.body.geometry;
       this.body.geometry = this.body.geometry.clone();
       this.dented = true;
     }
+  }
+
+  private restoreFull() {
+    this.far = false;
+    this.body.geometry = this.fullGeo!;
+    if (this.fullWheel) for (const w of this.wheels) w.geometry = this.fullWheel;
   }
 
   /** the triangles of a bumper (end 0 front +z, 1 rear): the low band across the very end */
@@ -341,6 +401,7 @@ export class Vehicle {
   dent(x: number, y: number, z: number, strength: number) {
     if (this.isBoat || this.wrecked || strength < 3) return;
     if (!this.dented) {
+      if (this.far && this.fullGeo) this.restoreFull();
       this.baseGeo = this.body.geometry;
       this.body.geometry = this.body.geometry.clone();
       this.dented = true;

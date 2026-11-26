@@ -872,6 +872,7 @@ export class Game {
         v.input.hand = true;
       }
       v.update(dt, this.map.colliders, this.events, this.elapsed);
+      v.updateLod(cam, v.driver === 'player');
       // a car in a swamp pond bogs down and throws up spray
       // the airboat's fan: idling, roaring with the throttle
       if (v.fan) v.fan.rotation.z += dt * (v.driver ? 14 + 50 * Math.abs(v.input.thr) : 0);

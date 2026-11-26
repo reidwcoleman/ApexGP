@@ -299,8 +299,20 @@ for name, fn in (('bench', bench), ('bin', bin_), ('hydrant', hydrant), ('news',
     me.color_attributes.remove(ao)
     me.color_attributes.active_color = me.color_attributes['Color']
     bpy.data.objects.remove(g, do_unlink=True)
+    # lighter for the street: thousands are drawn (and shadowed) at once, so collapse each to ~300
+    # triangles (the bevels and round sections are where the count went; the silhouettes stay)
+    me.calc_loop_triangles()
+    before = len(me.loop_triangles)
+    target = {'shelter': 420, 'signal': 380, 'lamp': 300}.get(name, 260)
+    if before > target:
+        m = o.modifiers.new('d', 'DECIMATE')
+        m.ratio = target / before
+        m.use_collapse_triangulate = True
+        bpy.context.view_layer.objects.active = o
+        bpy.ops.object.modifier_apply(modifier='d')
+    me.calc_loop_triangles()
     made.append(o)
-    print('prop', name, len(me.polygons), 'faces')
+    print('prop', name, before, '->', len(me.loop_triangles), 'tris')
 for p in made:
     p.hide_render = False
 bpy.ops.export_scene.gltf(filepath=OUT, export_format='GLB', export_vertex_color='ACTIVE', export_materials='NONE', export_yup=True, export_apply=False)
