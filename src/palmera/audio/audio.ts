@@ -427,6 +427,43 @@ export class AudioSys {
     o.stop(t0 + 0.4);
   }
 
+  /** thunder: a sharp crack when close, a long low rumble from far off */
+  thunder(dist: number) {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    const t0 = c.currentTime;
+    const near = Math.max(0, 1 - dist / 700);
+    const vol = 0.35 + near * 0.5;
+    const len = 3 + (1 - near) * 3;
+    // the crack
+    if (near > 0.3) {
+      const s = this.noiseSrc(false);
+      const f = c.createBiquadFilter();
+      f.type = 'highpass';
+      f.frequency.value = 900;
+      const g = c.createGain();
+      s.connect(f).connect(g).connect(this.sfx);
+      this.env(g, t0, 0.003, vol * near * 0.7, 0.35);
+      s.start(t0, Math.random());
+      s.stop(t0 + 0.5);
+    }
+    // the rumble: lowpassed noise that rolls (a slow wobble on the filter and the level)
+    const s = this.noiseSrc(true);
+    const f = c.createBiquadFilter();
+    f.type = 'lowpass';
+    f.Q.value = 0.7;
+    f.frequency.setValueAtTime(380 + near * 500, t0);
+    f.frequency.exponentialRampToValueAtTime(70, t0 + len);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.08 + (1 - near) * 0.5);
+    for (let k = 1; k < 6; k++) g.gain.linearRampToValueAtTime(vol * (0.45 + Math.random() * 0.55) * (1 - k / 7), t0 + (len * k) / 6);
+    g.gain.linearRampToValueAtTime(0, t0 + len);
+    s.connect(f).connect(g).connect(this.sfx);
+    s.start(t0, Math.random());
+    s.stop(t0 + len + 0.1);
+  }
+
   explosion(dist: number) {
     if (!this.ctx) return;
     const c = this.ctx;

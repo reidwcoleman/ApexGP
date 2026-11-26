@@ -121,6 +121,8 @@ export class Game {
     this.post = new Post(this.renderer, this.scene, this.camera);
     this.post.setSize(window.innerWidth, window.innerHeight);
     this.water = new Water(this.scene, this.sky);
+    // thunder rolls in after the flash, at the speed of sound
+    this.sky.onStrike = (d) => setTimeout(() => this.audio.thunder(d), Math.min(4000, (d / 343) * 1000));
     this.effects = new Effects(this.scene);
     this.humanR = new HumanRenderer(this.scene);
     this.skinned = new SkinnedCrowd(this.scene);

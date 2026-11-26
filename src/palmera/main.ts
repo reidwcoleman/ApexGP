@@ -83,10 +83,10 @@ function boot() {
   (window as unknown as { palmera: typeof api }).palmera = api;
   if (params.has('time')) game.sky.setTime(parseFloat(params.get('time')!));
   const wx = params.get('weather');
-  if (wx === 'rain' || wx === 'clear') {
+  if (wx === 'rain' || wx === 'clear' || wx === 'storm') {
     game.sky.forceWeather = wx;
-    game.sky.rain = game.sky.rainTarget = wx === 'rain' ? 1 : 0;
-    game.wet = wx === 'rain' ? 1 : 0;
+    game.sky.rain = game.sky.rainTarget = wx === 'clear' ? 0 : 1;
+    game.wet = wx === 'clear' ? 0 : 1;
   }
 
   let last = performance.now();

@@ -1,3 +1,4 @@
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import * as THREE from 'three';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { clamp, lerp, smoothstep } from '../core/math';
@@ -80,15 +81,17 @@ void main() {
   col += vec3(0.11, 0.06, 0.035) * uNight * exp(-max(d.y, 0.0) * 9.0) * (1.0 + uGrey);
   // moon
   float md = dot(d, uMoonDir);
-  col += vec3(0.85, 0.9, 1.0) * smoothstep(0.99935, 0.9996, md) * 1.2 * uNight;
-  col += vec3(0.3, 0.4, 0.7) * pow(max(md, 0.0), 200.0) * 0.06 * uNight;
+  // (behind cloud when it rains)
+  float clear = 1.0 - smoothstep(0.15, 0.6, uGrey);
+  col += vec3(0.85, 0.9, 1.0) * smoothstep(0.99935, 0.9996, md) * 1.2 * uNight * clear;
+  col += vec3(0.3, 0.4, 0.7) * pow(max(md, 0.0), 200.0) * 0.06 * uNight * clear;
   // stars
   vec3 sp = d * 300.0;
   vec3 cell = floor(sp);
   float r = h3(cell);
   float star = step(0.9968, r) * smoothstep(0.45, 0.0, length(fract(sp) - 0.5));
   star *= 0.6 + 0.4 * sin(uTime * 3.0 + r * 100.0);
-  col += vec3(star) * uNight * smoothstep(0.02, 0.25, d.y) * 0.5;
+  col += vec3(star) * uNight * smoothstep(0.02, 0.25, d.y) * 0.5 * clear;
   gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -179,7 +182,17 @@ export class SkySystem {
   rain = 0;
   rainTarget = 0;
   private weatherT = 90 + Math.random() * 120;
-  forceWeather: 'rain' | 'clear' | null = null;
+  forceWeather: 'rain' | 'clear' | 'storm' | null = null;
+  /** a thunderstorm: the heaviest showers bring lightning */
+  storm = false;
+  /** lightning flash, 0..1 (decays fast, flickers) */
+  flash = 0;
+  /** called on each strike with the distance to it (thunder follows at the speed of sound) */
+  onStrike: ((dist: number) => void) | null = null;
+  private strikeT = 4;
+  private flicker = 0;
+  private bolt: THREE.Mesh | null = null;
+  private readonly boltMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 3.4, 4.2), transparent: true, fog: false, depthWrite: false });
   light: THREE.DirectionalLight;
   hemi: THREE.HemisphereLight;
   mesh: THREE.Mesh;
@@ -342,14 +355,19 @@ export class SkySystem {
 
     // weather
     this.weatherT -= dt;
-    if (this.forceWeather) this.rainTarget = this.forceWeather === 'rain' ? 1 : 0;
-    else if (this.weatherT <= 0) {
+    if (this.forceWeather) {
+      this.rainTarget = this.forceWeather === 'clear' ? 0 : 1;
+      this.storm = this.forceWeather === 'storm';
+    } else if (this.weatherT <= 0) {
       const raining = this.rainTarget > 0;
       this.rainTarget = raining ? 0 : Math.random() < 0.45 ? 0.6 + Math.random() * 0.4 : 0;
+      // about a third of the heavy showers are thunderstorms
+      this.storm = this.rainTarget > 0.85 && Math.random() < 0.6;
       this.weatherT = raining ? 150 + Math.random() * 240 : this.rainTarget > 0 ? 60 + Math.random() * 90 : 120 + Math.random() * 200;
     }
     this.rain += (this.rainTarget - this.rain) * Math.min(1, dt * 0.08);
     const rn = this.rain;
+    this.lightning(dt, camPos);
     u.uGrey.value = rn;
     u.uLevel.value = (u.uLevel.value as number) * lerp(1, 0.66, rn);
     this.horizon.multiplyScalar(lerp(1, 0.7, rn));
@@ -366,6 +384,70 @@ export class SkySystem {
     // exposure: keep the frame bright as the light falls (eyes adapt), but let night be night
     const e = this.sunDir.y;
     this.exposure = lerp(1, 1.5, 1 - smoothstep(-0.18, 0.2, e)) * lerp(1, 1.12, this.sunset);
+    // a strike lights up everything for a moment (more so at night)
+    if (this.flash > 0.001) {
+      const f = this.flash * (0.6 + this.night * 0.8);
+      this.hemi.color.lerp(new THREE.Color(0.75, 0.82, 1), Math.min(1, f));
+      this.hemi.intensity += f * 1.1;
+      this.scene.environmentIntensity += f * 0.6;
+      u.uLevel.value = (u.uLevel.value as number) + f * 0.9;
+      fog.color.lerp(new THREE.Color(0.5, 0.54, 0.66), Math.min(0.45, f * 0.6));
+    }
+  }
+
+  /** storms: every 5-18 s a bolt somewhere out over the city or the sea, with a double flash */
+  private lightning(dt: number, cam: THREE.Vector3) {
+    this.flicker -= dt;
+    if (this.flicker <= 0 && this.flash > 0.5) this.flash *= Math.exp(-dt * 14);
+    else this.flash *= Math.exp(-dt * 7);
+    if (this.flicker > -0.12 && this.flicker < -0.05 && this.flash < 0.4 && this.bolt?.visible) this.flash = 0.8; // the restrike
+    if (this.bolt) {
+      this.boltMat.opacity = Math.min(1, this.flash * 1.6);
+      this.bolt.visible = this.flash > 0.08;
+    }
+    if (!this.storm || this.rain < 0.7) return;
+    this.strikeT -= dt;
+    if (this.strikeT > 0) return;
+    this.strikeT = 5 + Math.random() * 13;
+    const a = Math.random() * Math.PI * 2, d = 260 + Math.random() * 700;
+    const bx = cam.x + Math.sin(a) * d, bz = cam.z + Math.cos(a) * d;
+    // a jagged channel from the cloud base down, with a couple of forks
+    const pts: THREE.Vector3[] = [];
+    let x = bx, z = bz;
+    for (let y = 420; y > 0; y -= 18 + Math.random() * 22) {
+      pts.push(new THREE.Vector3(x, y, z));
+      x += (Math.random() - 0.5) * 34;
+      z += (Math.random() - 0.5) * 34;
+    }
+    pts.push(new THREE.Vector3(x, 0, z));
+    const geos: THREE.BufferGeometry[] = [];
+    const tube = (p: THREE.Vector3[], r: number) => {
+      const path = new THREE.CurvePath<THREE.Vector3>();
+      for (let i = 0; i < p.length - 1; i++) path.add(new THREE.LineCurve3(p[i], p[i + 1]));
+      geos.push(new THREE.TubeGeometry(path, p.length * 2, r, 3, false));
+    };
+    tube(pts, 4);
+    for (let k = 0; k < 2; k++) {
+      const i = 2 + Math.floor(Math.random() * (pts.length - 4));
+      const fork = [pts[i].clone()];
+      for (let j = 0; j < 4; j++) {
+        const q = fork[fork.length - 1];
+        fork.push(new THREE.Vector3(q.x + (Math.random() - 0.5) * 50, q.y - 20 - Math.random() * 25, q.z + (Math.random() - 0.5) * 50));
+      }
+      tube(fork, 2.2);
+    }
+    if (this.bolt) {
+      this.scene.remove(this.bolt);
+      this.bolt.geometry.dispose();
+    }
+    this.bolt = new THREE.Mesh(mergeGeometries(geos), this.boltMat);
+    for (const g of geos) g.dispose();
+    this.bolt.frustumCulled = false;
+    this.bolt.renderOrder = 2;
+    this.scene.add(this.bolt);
+    this.flash = 1;
+    this.flicker = 0.1;
+    this.onStrike?.(d);
   }
 
   clockString(): string {
