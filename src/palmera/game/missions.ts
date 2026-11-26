@@ -786,6 +786,10 @@ export class Missions {
     if (this.game.skyTours) out.push(...this.game.skyTours.blips);
     if (this.game.garages) out.push(...this.game.garages.blips);
     if (this.game.properties) out.push(...this.game.properties.blips);
+    if (this.game.delivery) {
+      if (this.game.delivery.active) return this.game.delivery.blips;
+      out.push(...this.game.delivery.blips);
+    }
     if (this.game.street) out.push(...this.game.street.blips);
     if (this.game.club) out.push(...this.game.club.blips);
     if (this.game.patrol) out.push(...this.game.patrol.blips);

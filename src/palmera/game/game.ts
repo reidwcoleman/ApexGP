@@ -41,6 +41,7 @@ import { SkyTours } from './skytours';
 import { Parts } from './parts';
 import { Garages } from './garage';
 import { Properties } from './properties';
+import { Delivery } from './delivery';
 import { StreetEvents } from './events';
 import { PhotoMode } from './photo';
 import { Club } from './club';
@@ -129,6 +130,7 @@ export class Game {
   parts!: Parts;
   garages!: Garages;
   properties!: Properties;
+  delivery!: Delivery;
   street!: StreetEvents;
   private speedBlurW = 0;
   photo!: PhotoMode;
@@ -205,6 +207,7 @@ export class Game {
     this.parts = new Parts(this);
     this.garages = new Garages(this);
     this.properties = new Properties(this);
+    this.delivery = new Delivery(this);
     Marker.camera = this.camera;
     this.photo = new PhotoMode(this);
     this.club = new Club(this);
@@ -1072,6 +1075,7 @@ export class Game {
       this.parts.update(sdt);
       this.garages.update(sdt);
       this.properties.update(sdt);
+      this.delivery.update(sdt);
       this.street.update(sdt);
       this.club.update(sdt);
       this.wakes.update(sdt);

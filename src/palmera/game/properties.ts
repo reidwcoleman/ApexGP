@@ -7,6 +7,54 @@ import * as THREE from 'three';
 import { groundAt } from '../world/map';
 import { Marker, type Blip } from './missions';
 import type { Game } from './game';
+import type { CityMap } from '../world/map';
+
+type Building = CityMap['buildings'][number];
+export type DoorSpot = { x: number; z: number; nx: number; nz: number };
+
+/**
+ * a door spot 1.2 m out from a real wall of a building: the side facing the nearest road junction
+ * first, then the others - each checked against the collision grid (a wall right behind the spot,
+ * nothing standing on the spot itself)
+ */
+export function buildingDoor(map: CityMap, b: Building): DoorSpot | null {
+  let n = map.nodes[0], nd = 1e9;
+  for (const q of map.nodes) {
+    const d = Math.hypot(q.x - b.x, q.z - b.z);
+    if (d < nd) (nd = d), (n = q);
+  }
+  const score = (f: [number, number]) => f[0] * (n.x - b.x) / b.w + f[1] * (n.z - b.z) / b.d;
+  const faces: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  faces.sort((f, g) => score(g) - score(f));
+  const tmp: ReturnType<typeof map.colliders.query> = [];
+  for (const [nx, nz] of faces) {
+    const x = b.x + nx * (b.w / 2 + 1.2), z = b.z + nz * (b.d / 2 + 1.2);
+    const y = groundAt(x, z);
+    if (!map.colliders.raycast(x, y + 1.2, z, -nx, 0, -nz, 1.6, true)) continue;
+    tmp.length = 0;
+    if (map.colliders.query(x - 0.4, z - 0.4, x + 0.4, z + 0.4, tmp).some((q) => q.y0 < y + 1.8 && q.y1 > y + 0.2)) continue;
+    return { x, z, nx, nz };
+  }
+  return null;
+}
+
+/** a door on one of the buildings nearest a point (the nearest that has a usable one) */
+export function doorNear(map: CityMap, px: number, pz: number): DoorSpot | null {
+  const cands = map.buildings
+    .filter((b) => b.y0 < 0.5 && b.w >= 6 && b.d >= 6 && Math.hypot(b.x - px, b.z - pz) < 140)
+    .sort((a, b) => Math.hypot(a.x - px, a.z - pz) - Math.hypot(b.x - px, b.z - pz))
+    .slice(0, 16);
+  for (const b of cands) {
+    const d = buildingDoor(map, b);
+    // one business per frontage: not within 25 m of a door already handed out (a property, the takeout)
+    if (d && !usedDoors.some((u) => Math.hypot(u.x - d.x, u.z - d.z) < 25)) {
+      usedDoors.push(d);
+      return d;
+    }
+  }
+  return null;
+}
+const usedDoors: DoorSpot[] = [];
 
 interface PropDef {
   name: string;
@@ -52,7 +100,7 @@ export class Properties {
     this.mine = boardMaterial('YOURS', '#1c7a3e', '#ffffff');
     const pole = new THREE.MeshStandardMaterial({ color: 0xe9e6df, roughness: 0.6 });
     for (const def of DEFS) {
-      const spot = this.doorNear(def.at.x, def.at.z);
+      const spot = doorNear(map, def.at.x, def.at.z);
       if (!spot) continue;
       const { x, z, nx, nz } = spot;
       const marker = new Marker(game.scene, 0xffd23f, 1.1, 2.2).at(x, z);
@@ -72,39 +120,6 @@ export class Properties {
       game.scene.add(g);
       this.places.push({ def, x, z, nx, nz, owned: false, till: 0, marker, board });
     }
-  }
-
-  /**
-   * a door spot 1.2 m out from a real wall of the building nearest a point: the side facing the nearest
-   * road junction first, then the others, then the next building - each checked against the collision
-   * grid (a wall right behind the spot, nothing on the spot itself)
-   */
-  private doorNear(px: number, pz: number): { x: number; z: number; nx: number; nz: number } | null {
-    const map = this.game.map;
-    const cands = map.buildings
-      .filter((b) => b.y0 < 0.5 && b.w >= 6 && b.d >= 6 && Math.hypot(b.x - px, b.z - pz) < 140)
-      .sort((a, b) => Math.hypot(a.x - px, a.z - pz) - Math.hypot(b.x - px, b.z - pz))
-      .slice(0, 16);
-    const tmp: ReturnType<typeof map.colliders.query> = [];
-    for (const b of cands) {
-      let n = map.nodes[0], nd = 1e9;
-      for (const q of map.nodes) {
-        const d = Math.hypot(q.x - b.x, q.z - b.z);
-        if (d < nd) (nd = d), (n = q);
-      }
-      const faces: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-      faces.sort((f, g) => -(f[0] * (n.x - b.x) / b.w + f[1] * (n.z - b.z) / b.d) + (g[0] * (n.x - b.x) / b.w + g[1] * (n.z - b.z) / b.d));
-      for (const [nx, nz] of faces) {
-        const x = b.x + nx * (b.w / 2 + 1.2), z = b.z + nz * (b.d / 2 + 1.2);
-        const y = groundAt(x, z);
-        const hit = map.colliders.raycast(x, y + 1.2, z, -nx, 0, -nz, 1.6, true);
-        if (!hit) continue;
-        tmp.length = 0;
-        if (map.colliders.query(x - 0.4, z - 0.4, x + 0.4, z + 0.4, tmp).some((q) => q.y0 < y + 1.8 && q.y1 > y + 0.2)) continue;
-        return { x, z, nx, nz };
-      }
-    }
-    return null;
   }
 
   get blips(): Blip[] {
