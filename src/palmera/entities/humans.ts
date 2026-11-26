@@ -35,6 +35,8 @@ export class Human {
   outfit: import('../game/wardrobe').Outfit | null = null;
   /** crouched behind something (the player, in a gunfight) */
   inCover = false;
+  /** an open umbrella (its canopy colour) held up in the rain, or null */
+  umbrella: number | null = null;
   armor = 0;
   dead = false;
   down = 0; // seconds left lying down

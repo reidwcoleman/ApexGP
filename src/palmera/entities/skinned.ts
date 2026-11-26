@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Person, loadPeople, setPeopleCore, setPeopleRest, type Look, type PeopleKit } from '../../people/Humans.ts';
 import { LONG_GUNS, type Human, type WeaponId } from './humans';
 import type { Vehicle } from './vehicle';
@@ -33,6 +34,7 @@ interface Slot {
   p: Person;
   anim: string;
   gun: THREE.Mesh | null;
+  umb?: THREE.Mesh;
   lastUsed: number;
 }
 
@@ -162,6 +164,7 @@ export class SkinnedCrowd {
     if (!s) return;
     this.scene.remove(s.p.root);
     if (s.gun) this.scene.remove(s.gun);
+    if (s.umb) this.scene.remove(s.umb);
     s.p.dispose();
     this.slots.delete(h.id);
     this.reassignT = 0;
@@ -208,6 +211,8 @@ export class SkinnedCrowd {
         if (!keep.has(id)) {
           s.p.root.visible = false;
           if (s.gun) s.gun.visible = false;
+        if (s.umb) s.umb.visible = false;
+          if (s.umb) s.umb.visible = false;
         }
       }
       for (const c of cands) if (!this.slots.has(c.h.id)) this.slots.set(c.h.id, this.make(c.h));
@@ -217,6 +222,8 @@ export class SkinnedCrowd {
         for (const s of old.slice(0, this.slots.size - this.max - 10)) {
           this.scene.remove(s.p.root);
           if (s.gun) this.scene.remove(s.gun);
+          if (s.umb) this.scene.remove(s.umb);
+    if (s.umb) this.scene.remove(s.umb);
           s.p.dispose();
           this.slots.delete(s.h.id);
         }
@@ -229,6 +236,7 @@ export class SkinnedCrowd {
       if (!on || h.hidden || h.vehicle) {
         s.p.root.visible = false;
         if (s.gun) s.gun.visible = false;
+        if (s.umb) s.umb.visible = false;
         continue;
       }
       this.taken.add(h.id);
@@ -281,6 +289,20 @@ export class SkinnedCrowd {
       this.aimArm(p, 'r', swing, punch);
     }
     p.root.updateMatrixWorld(true);
+    // an umbrella in the right hand, canopy level above the head
+    if (h.umbrella !== null && !h.dead && lie < 0.3) {
+      if (!s.umb) {
+        s.umb = new THREE.Mesh(umbrellaGeo(), umbrellaMat(h.umbrella));
+        s.umb.castShadow = true;
+        this.scene.add(s.umb);
+      }
+      s.umb.material = umbrellaMat(h.umbrella);
+      s.umb.visible = true;
+      // the handle at chest height, a little forward and to the right, where the forearm reaches
+      const rx = -fz, rz = fx;
+      s.umb.position.set(h.pos.x + fx * 0.3 + rx * 0.2, h.pos.y + 1.02, h.pos.z + fz * 0.3 + rz * 0.2);
+      s.umb.rotation.set(0, h.yaw, 0);
+    } else if (s.umb) s.umb.visible = false;
     // what's in the hand
     const held = !h.dead && lie < 0.3 && h.weapon !== 'fist' ? GUNS[h.weapon] : undefined;
     if (held) {
@@ -324,4 +346,36 @@ export class SkinnedCrowd {
       b.updateWorldMatrix(false, true);
     }
   }
+}
+
+/** an umbrella standing on its handle: a hooked grip at the origin, the shaft, an eight-panel canopy */
+let umbGeo: THREE.BufferGeometry | null = null;
+function umbrellaGeo(): THREE.BufferGeometry {
+  if (umbGeo) return umbGeo;
+  const shaft = new THREE.CylinderGeometry(0.012, 0.012, 1.0, 6);
+  shaft.translate(0, 0.5, 0);
+  const canopy = new THREE.ConeGeometry(0.5, 0.22, 8, 1, true);
+  canopy.translate(0, 1.0, 0);
+  const tip = new THREE.CylinderGeometry(0.008, 0.012, 0.12, 5);
+  tip.translate(0, 1.15, 0);
+  const parts = [shaft, canopy, tip].map((g) => g.toNonIndexed());
+  // vertex colour: white on the canopy (tinted by the material), dark on the shaft and tip
+  const colored = parts.map((g, i) => {
+    const n = g.getAttribute('position').count;
+    const c = new Float32Array(n * 3).fill(i === 1 ? 1 : 0.12);
+    g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+    g.deleteAttribute('uv');
+    return g;
+  });
+  umbGeo = mergeGeometries(colored)!;
+  return umbGeo;
+}
+const umbMats = new Map<number, THREE.MeshStandardMaterial>();
+function umbrellaMat(c: number) {
+  let m = umbMats.get(c);
+  if (!m) {
+    m = new THREE.MeshStandardMaterial({ color: c, vertexColors: true, roughness: 0.55, side: THREE.DoubleSide });
+    umbMats.set(c, m);
+  }
+  return m;
 }

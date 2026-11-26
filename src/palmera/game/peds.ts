@@ -87,7 +87,20 @@ export class Peds {
       this.spawn(g.settled ? 40 : 6, 140);
     }
     for (const h of g.npcs) if (h.kind === 'ped') this.think(h, dt);
+    // rain: about half the people out walking put up an umbrella; they all come down when it stops
+    this.umbT -= dt;
+    if (this.umbT <= 0) {
+      this.umbT = 0.8;
+      const wet = g.sky.rain > 0.3;
+      for (const h of g.npcs) {
+        if (h.kind !== 'ped') continue;
+        const k = ((h.id * 2654435761) >>> 0) / 4294967296;
+        const out = h.state === 'walk' || h.state === 'cross' || h.state === 'wait' || h.state === 'chat';
+        h.umbrella = wet && k < 0.5 && out && !h.dead ? UMBRELLAS[h.id % UMBRELLAS.length] : null;
+      }
+    }
   }
+  private umbT = 0;
 
   /** React to danger at (x,z). */
   scare(h: Human, x: number, z: number, t = 8, force = false) {
@@ -174,7 +187,8 @@ export class Peds {
       } else h.corner += h.dir;
       return;
     }
-    const sp = h.state === 'cross' ? 1.9 : 1.35 + (h.id % 5) * 0.06;
+    // a quicker step in the rain
+    const sp = (h.state === 'cross' ? 1.9 : 1.35 + (h.id % 5) * 0.06) * (1 + 0.3 * this.game.sky.rain);
     g.setDesired(h, (dx / d) * sp, (dz / d) * sp);
   }
 
@@ -210,3 +224,5 @@ export class Peds {
     if (best >= 0) h.corner = this.nearestCorner(this.paths[best], h.pos.x, h.pos.z);
   }
 }
+
+const UMBRELLAS = [0x1c1f26, 0xb3122e, 0x16407a, 0xf2c230, 0x2f6b3a, 0xe9e5dc, 0x7a1f5c, 0x2aa7b8];
