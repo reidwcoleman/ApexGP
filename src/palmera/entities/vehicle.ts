@@ -147,6 +147,42 @@ export class Vehicle {
   private baseGeo: THREE.BufferGeometry | null = null;
 
   /** a new colour (the paint materials are shared per colour, so swap rather than recolour) */
+  /** garage upgrades: engine 0-3, brakes 0-2, armour 0-2, underglow colour, tinted glass */
+  tune = { engine: 0, brakes: 0, armor: 0, neon: null as number | null, tint: false };
+  private neonMesh: THREE.Mesh | null = null;
+
+  /** rebuild this car's own stats and looks from its tune */
+  applyTune() {
+    const t = this.tune;
+    const base = SPECS[this.type];
+    const was = this.health / this.spec.health;
+    this.spec = {
+      ...base,
+      maxSpeed: base.maxSpeed * (1 + 0.08 * t.engine),
+      accel: base.accel * (1 + 0.16 * t.engine),
+      brake: base.brake * (1 + 0.22 * t.brakes),
+      grip: base.grip * (1 + 0.06 * t.brakes),
+      health: base.health * (1 + 0.35 * t.armor),
+    };
+    this.health = Math.min(this.spec.health, was * this.spec.health);
+    const m = this.body.material as THREE.Material[];
+    if (Array.isArray(m) && m[3]) m[3] = t.tint ? tintedGlass() : carMats.glass;
+    if (t.neon !== null) {
+      if (!this.neonMesh) {
+        this.neonMesh = new THREE.Mesh(neonGeo, new THREE.MeshBasicMaterial({ map: neonTexture(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+        this.neonMesh.renderOrder = 2;
+        this.root.add(this.neonMesh);
+      }
+      this.neonMesh.scale.set(this.spec.wid + 1.1, 1, this.spec.len + 1.2);
+      this.neonMesh.position.y = 0.04;
+      (this.neonMesh.material as THREE.MeshBasicMaterial).color.setHex(t.neon).multiplyScalar(2.2);
+    } else if (this.neonMesh) {
+      this.root.remove(this.neonMesh);
+      (this.neonMesh.material as THREE.Material).dispose();
+      this.neonMesh = null;
+    }
+  }
+
   repaint(color: number) {
     this.color = color;
     this.paint = paintMat(color);
@@ -699,4 +735,40 @@ export function collideVehicles(list: Vehicle[], events: VehicleEvents) {
         }
     }
   }
+}
+
+/** the underglow: a soft rounded pool of light on the road, laid flat under the car */
+const neonGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+let neonTex: THREE.CanvasTexture | null = null;
+function neonTexture() {
+  if (neonTex) return neonTex;
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 256;
+  const x = c.getContext('2d')!;
+  const img = x.createImageData(128, 256);
+  for (let j = 0; j < 256; j++)
+    for (let i = 0; i < 128; i++) {
+      // distance outside an inner rounded box, as a soft glow that is brightest at the car's edge
+      const u = Math.abs(i - 63.5) / 63.5, v = Math.abs(j - 127.5) / 127.5;
+      const dx = Math.max(0, u - 0.55) / 0.45, dy = Math.max(0, v - 0.72) / 0.28;
+      const d = Math.min(1, Math.hypot(dx, dy));
+      const a = Math.pow(1 - d, 1.6) * (u < 0.55 && v < 0.72 ? 0.75 : 1);
+      const k = (j * 128 + i) * 4;
+      img.data[k] = img.data[k + 1] = img.data[k + 2] = 255;
+      img.data[k + 3] = Math.round(a * 255);
+    }
+  x.putImageData(img, 0, 0);
+  neonTex = new THREE.CanvasTexture(c);
+  return neonTex;
+}
+let tinted: THREE.Material | null = null;
+function tintedGlass() {
+  if (!tinted) {
+    const m = carMats.glass.clone();
+    m.color.setHex(0x1a1d22);
+    m.opacity = 0.88;
+    tinted = m;
+  }
+  return tinted;
 }
