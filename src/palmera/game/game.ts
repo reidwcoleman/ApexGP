@@ -218,6 +218,15 @@ export class Game {
     this.boat.place(428, 235.5, Math.PI / 2);
     this.boat.persistent = true;
     this.addVehicle(this.boat);
+    // airboats at the swamp, on the bank of a pond near each swamp road
+    for (const [px, pz] of [[-560, 240], [-560, -240]] as [number, number][]) {
+      const f = this.map.flats.filter((q) => q.kind === 'pond').sort((a, b) => Math.hypot(a.x - px, a.z - pz) - Math.hypot(b.x - px, b.z - pz))[0];
+      if (!f) continue;
+      const a = new Vehicle('airboat');
+      a.place(f.x, f.z, Math.atan2(px - f.x, pz - f.z));
+      a.persistent = true;
+      this.addVehicle(a);
+    }
     // jet skis for hire, moored just past the surf off the main beach
     for (const [z, c] of [[-168, 0xffd23f], [-162, 0xff3b6b], [-156, 0x22c7e8]] as [number, number][]) {
       const j = new Vehicle('jetski', c);
@@ -834,7 +843,11 @@ export class Game {
       }
       v.update(dt, this.map.colliders, this.events, this.elapsed);
       // a car in a swamp pond bogs down and throws up spray
-      if (!v.isBoat && !v.airborne && v.pos.x < -470 && v.pos.y < -0.2) {
+      // the airboat's fan: idling, roaring with the throttle
+      if (v.fan) v.fan.rotation.z += dt * (v.driver ? 14 + 50 * Math.abs(v.input.thr) : 0);
+      if (v.type === 'airboat' && v.pos.x < -470 && groundAt(v.pos.x, v.pos.z) < -0.1 && v.speed > 4 && Math.random() < dt * 18 && v.pos.distanceToSquared(cam) < 120 * 120)
+        this.effects.puff(v.pos.x - v.fwdX() * 2.4 + (Math.random() - 0.5) * 2, 0.1, v.pos.z - v.fwdZ() * 2.4 + (Math.random() - 0.5) * 2, 'splash');
+      if (!v.isBoat && v.type !== 'airboat' && !v.airborne && v.pos.x < -470 && v.pos.y < -0.2) {
         const f = Math.exp(-1.1 * dt);
         v.vx *= f;
         v.vz *= f;
@@ -868,7 +881,7 @@ export class Game {
         }
       }
       // drift smoke
-      if (!v.isBoat && v.slip > 4 && v.speed > 6 && !v.airborne && Math.random() < dt * 25) {
+      if (!v.isBoat && v.type !== 'airboat' && v.slip > 4 && v.speed > 6 && !v.airborne && Math.random() < dt * 25) {
         const back = -v.spec.wheelZ;
         this.effects.puff(v.pos.x + v.fwdX() * back, v.pos.y + 0.2, v.pos.z + v.fwdZ() * back, 'tire');
       }

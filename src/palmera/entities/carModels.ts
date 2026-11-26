@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { box, cyl, merge, mergeGroups, prep } from '../core/geo';
 
-export type CarType = 'sedan' | 'sports' | 'suv' | 'pickup' | 'taxi' | 'police' | 'van' | 'bus' | 'bike' | 'ambulance' | 'boat' | 'jetski';
+export type CarType = 'sedan' | 'sports' | 'suv' | 'pickup' | 'taxi' | 'police' | 'van' | 'bus' | 'bike' | 'ambulance' | 'boat' | 'jetski' | 'airboat';
 
 export interface CarSpec {
   type: CarType;
@@ -35,6 +35,7 @@ export const SPECS: Record<CarType, CarSpec> = {
   ambulance: { type: 'ambulance', label: 'Palmera General Ambulance', len: 5.6, wid: 2.1, hgt: 2.5, mass: 3000, maxSpeed: 42, accel: 7, brake: 13, grip: 6, steer: 0.58, wheelbase: 3.5, wheelR: 0.38, wheelZ: 1.8, colors: [0xf6f6f2], health: 1800 },
   bike: { type: 'bike', label: 'Sprint 750', len: 2.1, wid: 0.8, hgt: 1.2, mass: 230, maxSpeed: 58, accel: 12, brake: 15, grip: 7.5, steer: 0.5, wheelbase: 1.4, wheelR: 0.32, wheelZ: 0.7, colors: [0xd62828, 0x111111, 0xf2f2f2, 0x1f6fd1, 0xf2b705, 0x2a9d4a], health: 500 },
   jetski: { type: 'jetski', label: 'Wavecat 900', len: 3.1, wid: 1.15, hgt: 1.0, mass: 380, maxSpeed: 27, accel: 10, brake: 7, grip: 2.4, steer: 1.4, wheelbase: 2, wheelR: 0, wheelZ: 0, colors: [0xffd23f, 0xff3b6b, 0x22c7e8, 0x7cff3a, 0xffffff], health: 420 },
+  airboat: { type: 'airboat', label: 'Glade Skimmer', len: 4.6, wid: 2.2, hgt: 2.6, mass: 650, maxSpeed: 25, accel: 8, brake: 6, grip: 2.2, steer: 0.9, wheelbase: 3, wheelR: 0, wheelZ: 0, colors: [0x3b6e3a, 0x2f4f6f, 0xc0b8a0, 0x7a2f2a], health: 700 },
   boat: { type: 'boat', label: 'Reef Runner', len: 7.0, wid: 2.4, hgt: 1.6, mass: 1800, maxSpeed: 30, accel: 6, brake: 6, grip: 1.6, steer: 1.0, wheelbase: 4, wheelR: 0, wheelZ: 0, colors: [0xffffff, 0x1f4e79, 0xc0392b], health: 1200 },
 };
 
@@ -192,6 +193,49 @@ export function carModel(type: CarType): CarModel {
       detail.push(box(W * 0.6, 0.32, 0.04, 0, 0.95, L / 2 + 0.01, CHROME));
       lamps(spec, 1.0, 1.1, lamp);
       geo = mergeGroups([paint, detail, lamp]);
+      break;
+    }
+    case 'airboat': {
+      // a flat-bottomed skiff with an upswept bow, a raised driver's seat and the fan cage at the back
+      const paint: THREE.BufferGeometry[] = [], detail: THREE.BufferGeometry[] = [], lamp: THREE.BufferGeometry[] = [];
+      const hull = new THREE.BoxGeometry(W, 0.45, L * 0.82, 1, 1, 4);
+      const hp = hull.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < hp.count; i++) {
+        const z = hp.getZ(i);
+        // the bow rises
+        if (z > L * 0.2 && hp.getY(i) < 0) hp.setY(i, hp.getY(i) + (z - L * 0.2) * 0.6);
+      }
+      hull.computeVertexNormals();
+      hull.translate(0, 0.3, -L * 0.05);
+      paint.push(prep(hull, 0xffffff));
+      for (const s of [-1, 1]) detail.push(box(0.08, 0.1, L * 0.8, s * (W / 2 + 0.01), 0.55, -L * 0.05, 0x8a8a84));
+      detail.push(box(W * 0.85, 0.04, L * 0.6, 0, 0.53, 0, 0x5a4a38));
+      // the driver's seat on its stand, and a bench in front
+      detail.push(box(0.12, 0.9, 0.12, -0.3, 0.98, -0.75, 0x7d7d78));
+      detail.push(box(0.12, 0.9, 0.12, 0.3, 0.98, -0.75, 0x7d7d78));
+      detail.push(box(0.8, 0.12, 0.6, 0, 1.45, -0.72, 0x202224));
+      detail.push(box(0.8, 0.5, 0.1, 0, 1.72, -1.0, 0x202224));
+      detail.push(box(1.6, 0.3, 0.5, 0, 0.72, 0.5, 0x202224));
+      // engine and the fan's cage (the blades spin separately)
+      detail.push(box(0.6, 0.5, 0.7, 0, 0.85, -1.55, 0x3a3c40));
+      const ring = new THREE.TorusGeometry(1.05, 0.05, 6, 24);
+      ring.translate(0, 1.7, -1.98);
+      detail.push(prep(ring, 0x9a9a94));
+      for (const a of [0.6, 2.54]) {
+        const st = new THREE.CylinderGeometry(0.035, 0.035, 2.1, 5);
+        st.rotateZ(a);
+        st.translate(0, 1.7, -1.95);
+        detail.push(prep(st, 0x9a9a94));
+      }
+      detail.push(box(0.06, 1.2, 0.06, -0.9, 1.1, -1.9, 0x9a9a94));
+      detail.push(box(0.06, 1.2, 0.06, 0.9, 1.1, -1.9, 0x9a9a94));
+      // a rudder pair behind the fan
+      detail.push(box(0.04, 0.9, 0.5, -0.35, 1.6, -2.3, 0x2a2c30));
+      detail.push(box(0.04, 0.9, 0.5, 0.35, 1.6, -2.3, 0x2a2c30));
+      lamp.push(box(0.16, 0.1, 0.05, 0, 0.75, L * 0.38, 0xfff4d8));
+      geo = mergeGroups([paint, detail, lamp]);
+      model.wheels = [];
+      model.wheelGeo = null;
       break;
     }
     case 'jetski': {

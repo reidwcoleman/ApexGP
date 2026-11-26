@@ -127,12 +127,12 @@ export class SkinnedCrowd {
           p.root.position.copy(v.seat!);
           if (i === 1) p.root.position.x *= -1;
           // inside a cabin: a touch lower and smaller, or the head pokes up through the roof (it cleared it by 0.1 m too little in every type)
-          if (v.type !== 'bike' && v.type !== 'jetski' && v.type !== 'bus') {
+          if (v.type !== 'bike' && v.type !== 'jetski' && v.type !== 'bus' && v.type !== 'airboat') {
             p.root.position.y -= 0.1;
             p.root.scale.multiplyScalar(0.92);
           }
           p.play('sit', { offset: (v.vid % 100) / 100 });
-          (v.type === 'bike' || v.type === 'jetski' ? v.body : v.root).add(p.root);
+          (v.type === 'bike' || v.type === 'jetski' || v.type === 'airboat' ? v.body : v.root).add(p.root);
           ps.push(p);
         }
         this.seated.set(v, { p: ps, key });

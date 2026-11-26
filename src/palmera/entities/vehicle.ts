@@ -106,6 +106,8 @@ export class Vehicle {
   seat: THREE.Vector3 | null = null;
   /** top of the cabin roof in the car frame (kit cars) */
   roofY = 0;
+  /** an airboat's spinning fan */
+  fan: THREE.Mesh | null = null;
   vid = Math.floor(Math.random() * 1e9);
 
   constructor(type: CarType, color?: number) {
@@ -124,6 +126,16 @@ export class Vehicle {
     if (kitM) this.roofY = kitM.roofY;
     // a jet ski's rider sits astride, out in the open
     if (type === 'jetski') this.seat = new THREE.Vector3(0, 0.62, -0.3);
+    if (type === 'airboat') {
+      this.seat = new THREE.Vector3(0, 1.51, -0.72);
+      // the fan: two long blades turning in the cage
+      const blades = new THREE.BoxGeometry(1.9, 0.18, 0.04);
+      const fan = new THREE.Mesh(blades, new THREE.MeshStandardMaterial({ color: 0x2b2a28, roughness: 0.6 }));
+      fan.position.set(0, 1.7, -2.0);
+      fan.castShadow = true;
+      this.body.add(fan);
+      this.fan = fan;
+    }
     if (kitM) {
       model.sirenRed && (this.sirenPos = [new THREE.Vector3(-0.3, kitM.roofY + 0.07, -0.25), new THREE.Vector3(0.3, kitM.roofY + 0.07, -0.25)]);
     }
@@ -245,7 +257,7 @@ export class Vehicle {
 
   /** a hard knock on an end: the bumper drops at one corner and hangs */
   sagBumper(end: number, side: number) {
-    if (this.isBoat || this.type === 'bike' || this.bumpers[end] !== 0) return;
+    if (this.isBoat || this.type === 'bike' || this.type === 'airboat' || this.bumpers[end] !== 0) return;
     this.ensureOwnGeometry();
     const tris = this.bumperTriangles(end);
     if (tris.length < 6) return;
@@ -268,7 +280,7 @@ export class Vehicle {
 
   /** the bumper comes away: its triangles leave the body and come back as a loose piece (local geometry, centred) */
   detachBumper(end: number): { geo: THREE.BufferGeometry; at: THREE.Vector3 } | null {
-    if (this.isBoat || this.type === 'bike' || this.bumpers[end] === 2) return null;
+    if (this.isBoat || this.type === 'bike' || this.type === 'airboat' || this.bumpers[end] === 2) return null;
     this.ensureOwnGeometry();
     const tris = this.bumperTriangles(end);
     if (tris.length < 6) return null;
@@ -551,7 +563,9 @@ export class Vehicle {
       this.pos.y = damp(this.pos.y, WATER_Y + wh + 0.05 + Math.min(0.25, sp * 0.01), 6, dt);
       this.airborne = false;
     } else {
-      const g = groundAt(this.pos.x, this.pos.z, this.pos.y + 1.0);
+      let g = groundAt(this.pos.x, this.pos.z, this.pos.y + 1.0);
+      // an airboat skims the swamp ponds instead of sinking into them
+      if (this.type === 'airboat' && this.pos.x < -470) g = Math.max(g, 0.02);
       if (this.pos.y > g + 0.06) {
         this.airborne = true;
         this.vy -= 20 * dt;
