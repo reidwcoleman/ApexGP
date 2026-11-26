@@ -69,6 +69,8 @@ const GUNS: Partial<Record<WeaponId, { geo: THREE.BufferGeometry; mat: THREE.Mat
 export class SkinnedCrowd {
   /** humans drawn here this frame (the instanced renderer skips them) */
   readonly taken = new Set<number>();
+  /** a human not to draw (you, in first person) */
+  hideId = -1;
   private slots = new Map<number, Slot>();
   private t = 0;
   private reassignT = 0;
@@ -138,7 +140,11 @@ export class SkinnedCrowd {
         this.seated.set(v, { p: ps, key });
       }
     }
-    for (const s of this.seated.values()) for (const p of s.p) p.update(dt);
+    for (const s of this.seated.values())
+      for (const p of s.p) {
+        p.root.visible = !(this.hideId >= 0 && s.key[0] === 'P');
+        p.update(dt);
+      }
   }
 
   private lookFor(h: Human): Look {
@@ -253,7 +259,7 @@ export class SkinnedCrowd {
 
   private pose(s: Slot, dt: number) {
     const h = s.h, p = s.p;
-    p.root.visible = true;
+    p.root.visible = h.id !== this.hideId;
     const sp = h.animSpeed;
     let a = sp < 0.25 ? h.clip || 'idle' : sp < 2.1 ? 'walk' : sp < 4.6 ? 'jog' : 'run';
     // in cover: down behind it, standing only to aim
@@ -343,7 +349,7 @@ export class SkinnedCrowd {
       }
       s.gun.geometry = held.geo;
       s.gun.material = held.mat;
-      s.gun.visible = true;
+      s.gun.visible = h.id !== this.hideId;
       const hand = p.bones['hand_r'];
       if (hand) hand.getWorldPosition(s.gun.position);
       if (gunHeld) s.gun.lookAt(this.v2.copy(s.gun.position).addScaledVector(want, 2));

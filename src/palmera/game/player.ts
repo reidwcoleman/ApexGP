@@ -6,6 +6,9 @@ import { WATER_Y, groundAt, groundBase } from '../world/map';
 import type { Game } from './game';
 import { WEAPONS, WEAPON_ORDER } from './weapons';
 
+/** an invisible stand-in for a car's glass, seen from inside in first person */
+const NO_GLASS = new THREE.MeshBasicMaterial({ visible: false });
+
 export const TUNING = {
   runSpeed: 5.0,
   sprintSpeed: 7.6,
@@ -36,6 +39,11 @@ export class PlayerController {
   aimW = 0;
   private camDist = TUNING.camDistFoot;
   mouseIdle = 10;
+  /** first-person view (N) */
+  fp = false;
+  private headV = new THREE.Vector3();
+  private clearGlass: Vehicle | null = null;
+  private savedGlass: THREE.Material | null = null;
   private punchCd = 0;
   private camPos = new THREE.Vector3();
   private camTarget = new THREE.Vector3();
@@ -63,6 +71,10 @@ export class PlayerController {
     const inp = g.input;
     const p = g.player;
     this.look(dt);
+    if (g.input.hit('KeyN') && !g.chopper?.flying) {
+      this.fp = !this.fp;
+      g.hud.toast(this.fp ? 'First-person view · N to switch back' : 'Third-person view');
+    }
     if (p.dead) {
       g.setDesired(p, 0, 0);
       return;
@@ -191,10 +203,11 @@ export class PlayerController {
       mz /= ml;
     } else speed = 0;
     g.setDesired(p, mx * speed, mz * speed);
-    // facing
+    // facing (in first person you always face where you look, and move relative to it)
+    if (this.fp && !this.cover) p.yaw = this.camYaw;
     if (this.aiming || (p.weapon !== 'fist' && inp.fire)) p.yaw = this.camYaw;
     else if (this.cover) p.yaw += wrapAngle(Math.atan2(-this.cover.nx, -this.cover.nz) + Math.PI - p.yaw) * clamp(10 * dt, 0, 1);
-    else if (ml > 0) p.yaw += wrapAngle(Math.atan2(mx, mz) - p.yaw) * clamp(12 * dt, 0, 1);
+    else if (ml > 0 && !this.fp) p.yaw += wrapAngle(Math.atan2(mx, mz) - p.yaw) * clamp(12 * dt, 0, 1);
     // jump
     if (inp.hit('Space') && p.onGround && !p.swimming && !p.inCover && !this.tryVault()) {
       p.vy = TUNING.jumpVel;
@@ -431,7 +444,7 @@ export class PlayerController {
       if (this.mouseIdle > 1.2) {
         const target = fwdSpeed < -2 ? v.heading + Math.PI : v.heading;
         this.camYaw += wrapAngle(target - this.camYaw) * clamp(dt * (2 + sp * 0.06), 0, 1);
-        this.camPitch = damp(this.camPitch, v.isBoat ? 0.2 : 0.16, 2, dt);
+        this.camPitch = damp(this.camPitch, this.fp ? 0.04 : v.isBoat ? 0.2 : 0.16, 2, dt);
       }
       dist = v.spec.len * 0.85 + 3.4 + Math.min(sp, 40) * 0.05;
       height = v.spec.hgt + 0.6;
@@ -474,6 +487,47 @@ export class PlayerController {
     if (this.camPos.y < gy) this.camPos.y = gy;
     cam.position.copy(this.camPos);
     cam.lookAt(px + lx * 10, py + ly * 10, pz + lz * 10);
+    // first person: the eyes, on foot or in the driver's seat (not in the helicopter)
+    const fpOn = this.fp && !air && !p.dead && !p.swimming;
+    g.skinned.hideId = fpOn ? p.id : -1;
+    // from inside, your own car's tinted glass would be a dark mirror: drop it while you look out through it
+    const glassCar = fpOn && v ? v : null;
+    if (this.clearGlass !== glassCar) {
+      if (this.clearGlass) {
+        const ms = this.clearGlass.body.material as THREE.Material[];
+        if (Array.isArray(ms) && this.savedGlass) ms[3] = this.savedGlass;
+      }
+      this.clearGlass = glassCar;
+      this.savedGlass = null;
+      if (glassCar) {
+        const ms = glassCar.body.material as THREE.Material[];
+        if (Array.isArray(ms) && ms.length > 3) {
+          this.savedGlass = ms[3];
+          ms[3] = NO_GLASS;
+        }
+      }
+    }
+    if (fpOn) {
+      const e = this.headV;
+      if (v && v.seat) {
+        const host = v.type === 'bike' || v.type === 'jetski' || v.type === 'airboat' ? v.body : v.root;
+        host.updateWorldMatrix(true, false);
+        const cabin = v.type !== 'bike' && v.type !== 'jetski' && v.type !== 'airboat' && v.type !== 'bus';
+        // a car: a 'bonnet' view from the top of the windscreen, ahead of the (blocky) cabin, out over the bonnet;
+        // on a bike or skiff: the rider's eyes over the seat
+        if (cabin && v.roofY > 0) e.set(0, v.roofY - 0.08, v.spec.len * 0.2);
+        else e.set(v.seat.x, v.seat.y + 1.12, v.seat.z + 0.05);
+        host.localToWorld(e);
+      } else e.set(p.pos.x + Math.sin(p.yaw) * 0.12, p.pos.y + 1.62, p.pos.z + Math.cos(p.yaw) * 0.12);
+      cam.position.copy(e);
+      cam.lookAt(e.x + lx * 10, e.y + ly * 10, e.z + lz * 10);
+      const ff = v ? 72 : 74;
+      if (Math.abs(cam.fov - ff) > 0.01 && this.aimW < 0.5) {
+        cam.fov = ff;
+        cam.updateProjectionMatrix();
+      }
+      return;
+    }
     if (Math.abs(cam.fov - this.fov) > 0.01) {
       cam.fov = this.fov;
       cam.updateProjectionMatrix();
