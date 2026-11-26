@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { box, cyl, merge, mergeGroups, prep } from '../core/geo';
 
-export type CarType = 'sedan' | 'sports' | 'suv' | 'pickup' | 'taxi' | 'police' | 'van' | 'bus' | 'bike' | 'ambulance' | 'boat';
+export type CarType = 'sedan' | 'sports' | 'suv' | 'pickup' | 'taxi' | 'police' | 'van' | 'bus' | 'bike' | 'ambulance' | 'boat' | 'jetski';
 
 export interface CarSpec {
   type: CarType;
@@ -34,6 +34,7 @@ export const SPECS: Record<CarType, CarSpec> = {
   bus: { type: 'bus', label: 'Palmera Transit Bus', len: 11.5, wid: 2.55, hgt: 3.1, mass: 11000, maxSpeed: 25, accel: 3.4, brake: 8, grip: 4.8, steer: 0.52, wheelbase: 6.4, wheelR: 0.5, wheelZ: 3.2, colors: [0x18a3a0, 0xe8743b, 0x2e6fbf], health: 3000 },
   ambulance: { type: 'ambulance', label: 'Palmera General Ambulance', len: 5.6, wid: 2.1, hgt: 2.5, mass: 3000, maxSpeed: 42, accel: 7, brake: 13, grip: 6, steer: 0.58, wheelbase: 3.5, wheelR: 0.38, wheelZ: 1.8, colors: [0xf6f6f2], health: 1800 },
   bike: { type: 'bike', label: 'Sprint 750', len: 2.1, wid: 0.8, hgt: 1.2, mass: 230, maxSpeed: 58, accel: 12, brake: 15, grip: 7.5, steer: 0.5, wheelbase: 1.4, wheelR: 0.32, wheelZ: 0.7, colors: [0xd62828, 0x111111, 0xf2f2f2, 0x1f6fd1, 0xf2b705, 0x2a9d4a], health: 500 },
+  jetski: { type: 'jetski', label: 'Wavecat 900', len: 3.1, wid: 1.15, hgt: 1.0, mass: 380, maxSpeed: 27, accel: 10, brake: 7, grip: 2.4, steer: 1.4, wheelbase: 2, wheelR: 0, wheelZ: 0, colors: [0xffd23f, 0xff3b6b, 0x22c7e8, 0x7cff3a, 0xffffff], health: 420 },
   boat: { type: 'boat', label: 'Reef Runner', len: 7.0, wid: 2.4, hgt: 1.6, mass: 1800, maxSpeed: 30, accel: 6, brake: 6, grip: 1.6, steer: 1.0, wheelbase: 4, wheelR: 0, wheelZ: 0, colors: [0xffffff, 0x1f4e79, 0xc0392b], health: 1200 },
 };
 
@@ -191,6 +192,36 @@ export function carModel(type: CarType): CarModel {
       detail.push(box(W * 0.6, 0.32, 0.04, 0, 0.95, L / 2 + 0.01, CHROME));
       lamps(spec, 1.0, 1.1, lamp);
       geo = mergeGroups([paint, detail, lamp]);
+      break;
+    }
+    case 'jetski': {
+      // a short V hull, a long padded seat, a bonnet and handlebars
+      const paint: THREE.BufferGeometry[] = [], detail: THREE.BufferGeometry[] = [], lamp: THREE.BufferGeometry[] = [];
+      const shape = new THREE.Shape();
+      const hw = W / 2, hl = L / 2;
+      shape.moveTo(-hw, -hl);
+      shape.lineTo(hw, -hl);
+      shape.lineTo(hw, hl * 0.2);
+      shape.quadraticCurveTo(hw * 0.7, hl * 0.85, 0, hl);
+      shape.quadraticCurveTo(-hw * 0.7, hl * 0.85, -hw, hl * 0.2);
+      shape.lineTo(-hw, -hl);
+      const hull = new THREE.ExtrudeGeometry(shape, { depth: 0.55, bevelEnabled: false, curveSegments: 6 });
+      hull.rotateX(Math.PI / 2);
+      hull.translate(0, 0.42, 0);
+      const hp = hull.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < hp.count; i++) if (hp.getY(i) < 0) hp.setX(i, hp.getX(i) * 0.4);
+      hull.computeVertexNormals();
+      paint.push(prep(hull, 0xffffff));
+      detail.push(box(W * 1.02, 0.08, L * 0.75, 0, 0.15, -L * 0.08, 0x1b1d22));
+      detail.push(box(0.42, 0.2, 1.3, 0, 0.55, -0.35, 0x202226));
+      paint.push(box(0.8, 0.22, 0.7, 0, 0.55, 0.65, 0xffffff));
+      detail.push(box(0.08, 0.32, 0.08, 0, 0.78, 0.45, 0x2a2c30));
+      detail.push(box(0.7, 0.05, 0.06, 0, 0.94, 0.42, 0x2a2c30));
+      detail.push(slab(0.5, 0.16, 0.04, 0, 0.82, 0.82, 0x6f8fa0, 0.7));
+      lamp.push(box(0.1, 0.05, 0.04, 0, 0.6, hl * 0.86, 0xfff4d8));
+      geo = mergeGroups([paint, detail, lamp]);
+      model.wheels = [];
+      model.wheelGeo = null;
       break;
     }
     case 'boat': {

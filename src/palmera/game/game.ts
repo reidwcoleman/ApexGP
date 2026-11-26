@@ -9,7 +9,7 @@ import { Vehicle, collideVehicles, type VehicleEvents } from '../entities/vehicl
 import { carModel } from '../entities/carModels';
 import { Hud } from '../ui/hud';
 import { City } from '../world/city';
-import { BEACH, CityMap, WATER_Y, groundAt, groundBase, regionAt, type Box } from '../world/map';
+import { BEACH, CityMap, WATER_Y, groundAt, groundBase, isWater, regionAt, type Box } from '../world/map';
 import { SkySystem } from '../world/sky';
 import { Water } from '../world/water';
 import { glowTexture } from '../world/textures';
@@ -206,6 +206,16 @@ export class Game {
     this.boat.place(428, 235.5, Math.PI / 2);
     this.boat.persistent = true;
     this.addVehicle(this.boat);
+    // jet skis for hire, moored just past the surf off the main beach
+    for (const [z, c] of [[-168, 0xffd23f], [-162, 0xff3b6b], [-156, 0x22c7e8]] as [number, number][]) {
+      const j = new Vehicle('jetski', c);
+      // the first spot out from the surf that counts as open water (a hull in the shallows is beached)
+      let x = 744;
+      while (!isWater(x, z) && x < 800) x += 1;
+      j.place(x + 2, z, Math.PI / 2);
+      j.persistent = true;
+      this.addVehicle(j);
+    }
     const bm = carModel('boat');
     const moored = new THREE.InstancedMesh(bm.geo, [new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 }), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4 }), new THREE.MeshBasicMaterial({ vertexColors: true })] as unknown as THREE.Material, this.map.moored.length);
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
@@ -745,7 +755,8 @@ export class Game {
         if (Math.abs(lx) > hw || Math.abs(lz) > hl) continue;
         // relative velocity of the car towards the person
         const vrel = Math.hypot(v.vx - h.vx, v.vz - h.vz);
-        if (vrel > 4.5 && !h.dead) {
+        // only a moving vehicle knocks people down (running into a parked one, or wading up to a jet ski, does not)
+        if (vrel > 4.5 && Math.hypot(v.vx, v.vz) > 3 && !h.dead) {
           const dmg = vrel * (h === this.player ? 3.5 : 6.5);
           const killed = h.hurt(dmg, v.pos.x - v.vx, v.pos.z - v.vz, 0);
           h.vx = v.vx * 0.9 + (Math.random() - 0.5) * 3;

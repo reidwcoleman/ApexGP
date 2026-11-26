@@ -119,6 +119,8 @@ export class Vehicle {
     this.body.receiveShadow = true;
     this.root.add(this.body);
     if (kitM) this.seat = kitM.seat;
+    // a jet ski's rider sits astride, out in the open
+    if (type === 'jetski') this.seat = new THREE.Vector3(0, 0.62, -0.3);
     if (kitM) {
       model.sirenRed && (this.sirenPos = [new THREE.Vector3(-0.3, kitM.roofY + 0.07, -0.25), new THREE.Vector3(0.3, kitM.roofY + 0.07, -0.25)]);
     }
@@ -403,7 +405,7 @@ export class Vehicle {
   }
 
   get isBoat() {
-    return this.type === 'boat';
+    return this.type === 'boat' || this.type === 'jetski';
   }
   get speed() {
     return Math.hypot(this.vx, this.vz);

@@ -96,7 +96,7 @@ export class SkinnedCrowd {
     if (this.seatT <= 0) {
       this.seatT = 0.3;
       const cands = vehicles
-        .filter((v) => v.seat && !v.wrecked && !v.isBoat && (v.driver === 'npc' || v.driver === 'player' || v.occupants > 0))
+        .filter((v) => v.seat && !v.wrecked && (!v.isBoat || v.type === 'jetski') && (v.driver === 'npc' || v.driver === 'player' || v.occupants > 0))
         .map((v) => ({ v, d: (v.pos.x - cam.x) ** 2 + (v.pos.z - cam.z) ** 2 }))
         .filter((c) => c.d < 55 * 55 || c.v.driver === 'player')
         .sort((a, b) => a.d - b.d)
@@ -125,7 +125,7 @@ export class SkinnedCrowd {
           p.root.position.copy(v.seat!);
           if (i === 1) p.root.position.x *= -1;
           p.play('sit', { offset: (v.vid % 100) / 100 });
-          (v.type === 'bike' ? v.body : v.root).add(p.root);
+          (v.type === 'bike' || v.type === 'jetski' ? v.body : v.root).add(p.root);
           ps.push(p);
         }
         this.seated.set(v, { p: ps, key });
