@@ -267,6 +267,12 @@ export class SkinnedCrowd {
     const lounge = h.state === 'lounge' ? 1 : 0;
     p.root.position.set(h.pos.x - Math.sin(h.yaw) * lounge * 0.25, h.pos.y + lie * 0.12 + (h.swimming ? -1.15 : 0) + lounge * 0.38, h.pos.z - Math.cos(h.yaw) * lounge * 0.25);
     p.root.rotation.set(towel ? -Math.PI / 2 : -lie * 1.5 - lounge * 0.75, h.yaw, 0, 'YXZ');
+    // vaulting: lean into it, and roll onto a hip across a car bonnet
+    if (h.vaultU >= 0) {
+      const k = Math.sin(h.vaultU * Math.PI);
+      p.root.rotation.x += 0.35 * k;
+      p.root.rotation.z = h.vaultRoll * k;
+    }
     // past 45 m the skeleton is updated every other frame (twice the step), which nobody can see
     const far = h.kind !== 'player' && s.p.root.position.distanceToSquared(this.lastCam) > 45 * 45;
     // people lying or sitting still (towels, loungers, benches) barely move: a quarter of the frames

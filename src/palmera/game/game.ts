@@ -94,7 +94,7 @@ export class Game {
   private overlayT = 0;
   private overlayKind: 'dead' | 'busted' | '' = '';
   private titleT = 0;
-  private tmpBoxes: Box[] = [];
+  readonly tmpBoxes: Box[] = [];
   private prTimer = 0;
   private prFrames = 0;
   private pixelRatio: number;
@@ -656,7 +656,7 @@ export class Game {
         h.vx = h.vz = 0;
         continue;
       }
-      if (h.hidden) continue;
+      if (h.hidden || h.vaultU >= 0) continue;
       const isP = h === this.player;
       const incap = h.dead || h.down > 0;
       if (incap) {
@@ -725,6 +725,15 @@ export class Game {
         if (vn < 0) {
           h.vx -= vn * res.nx;
           h.vz -= vn * res.nz;
+        }
+        // people walk round a planter or bin rather than into it: step aside the nearer way
+        if (res.small && !isP) {
+          let tx = -res.nz, tz = res.nx;
+          const side = tx * h.dvx + tz * h.dvz;
+          if (side < 0 || (Math.abs(side) < 0.2 && h.id % 2)) { tx = -tx; tz = -tz; }
+          const want = Math.max(1.2, Math.hypot(h.dvx, h.dvz));
+          h.vx += tx * want * 0.6;
+          h.vz += tz * want * 0.6;
         }
       }
     }

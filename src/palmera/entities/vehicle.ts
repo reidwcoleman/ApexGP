@@ -608,7 +608,8 @@ export class Vehicle {
     const y0 = this.pos.y + (this.isBoat ? -0.5 : 0.25), y1 = this.pos.y + this.spec.hgt;
     for (let k = 0; k < 3; k++) {
       const c = cs[k];
-      const res = colliders.resolveCircle(c.x, c.z, c.r, y0, y1, tmpBoxes);
+      // cars roll over street furniture rather than stopping dead on a planter
+      const res = colliders.resolveCircle(c.x, c.z, c.r, y0, y1, tmpBoxes, true);
       if (!res) continue;
       const dx = res.x - c.x, dz = res.z - c.z;
       this.pos.x += dx;

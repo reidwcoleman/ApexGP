@@ -108,6 +108,8 @@ export interface Box {
   y0: number;
   y1: number;
   stamp: number;
+  /** street furniture (planters, bins, hydrants): blocks people, not cars or the camera */
+  small?: boolean;
 }
 
 export interface RayHit {
@@ -135,8 +137,8 @@ export class ColliderGrid {
     for (let i = 0; i < this.nx * this.nz; i++) this.cells.push([]);
   }
 
-  add(x0: number, z0: number, x1: number, z1: number, y0: number, y1: number): Box {
-    const b: Box = { x0, z0, x1, z1, y0, y1, stamp: 0 };
+  add(x0: number, z0: number, x1: number, z1: number, y0: number, y1: number, small = false): Box {
+    const b: Box = { x0, z0, x1, z1, y0, y1, stamp: 0, small };
     this.boxes.push(b);
     const cx0 = this.cx(x0), cx1 = this.cx(x1), cz0 = this.cz(z0), cz1 = this.cz(z1);
     for (let i = cx0; i <= cx1; i++) for (let j = cz0; j <= cz1; j++) this.cells[j * this.nx + i].push(b);
@@ -169,16 +171,17 @@ export class ColliderGrid {
   }
 
   /** Push a circle out of boxes overlapping the vertical range [y0,y1]. Returns push vector or null. */
-  resolveCircle(x: number, z: number, r: number, y0: number, y1: number, tmp: Box[]): { x: number; z: number; nx: number; nz: number } | null {
+  resolveCircle(x: number, z: number, r: number, y0: number, y1: number, tmp: Box[], skipSmall = false): { x: number; z: number; nx: number; nz: number; small: boolean } | null {
     this.query(x - r, z - r, x + r, z + r, tmp);
-    let px = x, pz = z, hit = false, nx = 0, nz = 0;
+    let px = x, pz = z, hit = false, nx = 0, nz = 0, small = false;
     for (const b of tmp) {
-      if (b.y1 <= y0 || b.y0 >= y1) continue;
+      if (b.y1 <= y0 || b.y0 >= y1 || (skipSmall && b.small)) continue;
       const cx = clamp(px, b.x0, b.x1), cz = clamp(pz, b.z0, b.z1);
       let dx = px - cx, dz = pz - cz;
       const d2 = dx * dx + dz * dz;
       if (d2 >= r * r) continue;
       hit = true;
+      if (b.small) small = true;
       if (d2 > 1e-8) {
         const d = Math.sqrt(d2);
         dx /= d;
@@ -199,11 +202,11 @@ export class ColliderGrid {
     }
     if (!hit) return null;
     const nl = Math.hypot(nx, nz) || 1;
-    return { x: px, z: pz, nx: nx / nl, nz: nz / nl };
+    return { x: px, z: pz, nx: nx / nl, nz: nz / nl, small };
   }
 
   /** 3D ray against boxes using a 2D DDA over the grid. */
-  raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): RayHit | null {
+  raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number, skipSmall = false): RayHit | null {
     const s = ++this.stamp;
     let best: RayHit | null = null;
     let cx = Math.floor((ox - this.ox) / this.cell);
@@ -223,6 +226,7 @@ export class ColliderGrid {
           const b = c[k];
           if (b.stamp === s) continue;
           b.stamp = s;
+          if (skipSmall && b.small) continue;
           const h = rayBox(ox, oy, oz, dx, dy, dz, b);
           if (h && h.t <= maxT && (!best || h.t < best.t)) best = h;
         }

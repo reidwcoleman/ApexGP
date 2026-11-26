@@ -48,7 +48,7 @@ export class Club {
     this.out.set(Math.sin(f.yaw), 0, Math.cos(f.yaw));
     // find the wall people actually see: a ray in from the street; the door is just in front of it
     const sx = f.p.x + this.out.x * 8, sz = f.p.z + this.out.z * 8;
-    const hit = map.colliders.raycast(sx, 1, sz, -this.out.x, 0, -this.out.z, 16);
+    const hit = map.colliders.raycast(sx, 1, sz, -this.out.x, 0, -this.out.z, 16, true);
     const t = hit ? hit.t : 8 - 0.2;
     this.door.set(sx - this.out.x * (t - 0.6), 0, sz - this.out.z * (t - 0.6));
     this.buildFront(f.yaw);

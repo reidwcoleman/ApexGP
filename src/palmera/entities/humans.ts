@@ -35,6 +35,10 @@ export class Human {
   outfit: import('../game/wardrobe').Outfit | null = null;
   /** crouched behind something (the player, in a gunfight) */
   inCover = false;
+  /** 0-1 through a vault over a wall, planter or car bonnet (-1: not vaulting) */
+  vaultU = -1;
+  /** sideways roll of a bonnet slide */
+  vaultRoll = 0;
   /** an open umbrella (its canopy colour) held up in the rain, or null */
   umbrella: number | null = null;
   armor = 0;

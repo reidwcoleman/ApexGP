@@ -109,6 +109,10 @@ export class PlayerController {
     const g = this.game;
     const inp = g.input;
     const p = g.player;
+    if (this.vault) {
+      this.stepVault(dt);
+      return;
+    }
     if (this.enterT > 0) {
       // walking to the door
       this.enterT -= dt;
@@ -192,7 +196,7 @@ export class PlayerController {
     else if (this.cover) p.yaw += wrapAngle(Math.atan2(-this.cover.nx, -this.cover.nz) + Math.PI - p.yaw) * clamp(10 * dt, 0, 1);
     else if (ml > 0) p.yaw += wrapAngle(Math.atan2(mx, mz) - p.yaw) * clamp(12 * dt, 0, 1);
     // jump
-    if (inp.hit('Space') && p.onGround && !p.swimming && !p.inCover) {
+    if (inp.hit('Space') && p.onGround && !p.swimming && !p.inCover && !this.tryVault()) {
       p.vy = TUNING.jumpVel;
       p.onGround = false;
       g.audio.whoosh();
@@ -264,6 +268,103 @@ export class PlayerController {
       v.damage(p.weapon === 'bat' ? 30 : 4);
       g.audio.punch();
       if (v.police) g.onVehicleAttacked(v);
+    }
+  }
+
+  /** an arc from where you stand, over the obstacle, to the ground beyond it */
+  private vault: { t: number; dur: number; x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; top: number; fx: number; fz: number; sp: number } | null = null;
+
+  /**
+   * Space in front of something low and thin (a bench, planter, low wall, railing, a parked car)
+   * vaults over it instead of jumping into it. Checks the far side is clear ground.
+   */
+  private tryVault(): boolean {
+    const g = this.game;
+    const p = g.player;
+    const map = g.map.colliders;
+    // the way you're moving, else the way you face
+    const hs = Math.hypot(p.vx, p.vz);
+    const fx = hs > 1 ? p.vx / hs : Math.sin(p.yaw), fz = hs > 1 ? p.vz / hs : Math.cos(p.yaw);
+    let top = 0, exit = 0, car = false;
+    // a parked or slow car just ahead: slide across it (only across, never along its length)
+    const ahead = new THREE.Vector3(p.pos.x + fx * 1.6, p.pos.y, p.pos.z + fz * 1.6);
+    const v = g.nearestVehicle(ahead, 1.2);
+    if (v && !v.isBoat && v.speed < 3 && v.spec.hgt < 1.9) {
+      const c = Math.cos(v.heading), s = Math.sin(v.heading);
+      const dx = p.pos.x - v.pos.x, dz = p.pos.z - v.pos.z;
+      const lx = dx * c - dz * s, lz = dx * s + dz * c;
+      const ux = fx * c - fz * s, uz = fx * s + fz * c;
+      const hw = v.spec.wid / 2 + 0.1, hl = v.spec.len / 2 + 0.1;
+      const slab = (o: number, d: number, h: number): [number, number] => (Math.abs(d) < 1e-6 ? (Math.abs(o) < h ? [-1e9, 1e9] : [1e9, -1e9]) : [Math.min((-h - o) / d, (h - o) / d), Math.max((-h - o) / d, (h - o) / d)]);
+      const [ax0, ax1] = slab(lx, ux, hw), [az0, az1] = slab(lz, uz, hl);
+      const t0 = Math.max(ax0, az0), t1 = Math.min(ax1, az1);
+      if (t0 < t1 && t0 > -0.3 && t0 < 2.6 && t1 - Math.max(0, t0) < 3.2) {
+        exit = t1;
+        // over the bonnet or boot it's lower than over the roof
+        const mid = lz + uz * (t0 + t1) / 2;
+        top = v.pos.y + v.spec.hgt * (Math.abs(mid) > v.spec.len * 0.22 ? 0.62 : 1.0);
+        car = true;
+      }
+    }
+    if (!car) {
+      const hit = map.raycast(p.pos.x, p.pos.y + 0.45, p.pos.z, fx, 0, fz, 2.2);
+      const b = hit?.box;
+      if (!hit || !b) return false;
+      const rise = b.y1 - p.pos.y;
+      if (rise < 0.3 || rise > 1.45 || b.y0 > p.pos.y + 0.4) return false;
+      // through the box from where the ray met it
+      const ex = p.pos.x + fx * hit.t, ez = p.pos.z + fz * hit.t;
+      const tx = fx > 1e-6 ? (b.x1 - ex) / fx : fx < -1e-6 ? (b.x0 - ex) / fx : 1e9;
+      const tz = fz > 1e-6 ? (b.z1 - ez) / fz : fz < -1e-6 ? (b.z0 - ez) / fz : 1e9;
+      const depth = Math.min(tx, tz);
+      if (depth > 2.4) return false;
+      // head room over it (nothing else at chest height just past the edge)
+      if (map.raycast(p.pos.x, b.y1 + 0.5, p.pos.z, fx, 0, fz, hit.t + depth + 0.6)) return false;
+      top = b.y1;
+      exit = hit.t + depth;
+    }
+    const lx = p.pos.x + fx * (exit + 0.55), lz = p.pos.z + fz * (exit + 0.55);
+    const ly = groundAt(lx, lz, p.pos.y + 1.5);
+    if (Math.abs(ly - p.pos.y) > 1.6 || ly < WATER_Y - 0.3) return false;
+    if (map.resolveCircle(lx, lz, 0.35, ly + 0.35, ly + 1.8, g.tmpBoxes)) return false;
+    if (g.nearestVehicle(new THREE.Vector3(lx, ly, lz), 0.3)) return false;
+    const dist = exit + 0.55;
+    this.vault = { t: 0, dur: 0.32 + dist * 0.07 + (top - p.pos.y) * 0.08, x0: p.pos.x, y0: p.pos.y, z0: p.pos.z, x1: lx, y1: ly, z1: lz, top, fx, fz, sp: clamp(hs, 2.5, 6) };
+    p.yaw = Math.atan2(fx, fz);
+    p.vaultRoll = car ? 0.55 : 0;
+    p.vaultU = 0;
+    p.onGround = false;
+    p.vx = p.vz = p.vy = 0;
+    g.audio.whoosh();
+    return true;
+  }
+
+  private stepVault(dt: number) {
+    const g = this.game;
+    const p = g.player;
+    const vt = this.vault!;
+    if (p.dead || p.down > 0 || p.vehicle) {
+      this.vault = null;
+      p.vaultU = -1;
+      return;
+    }
+    vt.t += dt;
+    const u = Math.min(1, vt.t / vt.dur);
+    const e = u * u * (3 - 2 * u);
+    const base = lerp(vt.y0, vt.y1, e);
+    // the feet clear the top with a little to spare at the middle of the arc
+    const lift = Math.max(0, vt.top + 0.12 - (vt.y0 + vt.y1) / 2);
+    p.pos.set(lerp(vt.x0, vt.x1, e), base + 4 * e * (1 - e) * lift, lerp(vt.z0, vt.z1, e));
+    p.vaultU = u;
+    if (u >= 1) {
+      this.vault = null;
+      p.vaultU = -1;
+      p.vaultRoll = 0;
+      p.pos.y = vt.y1;
+      p.onGround = true;
+      // carry on at the speed you came in with
+      p.vx = vt.fx * vt.sp;
+      p.vz = vt.fz * vt.sp;
     }
   }
 
@@ -362,7 +463,7 @@ export class PlayerController {
     // pivot shifted to the shoulder
     const px = this.camTarget.x + rx * side, pz = this.camTarget.z + rz * side, py = this.camTarget.y;
     let d = this.camDist;
-    const hit = g.map.colliders.raycast(px, py, pz, -lx, -ly, -lz, d + 0.3);
+    const hit = g.map.colliders.raycast(px, py, pz, -lx, -ly, -lz, d + 0.3, true);
     if (hit) d = Math.max(0.6, hit.t - 0.3);
     this.camPos.set(px - lx * d, py - ly * d, pz - lz * d);
     // keep the camera out of the sea (but not out of the walk-in stores below the street)

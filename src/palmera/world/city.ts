@@ -1030,6 +1030,16 @@ export class City {
     }
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.15 });
     const glassy = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.9 });
+    // solid street furniture: you bump into planters, bins, hydrants and news boxes (and can vault them)
+    const SOLID: Partial<Record<FurnitureKind, [number, number]>> = { planter: [0.5, 1.0], bin: [0.3, 0.95], hydrant: [0.2, 0.75], news: [0.3, 1.15] };
+    const pv = new THREE.Vector3();
+    for (const it of items) {
+      const sz = SOLID[it.kind];
+      if (!sz) continue;
+      pv.setFromMatrixPosition(it.m);
+      const r = sz[0];
+      this.map.colliders.add(pv.x - r, pv.z - r, pv.x + r, pv.z + r, pv.y - 0.2, pv.y + sz[1], true);
+    }
     for (const [kind, list] of by) {
       chunked(this.scene, this.chunks, list, furnitureGeometry(kind), kind === 'shelter' ? glassy : mat, { far: kind === 'shelter' || kind === 'sign' ? 380 : 220, shadow: true });
     }
