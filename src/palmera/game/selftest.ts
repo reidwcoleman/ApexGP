@@ -77,7 +77,23 @@ export async function runSelfTest(game: Game): Promise<SelfTestResult> {
   // (clear the street first: cars within 60 m, since one arriving at speed during the 2 s drive could hit the test car; people within 25 m)
   for (const u of [...game.vehicles]) if (u.driver !== 'player' && Math.hypot(u.pos.x - p.pos.x, u.pos.z - p.pos.z) < 60) game.removeVehicle(u);
   for (const h of [...game.npcs]) if (Math.hypot(h.pos.x - p.pos.x, h.pos.z - p.pos.z) < 25) game.removeNpc(h);
-  const car = game.spawnCar('sedan', p.pos.x - fz * 6.0, p.pos.z + fx * 6.0, p.yaw); // on the quiet side, clear of palms
+  // in the right-hand lane of the nearest long straight road, pointing along it (it used to be parked
+  // 6 m beside wherever the player stood, on the player's heading - some runs that was nose-up against
+  // a building and the car 'drove 0.0 m')
+  const map = game.map;
+  let best = { d: 1e9, x: p.pos.x, z: p.pos.z, h: p.yaw };
+  for (const e of map.edges) {
+    const A = map.nodes[e.a], B = map.nodes[e.b];
+    const len = Math.hypot(B.x - A.x, B.z - A.z);
+    if (len < 60) continue;
+    const dx = (B.x - A.x) / len, dz = (B.z - A.z) / len;
+    const x = A.x + dx * 20 - dz * 3, z = A.z + dz * 20 + dx * 3;
+    const d = Math.hypot(x - p.pos.x, z - p.pos.z);
+    if (d < best.d && !map.colliders.raycast(x, groundAt(x, z) + 0.8, z, dx, 0, dz, 25, true)) best = { d, x, z, h: Math.atan2(dx, dz) };
+  }
+  for (const u of [...game.vehicles]) if (u.driver !== 'player' && Math.hypot(u.pos.x - best.x, u.pos.z - best.z) < 60) game.removeVehicle(u);
+  for (const h of [...game.npcs]) if (Math.hypot(h.pos.x - best.x, h.pos.z - best.z) < 25) game.removeNpc(h);
+  const car = game.spawnCar('sedan', best.x, best.z, best.h);
   car.persistent = true;
   await waitGame(game, 0.2);
   // step towards it like a player would
@@ -94,7 +110,14 @@ export async function runSelfTest(game: Game): Promise<SelfTestResult> {
   const entered = p.vehicle === car;
   const c0x = car.pos.x, c0z = car.pos.z;
   inp.virtual.add('KeyW');
-  await waitGame(game, 2.0);
+  await waitGame(game, 1.0);
+  // what the car is doing half way (for a failure report)
+  let near = '';
+  for (const u of game.vehicles) if (u !== car && Math.hypot(u.pos.x - car.pos.x, u.pos.z - car.pos.z) < 8) near += u.type + '@' + Math.hypot(u.pos.x - car.pos.x, u.pos.z - car.pos.z).toFixed(1) + ' ';
+  const ahead = game.map.colliders.raycast(car.pos.x, car.pos.y + 0.8, car.pos.z, car.fwdX(), 0, car.fwdZ(), 20, true);
+  near += ahead ? `wall@${ahead.t.toFixed(1)}` : '';
+  const mid = `[hand ${car.input.hand} sink ${car.sinking} hp ${Math.round(car.health)} thr ${car.input.thr.toFixed(2)} drv ${car.driver} pv ${p.vehicle === car} air ${car.airborne} wreck ${car.wrecked} y ${car.pos.y.toFixed(2)} g ${groundAt(car.pos.x, car.pos.z, car.pos.y + 1).toFixed(2)} sp ${car.speed.toFixed(1)} near ${near || '-'} at ${car.pos.x.toFixed(0)},${car.pos.z.toFixed(0)}]`;
+  await waitGame(game, 1.0);
   inp.virtual.delete('KeyW');
   const drove = Math.hypot(car.pos.x - c0x, car.pos.z - c0z);
   const topSpeed = car.speed;
@@ -104,7 +127,7 @@ export async function runSelfTest(game: Game): Promise<SelfTestResult> {
   steps.push({
     step: 'act',
     passed: jumped > 0.4 && punched && fired && entered && drove > 5,
-    detail: `${[jumped > 0.4 ? '' : 'jump', punched ? '' : 'punch', fired ? '' : 'pistol', entered ? '' : 'enter', drove > 5 ? '' : 'drive'].filter(Boolean).map((x) => 'FAILED-' + x + ' ').join('')}jumped ${jumped.toFixed(2)} m, punch ${punched ? 'hit' : 'missed'} (ped hp ${h0}->${Math.round(ped.health)}), pistol ${fired ? 'fired' : 'did not fire'}, entered car ${entered}, drove ${drove.toFixed(1)} m reaching ${(topSpeed * 2.237).toFixed(0)} mph, exited ${exited}`,
+    detail: `${[jumped > 0.4 ? '' : 'jump', punched ? '' : 'punch', fired ? '' : 'pistol', entered ? '' : 'enter', drove > 5 ? '' : 'drive'].filter(Boolean).map((x) => 'FAILED-' + x + ' ').join('')}jumped ${jumped.toFixed(2)} m, punch ${punched ? 'hit' : 'missed'} (ped hp ${h0}->${Math.round(ped.health)}), pistol ${fired ? 'fired' : 'did not fire'}, entered car ${entered}, drove ${drove.toFixed(1)} m reaching ${(topSpeed * 2.237).toFixed(0)} mph, exited ${exited}${drove > 5 ? '' : ' ' + mid}`,
   });
 
   // ---- wanted: punching raised heat?
