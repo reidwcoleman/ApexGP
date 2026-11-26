@@ -31,6 +31,8 @@ export class Human {
   injured = false;
   /** a spot to hold (officers at a roadblock) */
   post: THREE.Vector3 | null = null;
+  /** the player's clothes (Threadline) */
+  outfit: import('../game/wardrobe').Outfit | null = null;
   armor = 0;
   dead = false;
   down = 0; // seconds left lying down

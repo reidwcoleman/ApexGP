@@ -21,6 +21,8 @@ interface SaveData {
   time: number;
   radio: number;
   pos: { x: number; z: number } | null;
+  clothes?: string[];
+  wearing?: string;
 }
 
 export class SaveGame {
@@ -67,6 +69,8 @@ export class SaveGame {
       time: g.sky.time,
       radio: g.audio.radio.station,
       pos: this.spot() ?? old?.pos ?? null,
+      clothes: [...g.wardrobe.owned],
+      wearing: g.wardrobe.wearing,
     };
     try {
       localStorage.setItem(KEY, JSON.stringify(d));
@@ -105,6 +109,11 @@ export class SaveGame {
     let guard = 0;
     while (r.station !== d.radio && guard++ < 8) r.tune(1);
     if (d.pos) g.teleport(d.pos.x, d.pos.z);
+    if (d.clothes) g.wardrobe.owned = new Set(d.clothes);
+    if (d.wearing) {
+      g.wardrobe.wearing = d.wearing;
+      g.wardrobe.apply(d.wearing);
+    }
     g.hud.toast(`Welcome back · $${d.cash.toLocaleString()} · ${d.done.length} job${d.done.length === 1 ? '' : 's'} done`);
     return true;
   }

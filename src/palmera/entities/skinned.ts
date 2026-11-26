@@ -136,8 +136,12 @@ export class SkinnedCrowd {
     const r = Math.random;
     const shirt = '#' + h.shirt.getHexString();
     const pants = '#' + h.pants.getHexString();
-    if (h.kind === 'player')
+    if (h.kind === 'player') {
+      const o = h.outfit;
+      if (o)
+        return { female: false, tone: 0.4, body: 'Male_Adult_08', hair: 'none', hairColor: 0x2a1d14, top: o.top, topColor: o.topColor, top2: o.top2, accent: 0x111111, tint: 0.85, bottom: o.bottom, bottomColor: o.bottomColor, shoeColor: 0x1b1b1d, cap: o.cap ?? null, height: 1.0 };
       return { female: false, tone: 0.4, body: 'Male_Adult_08', hair: 'none', hairColor: 0x2a1d14, top: 'tshirt', topColor: shirt, tint: 0.85, bottom: 'jeans', bottomColor: 0x2d3f63, height: 1.0 };
+    }
     if (h.kind === 'cop') {
       const female = r() < 0.25;
       return { female, tone: r(), top: 'polo', topColor: 0x2c4a78, top2: 0x2c4a78, accent: 0x0d0e10, bottom: 'trousers', bottomColor: 0x1d2433, shoeColor: 0x0b0b0c, cap: 0x1d2433, hair: 'none', hairColor: 0x1a120c };
@@ -150,6 +154,17 @@ export class SkinnedCrowd {
       top: 'tshirt', topColor: shirt, tint: h.id % 5 === 0 ? 0 : 0.6 + ((h.id * 0.13) % 0.4),
       bottom: 'jeans', bottomColor: pants, height: 0.95 + ((h.id * 0.071) % 0.1), build: 0.97 + ((h.id * 0.053) % 0.07),
     };
+  }
+
+  /** rebuild someone's figure (new clothes): the slot is dropped and made again next update */
+  restyle(h: Human) {
+    const s = this.slots.get(h.id);
+    if (!s) return;
+    this.scene.remove(s.p.root);
+    if (s.gun) this.scene.remove(s.gun);
+    s.p.dispose();
+    this.slots.delete(h.id);
+    this.reassignT = 0;
   }
 
   private make(h: Human): Slot {
