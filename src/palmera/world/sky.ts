@@ -315,8 +315,19 @@ export class SkySystem {
     }
   }
 
+  /** morning mist: how thick it is on this day (0 on clear mornings), and how much is out now */
+  mistDay = 0;
+  mist = 0;
+  forceMist = false;
+
   update(dt: number, focus: THREE.Vector3, camPos: THREE.Vector3, _renderer: THREE.WebGLRenderer, elapsed: number) {
+    const before = this.time;
     this.time = (this.time + dt * this.rate) % 24;
+    // a new day: some mornings come up misty
+    if (this.time < before) this.mistDay = Math.random() < 0.45 ? 0.55 + Math.random() * 0.45 : 0;
+    if (this.forceMist) this.mistDay = 1;
+    // it rises before dawn, lies thickest from 6 to 7:30 and burns off by about 9
+    this.mist = (this.mistDay * smoothstep(4.8, 6.0, this.time) * (1 - smoothstep(7.4, 9.2, this.time)));
     this.compute();
     const u = this.uniforms;
     u.uNight.value = this.night;
@@ -383,6 +394,14 @@ export class SkySystem {
     // haze sits low: from a rooftop or a helicopter you see through more of it
     fog.density /= 1 + Math.max(0, camPos.y - 25) / 85;
     fog.color.lerp(new THREE.Color(0.5, 0.53, 0.57).multiplyScalar(0.15 + 0.85 * this.day), rn * 0.8);
+    // morning mist: a pale, sun-warmed haze lying low over the streets and the water (thinning with height as above)
+    if (this.mist > 0.001) {
+      const m = this.mist * (1 - rn);
+      fog.density += m * 0.011 / (1 + Math.max(0, camPos.y - 12) / 30);
+      // and the sky goes milky toward the horizon
+      u.uGrey.value = Math.max(u.uGrey.value as number, m * 0.3);
+      fog.color.lerp(new THREE.Color(0.9, 0.84, 0.76).multiplyScalar(0.55 + 0.45 * this.day), m * 0.75);
+    }
     // exposure: keep the frame bright as the light falls (eyes adapt), but let night be night
     const e = this.sunDir.y;
     this.exposure = lerp(1, 1.5, 1 - smoothstep(-0.18, 0.2, e)) * lerp(1, 1.12, this.sunset);
