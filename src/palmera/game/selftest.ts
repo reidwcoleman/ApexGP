@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 // Scripted self-test of the core loop: move, act (jump, punch, shoot, drive), and HUD.
 import { Human } from '../entities/humans';
 import { groundAt } from '../world/map';
@@ -58,6 +59,8 @@ export async function runSelfTest(game: Game): Promise<SelfTestResult> {
   inp.press('Mouse0');
   await waitGame(game, 0.3);
   const punched = ped.health < h0;
+  // some people swing back now (reactions); take this one away so the rest of the test is deterministic
+  game.removeNpc(ped);
 
   // pistol: give one and fire
   game.loadout.owned.add('pistol');
@@ -79,6 +82,9 @@ export async function runSelfTest(game: Game): Promise<SelfTestResult> {
   inp.virtual.add('KeyD');
   await waitGame(game, 0.3);
   inp.virtual.delete('KeyD');
+  // stand at its door (traffic now includes vans, buses and bikes, so another vehicle can be nearer)
+  const door = car.doorPos(new THREE.Vector3());
+  p.pos.set(door.x, groundAt(door.x, door.z), door.z);
   await waitGame(game, 0.2);
   inp.press('KeyF');
   await waitGame(game, 1.6);

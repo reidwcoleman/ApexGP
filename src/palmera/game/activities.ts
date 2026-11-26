@@ -75,6 +75,7 @@ export class Activities {
   private destMarker: Marker;
   private nextFareT = 0;
   private cooldown = 0;
+  private hold = 0;
 
   constructor(private game: Game) {
     const nodes = game.map.nodes.filter((n) => n.edges.length >= 3);
@@ -260,13 +261,26 @@ export class Activities {
 
     // ---- a race start: roll in and stop
     if (car && !car.isBoat && !g.missions.active && this.cooldown <= 0 && !this.fare) {
+      let inCircle = false;
       this.starts.forEach((s, i) => {
         if (Math.hypot(s.node.x - car.pos.x, s.node.z - car.pos.z) < 6) {
+          inCircle = true;
           if (g.wanted.level > 0) g.hud.prompt('Lose the cops before racing');
-          else if (car.speed > 3) g.hud.prompt('Stop in the circle to race');
-          else this.startRace(i);
+          else if (car.speed > 1.5) {
+            this.hold = 0;
+            g.hud.prompt(`Stop in the circle to race · ${s.name}`);
+          } else {
+            // wait a moment, so stopping at this junction doesn't start a race by accident
+            this.hold += dt;
+            g.hud.prompt(`${s.name} starts in ${Math.ceil(2 - this.hold)}… drive off to cancel`);
+            if (this.hold >= 2) {
+              this.hold = 0;
+              this.startRace(i);
+            }
+          }
         }
       });
+      if (!inCircle) this.hold = 0;
     }
 
     // ---- taxi
