@@ -237,7 +237,7 @@ export class Hud {
     }
     // objective
     const obj = this.q('#objective');
-    const m = g.missions;
+    const m = g.missions.active ? g.missions : g.activities.active ? g.activities : g.missions;
     obj.classList.toggle('hidden', !m.active);
     if (m.active) {
       this.setText('#objective .t', m.title);

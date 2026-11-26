@@ -166,6 +166,9 @@ export class Life {
   think(h: Human, dt: number): boolean {
     const g = this.game;
     switch (h.state) {
+      case 'wait':
+        g.setDesired(h, 0, 0);
+        return true;
       case 'chat':
       case 'lounge':
       case 'towel':

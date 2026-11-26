@@ -27,6 +27,7 @@ import { Life } from './life';
 import { Ambient } from '../world/ambient';
 import { Heli } from './heli';
 import { Reactions } from './reactions';
+import { Activities } from './activities';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
 
@@ -88,6 +89,7 @@ export class Game {
   ambient!: Ambient;
   heli!: Heli;
   reactions!: Reactions;
+  activities!: Activities;
   rain!: Rain;
   wet = 0;
   private ambLight = new THREE.Color();
@@ -128,6 +130,7 @@ export class Game {
     this.ambient = new Ambient(this.scene);
     this.heli = new Heli(this);
     this.reactions = new Reactions(this);
+    this.activities = new Activities(this);
     this.rain = new Rain(this.scene);
     this.missions = new Missions(this);
     this.hud = new Hud(this);
@@ -865,6 +868,7 @@ export class Game {
       this.shop.update();
       this.heli.update(sdt, this.elapsed);
       this.reactions.update(sdt);
+      this.activities.update(sdt);
       this.missions.update(sdt);
       this.playerCtl.updateCamera(dt);
       if (p.health <= 0 && !this.overlayKind) this.die();

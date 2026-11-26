@@ -35,7 +35,7 @@ interface ActiveMission {
   cleanup(): void;
 }
 
-class Marker {
+export class Marker {
   group = new THREE.Group();
   constructor(scene: THREE.Scene, color: number, radius: number, height = 6) {
     const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
@@ -316,6 +316,9 @@ export class Missions {
   get blips(): Blip[] {
     const out: Blip[] = [];
     if (this.active) return this.active.blips;
+    const act = this.game.activities;
+    if (act && act.active) return act.blips;
+    if (act) out.push(...act.blips);
     for (const d of MISSIONS) if (!this.done.has(d.id)) out.push({ x: d.start.x, z: d.start.z, color: d.color, label: String(d.id + 1), kind: 'mission' });
     return out;
   }
