@@ -215,7 +215,43 @@ class WetReflectEffect extends Effect {
   }
 }
 
+/**
+ * Speed blur: at high speed in a car the picture streaks toward the middle of the screen, more at
+ * the edges than the centre, so the road ahead stays sharp. Off (an early return) below the threshold.
+ */
+class SpeedBlurEffect extends Effect {
+  constructor() {
+    super(
+      'PalmeraSpeedBlur',
+      /* glsl */ `
+      uniform float uAmount;
+      void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+        if (uAmount <= 0.001) { outputColor = inputColor; return; }
+        vec2 d = vec2(0.5, 0.52) - uv;
+        float r = length(d * vec2(1.6, 1.0));
+        float m = smoothstep(0.18, 0.75, r) * uAmount;
+        if (m <= 0.002) { outputColor = inputColor; return; }
+        const int N = 10;
+        vec2 st = d * m * 0.07 / float(N);
+        float j = fract(sin(dot(uv * 711.3, vec2(12.9898, 78.233))) * 43758.5453);
+        vec2 p = uv + st * j;
+        vec3 acc = inputColor.rgb;
+        for (int i = 0; i < N; i++) {
+          p += st;
+          acc += texture2D(inputBuffer, p).rgb;
+        }
+        outputColor = vec4(acc / float(N + 1), inputColor.a);
+      }`,
+      { uniforms: new Map<string, THREE.Uniform>([['uAmount', new THREE.Uniform(0)]]) },
+    );
+  }
+  set(amount: number) {
+    this.uniforms.get('uAmount')!.value = amount;
+  }
+}
+
 export class Post {
+  readonly speedBlur = new SpeedBlurEffect();
   readonly wetRefl = new WetReflectEffect();
   readonly shafts = new ShaftsEffect();
   readonly exposure = new ExposureEffect();
@@ -245,7 +281,7 @@ export class Post {
     c.addPass((this.taa = new TAAPass()));
     this.bloom = new BloomEffect({ mipmapBlur: true, levels: 6, luminanceThreshold: 2.2, luminanceSmoothing: 0.6, intensity: 0.45, radius: 0.6 });
     const tone = new ToneMappingEffect({ mode: ToneMappingMode.AGX });
-    c.addPass(new EffectPass(camera, this.wetRefl, this.shafts, this.exposure, this.bloom, tone, this.grade, new VignetteEffect({ darkness: 0.34, offset: 0.3 })));
+    c.addPass(new EffectPass(camera, this.speedBlur, this.wetRefl, this.shafts, this.exposure, this.bloom, tone, this.grade, new VignetteEffect({ darkness: 0.34, offset: 0.3 })));
   }
 
   setSize(w: number, h: number) {

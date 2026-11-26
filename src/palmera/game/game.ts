@@ -14,7 +14,7 @@ import { SkySystem } from '../world/sky';
 import { Water } from '../world/water';
 import { glowTexture } from '../world/textures';
 import { Effects } from './effects';
-import { Missions } from './missions';
+import { Marker, Missions } from './missions';
 import { Peds } from './peds';
 import { PlayerController, TUNING } from './player';
 import { PursuitAI, Wanted } from './police';
@@ -116,6 +116,7 @@ export class Game {
   parts!: Parts;
   garages!: Garages;
   street!: StreetEvents;
+  private speedBlurW = 0;
   interiors!: Interiors;
   saveGame!: SaveGame;
   phone!: Phone;
@@ -173,6 +174,7 @@ export class Game {
     this.skyTours = new SkyTours(this);
     this.parts = new Parts(this);
     this.garages = new Garages(this);
+    Marker.camera = this.camera;
     this.street = new StreetEvents(this);
     this.interiors = new Interiors(this);
     this.saveGame = new SaveGame(this);
@@ -1018,6 +1020,11 @@ export class Game {
 
   private render() {
     this.post.shafts.set(this.camera, this.sky.sunDir, this.sky.sunColor, this.sky.day, this.sky.sunset);
+    Marker.fadeNear();
+    // speed blur from about 50 mph, full by 110
+    const pv = this.player.vehicle;
+    this.speedBlurW += ((pv && !pv.isBoat ? Math.min(1, Math.max(0, (Math.abs(pv.speed) - 22) / 27)) : 0) - this.speedBlurW) * 0.07;
+    this.post.speedBlur.set(this.speedBlurW);
     this.post.render(this.elapsed, this.sky.night, this.sky.exposure);
   }
 

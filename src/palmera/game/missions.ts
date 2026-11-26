@@ -36,9 +36,14 @@ interface ActiveMission {
 }
 
 export class Marker {
+  /** the camera, set by the game: a marker's glowing wall fades out as you get right up to it */
+  static camera: THREE.Camera | null = null;
   group = new THREE.Group();
+  private wall: THREE.MeshBasicMaterial;
   constructor(scene: THREE.Scene, color: number, radius: number, height = 6) {
     const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    this.wall = mat;
+    Marker.all.add(this);
     const cyl = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, 28, 1, true), mat);
     cyl.position.y = height / 2;
     const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 0.8, radius, 32), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
@@ -61,6 +66,17 @@ export class Marker {
   }
   dispose(scene: THREE.Scene) {
     scene.remove(this.group);
+    Marker.all.delete(this);
+  }
+  private static all = new Set<Marker>();
+  /** every frame: seen from close by, a wall would tint half the screen, so it fades out inside ~14 m */
+  static fadeNear() {
+    const c = Marker.camera;
+    if (!c) return;
+    for (const m of Marker.all) {
+      const d = Math.hypot(c.position.x - m.group.position.x, c.position.z - m.group.position.z);
+      m.wall.opacity = 0.3 * Math.min(1, Math.max(0, (d - 5) / 9));
+    }
   }
 }
 
