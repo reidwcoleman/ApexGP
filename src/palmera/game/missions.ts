@@ -583,6 +583,7 @@ export class Missions {
     if (st === 'passed') {
       this.done.add(d.id);
       g.addCash(d.reward);
+      setTimeout(() => g.saveGame.save('Progress saved'), 3500);
       g.hud.bigMessage('JOB DONE', `+$${d.reward.toLocaleString()}`, '#7dff9a');
       g.audio.cue('pass');
       if (this.done.size === MISSIONS.length) setTimeout(() => g.hud.subtitle('Every job done. Port Palmera is yours to roam.'), 4000);

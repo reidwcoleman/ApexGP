@@ -38,6 +38,7 @@ export class Phone {
   private app = -1; // -1 home
   private sel = 0;
   private stack: Screen[] = [];
+  private confirmReset = false;
   private readonly apps = [
     { name: 'Contacts', letter: 'C', bg: '#34c37a' },
     { name: 'Jobs', letter: 'J', bg: '#ffb020' },
@@ -59,6 +60,7 @@ export class Phone {
     this.app = -1;
     this.sel = 0;
     this.stack = [];
+    this.confirmReset = false;
     this.el.classList.toggle('open', this.open);
     this.game.audio.cue('cash');
     this.render();
@@ -159,6 +161,22 @@ export class Phone {
             { label: String(s.carsStolen), sub: 'Cars taken' },
             { label: String(s.kills), sub: 'Takedowns' },
             { label: String(s.shots), sub: 'Shots fired' },
+            {
+              label: this.confirmReset ? 'Press Enter again to wipe it' : 'Start over',
+              sub: this.confirmReset ? 'Cash, jobs and weapons go back to the start' : 'Deletes the saved game',
+              act: () => {
+                if (!this.confirmReset) {
+                  this.confirmReset = true;
+                  this.stack.pop();
+                  this.stack.push(this.openApp(3));
+                  this.sel = 5;
+                  return;
+                }
+                g.saveGame.reset();
+                g.saveGame.enabled = false;
+                location.reload();
+              },
+            },
           ],
         };
       }

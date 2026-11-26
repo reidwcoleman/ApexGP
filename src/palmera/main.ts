@@ -32,6 +32,11 @@ function boot() {
     game.input.wantLock = true;
     canvas.requestPointerLock?.();
     begin('play');
+    // a normal game picks up where you left off (?fresh starts clean without touching the save)
+    if (!params.has('fresh')) {
+      game.saveGame.enabled = true;
+      game.saveGame.load();
+    }
   });
 
   if (testMode === 'drive' || testMode === 'foot') begin(testMode);
