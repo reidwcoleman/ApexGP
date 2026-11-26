@@ -84,6 +84,7 @@ export class Game {
   private prFrames = 0;
   private pixelRatio: number;
   stats = { kills: 0, carsStolen: 0, shots: 0 };
+  private readonly tmpFwd = new THREE.Vector3();
   events: VehicleEvents;
   post: Post;
   skinned: SkinnedCrowd;
@@ -931,7 +932,7 @@ export class Game {
     this.audio.radio.setOn(!!this.player.vehicle && this.mode === 'play' && !this.player.dead);
     const dl = (0.08 + 0.92 * this.sky.day) * (1 - 0.4 * this.sky.rain);
     this.ambient.update(sdt, this.elapsed, this.focus, this.sky.day, this.ambLight.setRGB(dl, dl, dl * 0.97));
-    this.skinned.update(dt, this.humans, cam);
+    this.skinned.update(dt, this.humans, cam, this.camera.getWorldDirection(this.tmpFwd));
     this.skinned.updateDrivers(dt, this.vehicles, cam, this.player);
     this.humanR.render(this.humans, cam, 150, this.skinned.taken);
     if (this.mode === 'play') {

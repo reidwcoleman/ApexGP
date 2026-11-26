@@ -68,7 +68,10 @@ export class SkinnedCrowd {
   private slots = new Map<number, Slot>();
   private t = 0;
   private reassignT = 0;
-  private readonly max = 30;
+  private readonly max = 54;
+  private frame = 0;
+  private readonly lastCam = new THREE.Vector3();
+  private readonly camFwd = new THREE.Vector3();
   private readonly v1 = new THREE.Vector3();
   private readonly v2 = new THREE.Vector3();
   private readonly q1 = new THREE.Quaternion();
@@ -162,8 +165,11 @@ export class SkinnedCrowd {
     return { h, p, anim: '', gun: null, lastUsed: this.t };
   }
 
-  update(dt: number, humans: Human[], cam: THREE.Vector3) {
+  update(dt: number, humans: Human[], cam: THREE.Vector3, camFwd?: THREE.Vector3) {
     this.t += dt;
+    this.frame++;
+    this.lastCam.copy(cam);
+    if (camFwd) this.camFwd.set(camFwd.x, 0, camFwd.z).normalize();
     this.taken.clear();
     if (!kit) return;
     this.reassignT -= dt;
@@ -172,8 +178,14 @@ export class SkinnedCrowd {
       this.reassignT = 0.25;
       const cands = humans
         .filter((h) => !h.hidden && !h.vehicle)
-        .map((h) => ({ h, d: h.kind === 'player' ? -1 : (h.pos.x - cam.x) ** 2 + (h.pos.z - cam.z) ** 2 }))
-        .filter((c) => c.d < 70 * 70)
+        .map((h) => {
+          if (h.kind === 'player') return { h, d: -1 };
+          const dx = h.pos.x - cam.x, dz = h.pos.z - cam.z, d2 = dx * dx + dz * dz;
+          // people behind the camera count as further away: the scans go where you're looking
+          const behind = dx * this.camFwd.x + dz * this.camFwd.z < -4;
+          return { h, d: behind ? d2 * 4 : d2 };
+        })
+        .filter((c) => c.d < 110 * 110)
         .sort((a, b) => a.d - b.d)
         .slice(0, this.max);
       const keep = new Set(cands.map((c) => c.h.id));
@@ -228,7 +240,10 @@ export class SkinnedCrowd {
     const lounge = h.state === 'lounge' ? 1 : 0;
     p.root.position.set(h.pos.x - Math.sin(h.yaw) * lounge * 0.25, h.pos.y + lie * 0.12 + (h.swimming ? -1.15 : 0) + lounge * 0.38, h.pos.z - Math.cos(h.yaw) * lounge * 0.25);
     p.root.rotation.set(-lie * 1.5 - lounge * 0.75, h.yaw, 0, 'YXZ');
-    p.update(dt);
+    // past 45 m the skeleton is updated every other frame (twice the step), which nobody can see
+    const far = h.kind !== 'player' && s.p.root.position.distanceToSquared(this.lastCam) > 45 * 45;
+    if (!far) p.update(dt);
+    else if ((this.frame + h.id) % 2 === 0) p.update(dt * 2);
     // the arm on the aim, or thrown in a punch (or a swing of the bat)
     const gunHeld = h.weapon !== 'fist' && h.weapon !== 'bat' && h.weapon !== 'grenade';
     const armed = gunHeld && !h.dead && lie < 0.3;
