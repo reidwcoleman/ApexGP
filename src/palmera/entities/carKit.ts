@@ -37,6 +37,7 @@ export const VARIANTS: Partial<Record<CarType, string[]>> = {
   van: ['van'],
   bus: ['bus'],
   bike: ['bike'],
+  ambulance: ['van'],
 };
 
 type Parts = { body: THREE.BufferGeometry; glass: THREE.BufferGeometry; heads: THREE.BufferGeometry; tails: THREE.BufferGeometry; trim?: THREE.BufferGeometry };
@@ -285,6 +286,12 @@ export function kitModel(type: CarType, spec: CarSpec, variant: number): KitMode
   boxAt(cw, 0.14, 0.4, 0, belt + 0.02, b.L * 0.16, [0.03, 0.03, 0.032]);
   for (const sx of [-1, 1]) boxAt(cw * 0.38, 0.62, 0.12, sx * cw * 0.25, belt + 0.12, -b.L * 0.05, [0.09, 0.08, 0.075]);
   boxAt(cw * 0.92, 0.04, b.L * 0.34, 0, b.H - 0.08, -b.L * 0.06, [0.42, 0.41, 0.39]);
+  if (type === 'ambulance') {
+    // a red band round the body and a white light bar
+    for (const s of [-1, 1]) boxAt(0.03, 0.22, b.L * 0.86, s * (b.W / 2 + 0.012), b.H * 0.52, -b.L * 0.04, [0.78, 0.06, 0.08]);
+    boxAt(b.W * 0.8, 0.22, 0.03, 0, b.H * 0.52, -b.L / 2 - 0.012, [0.78, 0.06, 0.08]);
+    boxAt(b.W * 0.7, 0.1, 0.34, 0, b.H + 0.03, b.L * 0.12, [0.85, 0.85, 0.85]);
+  }
   const detail = (id === 'bus' || id === 'bike') && p.trim ? p.trim : p.trim ? mergeColored([...cab, p.trim]) : mergeColored(cab);
   const groups = [body, detail, lamps, glass] as (THREE.BufferGeometry | null)[];
   const geo = new THREE.BufferGeometry();

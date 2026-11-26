@@ -227,7 +227,7 @@ export class FleeAI extends TrafficAI {
 }
 
 // ---------------------------------------------------------------- manager
-const TYPES: [CarType, number][] = [['sedan', 34], ['suv', 18], ['pickup', 12], ['taxi', 14], ['sports', 10], ['van', 9], ['bus', 4], ['bike', 6], ['police', 5]];
+const TYPES: [CarType, number][] = [['sedan', 34], ['suv', 18], ['pickup', 12], ['taxi', 14], ['sports', 10], ['van', 9], ['bus', 4], ['bike', 6], ['ambulance', 2], ['police', 5]];
 function randomType(): CarType {
   const tot = TYPES.reduce((a, b) => a + b[1], 0);
   let r = Math.random() * tot;

@@ -63,6 +63,8 @@ interface Fare {
   dist: number;
   /** pickup to destination, for the fare */
   d0: number;
+  /** a patient for the ambulance, not a taxi fare */
+  medic: boolean;
 }
 
 export class Activities {
@@ -75,6 +77,8 @@ export class Activities {
   private destMarker: Marker;
   private nextFareT = 0;
   private cooldown = 0;
+  /** Palmera General's ambulance bay */
+  readonly hospital: THREE.Vector3;
   private hold = 0;
 
   constructor(private game: Game) {
@@ -91,6 +95,15 @@ export class Activities {
       this.starts.push({ node: best, name: a.name });
       this.raceMarkers.push(new Marker(game.scene, 0xffffff, 3.2, 5).at(best.x, best.z));
     }
+    {
+      let h = game.map.nodes[0], hd = 1e9;
+      for (const n of game.map.nodes) {
+        const d = Math.hypot(n.x - 20, n.z + 80);
+        if (d < hd && n.edges.length >= 3) (hd = d), (h = n);
+      }
+      this.hospital = new THREE.Vector3(h.x + 9, 0, h.z + 9);
+      new Marker(game.scene, 0xff4b5c, 2.6, 4).at(this.hospital.x, this.hospital.z);
+    }
     this.cpMarker = new Marker(game.scene, 0xffd23f, 6, 12);
     this.cpMarker.visible = false;
     this.destMarker = new Marker(game.scene, 0x7dff9a, 4, 8);
@@ -101,7 +114,7 @@ export class Activities {
     return !!this.race || (this.taxiOn && !!this.fare);
   }
   get title() {
-    return this.race ? this.race.name : 'Taxi';
+    return this.race ? this.race.name : this.fare?.medic ? 'Paramedic' : 'Taxi';
   }
   get objective() {
     const r = this.race;
@@ -111,6 +124,7 @@ export class Activities {
     }
     const f = this.fare;
     if (!f) return '';
+    if (f.medic) return f.stage === 'pickup' ? 'Reach the patient (red)' : `Get them to Palmera General  ·  ${Math.round(f.dist)} m`;
     return f.stage === 'pickup' ? 'Pick up the fare (green)' : `Drop them off  ·  ${Math.round(f.dist)} m`;
   }
   get timer(): number | null {
@@ -127,9 +141,10 @@ export class Activities {
     }
     if (this.fare) {
       const p = this.fare.stage === 'pickup' ? this.fare.ped.pos : this.fare.dest;
-      out.push({ x: p.x, z: p.z, color: '#7dff9a', label: '', kind: 'dest' });
+      out.push({ x: p.x, z: p.z, color: this.fare.medic ? '#ff4b5c' : '#7dff9a', label: '', kind: 'dest' });
       return out;
     }
+    out.push({ x: this.hospital.x, z: this.hospital.z, color: '#ff4b5c', label: 'H', kind: 'mission' });
     for (const s of this.starts) out.push({ x: s.node.x, z: s.node.z, color: '#ffffff', label: 'R', kind: 'mission' });
     return out;
   }
@@ -284,15 +299,16 @@ export class Activities {
     }
 
     // ---- taxi
-    const inCab = !!car && car.type === 'taxi';
+    const inCab = !!car && (car.type === 'taxi' || car.type === 'ambulance');
+    const medic = !!car && car.type === 'ambulance';
     if (inCab && !g.missions.active) {
       if (g.input.hit('KeyT')) {
         this.taxiOn = !this.taxiOn;
-        g.hud.toast(this.taxiOn ? 'On duty: fares will call in' : 'Off duty');
+        g.hud.toast(this.taxiOn ? (medic ? 'On shift: emergency calls will come in · G for the siren' : 'On duty: fares will call in') : 'Off duty');
         this.nextFareT = 1;
         if (!this.taxiOn) this.clearFare();
       }
-      if (!this.taxiOn && !this.fare) g.hud.prompt('<kbd>T</kbd> Go on duty (taxi fares)');
+      if (!this.taxiOn && !this.fare) g.hud.prompt(medic ? '<kbd>T</kbd> Start a paramedic shift' : '<kbd>T</kbd> Go on duty (taxi fares)');
     } else if (this.taxiOn && !car) {
       this.taxiOn = false;
       this.clearFare();
@@ -317,14 +333,24 @@ export class Activities {
         f.ped.hidden = true;
         f.ped.state = 'wait';
         f.dist = Math.hypot(f.dest.x - car.pos.x, f.dest.z - car.pos.z);
-        f.timer = f.dist / 11 + 18;
-        g.hud.subtitle(['PASSENGER: Take me to the address on your screen, please.', 'PASSENGER: I’m late. Step on it.', 'PASSENGER: Scenic route is fine, but not too scenic.'][Math.floor(Math.random() * 3)]);
+        f.timer = f.medic ? f.dist / 12 + 20 : f.dist / 11 + 18;
+        if (f.medic) g.hud.subtitle(['PATIENT: It hurts... please hurry.', 'PATIENT: I can\u2019t feel my arm. Is that bad?', 'PATIENT: Just get me there, I\u2019ll be fine... I think.'][Math.floor(Math.random() * 3)]);
+        else g.hud.subtitle(['PASSENGER: Take me to the address on your screen, please.', 'PASSENGER: I’m late. Step on it.', 'PASSENGER: Scenic route is fine, but not too scenic.'][Math.floor(Math.random() * 3)]);
       }
     } else {
       f.timer -= dt;
       f.dist = Math.hypot(f.dest.x - car.pos.x, f.dest.z - car.pos.z);
       this.destMarker.at(f.dest.x, f.dest.z).visible = true;
-      if (f.dist < 10 && car.speed < 2) {
+      if (f.dist < 10 && car.speed < 2 && f.medic) {
+        const pay = 150 + Math.max(0, Math.round(f.timer * 6));
+        g.addCash(pay);
+        g.hud.bigMessage('PATIENT SAVED', `+$${pay}`, '#7dff9a');
+        g.audio.cue('cash');
+        this.endPatient();
+      } else if (f.timer <= 0 && f.medic) {
+        g.hud.toast('The patient didn\u2019t make it');
+        this.endPatient();
+      } else if (f.dist < 10 && car.speed < 2) {
         const base = 25 + Math.round(f.d0 * 0.35);
         const tip = Math.max(0, Math.round(f.timer * 3));
         g.addCash(base + tip);
@@ -351,7 +377,8 @@ export class Activities {
       }
       return null;
     };
-    const at = pick(50, 150), dest = pick(250, 650);
+    const medic = car.type === 'ambulance';
+    const at = pick(50, 150), dest = medic ? this.hospital.clone() : pick(250, 650);
     if (!at || !dest) {
       this.nextFareT = 2;
       return;
@@ -361,9 +388,23 @@ export class Activities {
     ped.state = 'wait';
     ped.clip = 'idle';
     ped.stateT = 1e9;
+    if (medic) {
+      ped.fall = 1; // down on the pavement
+      ped.injured = true;
+    }
     g.addNpc(ped);
-    this.fare = { stage: 'pickup', ped, dest, timer: 0, dist: 0, d0: Math.hypot(dest.x - at.x, dest.z - at.z) };
-    g.hud.toast('New fare: pick them up (green on the map)');
+    this.fare = { stage: 'pickup', ped, dest, timer: 0, dist: 0, d0: Math.hypot(dest.x - at.x, dest.z - at.z), medic };
+    g.hud.toast(medic ? 'Emergency call: someone is down (red on the map)' : 'New fare: pick them up (green on the map)');
+  }
+
+  /** the patient is handed over (or lost): off the street, next call in a few seconds */
+  private endPatient() {
+    const f = this.fare!;
+    f.ped.hidden = false;
+    this.game.removeNpc(f.ped);
+    this.fare = null;
+    this.destMarker.visible = false;
+    this.nextFareT = 5;
   }
 
   private dropOff() {
@@ -382,7 +423,10 @@ export class Activities {
   }
 
   private clearFare() {
-    if (this.fare) {
+    if (this.fare?.medic) {
+      // another crew takes the call
+      this.game.removeNpc(this.fare.ped);
+    } else if (this.fare) {
       this.fare.ped.hidden = false;
       this.fare.ped.state = 'walk';
       this.fare.ped.clip = '';

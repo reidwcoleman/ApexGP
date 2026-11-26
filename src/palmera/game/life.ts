@@ -209,6 +209,7 @@ export class Life {
     switch (h.state) {
       case 'wait':
         g.setDesired(h, 0, 0);
+        if (h.injured) h.fall = 1;
         return true;
       case 'bench': {
         h.stateT -= dt;

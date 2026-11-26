@@ -204,6 +204,11 @@ export class PlayerController {
     // the radio
     if (inp.hit('KeyQ') || inp.hit('KeyE')) g.hud.toast(g.audio.radio.tune(inp.hit('KeyE') ? 1 : -1));
     const horn = inp.down('KeyH');
+    // the siren, in anything that has one
+    if (inp.hit('KeyG') && v.sirenRed) {
+      v.siren = !v.siren;
+      g.hud.toast(v.siren ? 'Siren on' : 'Siren off');
+    }
     g.audio.setHorn(horn);
     if (horn) g.alertDanger(v.pos, 12, false, true);
     if (inp.hit('KeyF')) {

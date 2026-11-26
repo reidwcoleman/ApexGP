@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { box, cyl, merge, mergeGroups, prep } from '../core/geo';
 
-export type CarType = 'sedan' | 'sports' | 'suv' | 'pickup' | 'taxi' | 'police' | 'van' | 'bus' | 'bike' | 'boat';
+export type CarType = 'sedan' | 'sports' | 'suv' | 'pickup' | 'taxi' | 'police' | 'van' | 'bus' | 'bike' | 'ambulance' | 'boat';
 
 export interface CarSpec {
   type: CarType;
@@ -32,6 +32,7 @@ export const SPECS: Record<CarType, CarSpec> = {
   police: { type: 'police', label: 'Palmera PD Cruiser', len: 4.8, wid: 1.9, hgt: 1.5, mass: 1650, maxSpeed: 56, accel: 10.5, brake: 18, grip: 8.2, steer: 0.62, wheelbase: 2.8, wheelR: 0.35, wheelZ: 1.45, colors: [0xf4f4f2], health: 1400 },
   van: { type: 'van', label: 'Coastline Courier', len: 5.4, wid: 2.05, hgt: 2.35, mass: 2600, maxSpeed: 38, accel: 6.2, brake: 12, grip: 5.8, steer: 0.58, wheelbase: 3.4, wheelR: 0.38, wheelZ: 1.75, colors: [0xf2f2ee, 0xf2f2ee, 0x2b4a7a, 0x9aa0a6, 0xc9402e, 0x1f6b52], health: 1500 },
   bus: { type: 'bus', label: 'Palmera Transit Bus', len: 11.5, wid: 2.55, hgt: 3.1, mass: 11000, maxSpeed: 25, accel: 3.4, brake: 8, grip: 4.8, steer: 0.52, wheelbase: 6.4, wheelR: 0.5, wheelZ: 3.2, colors: [0x18a3a0, 0xe8743b, 0x2e6fbf], health: 3000 },
+  ambulance: { type: 'ambulance', label: 'Palmera General Ambulance', len: 5.6, wid: 2.1, hgt: 2.5, mass: 3000, maxSpeed: 42, accel: 7, brake: 13, grip: 6, steer: 0.58, wheelbase: 3.5, wheelR: 0.38, wheelZ: 1.8, colors: [0xf6f6f2], health: 1800 },
   bike: { type: 'bike', label: 'Sprint 750', len: 2.1, wid: 0.8, hgt: 1.2, mass: 230, maxSpeed: 58, accel: 12, brake: 15, grip: 7.5, steer: 0.5, wheelbase: 1.4, wheelR: 0.32, wheelZ: 0.7, colors: [0xd62828, 0x111111, 0xf2f2f2, 0x1f6fd1, 0xf2b705, 0x2a9d4a], health: 500 },
   boat: { type: 'boat', label: 'Reef Runner', len: 7.0, wid: 2.4, hgt: 1.6, mass: 1800, maxSpeed: 30, accel: 6, brake: 6, grip: 1.6, steer: 1.0, wheelbase: 4, wheelR: 0, wheelZ: 0, colors: [0xffffff, 0x1f4e79, 0xc0392b], health: 1200 },
 };
@@ -112,6 +113,11 @@ export function carModel(type: CarType): CarModel {
   let geo: THREE.BufferGeometry;
   const model: CarModel = { geo: null as unknown as THREE.BufferGeometry, wheels: wheelsFor(spec), wheelGeo: wheelGeo(spec.wheelR, 0.26) };
   switch (type) {
+    case 'ambulance':
+      geo = sedanLike(spec, () => {});
+      model.sirenRed = new THREE.Vector3(-0.35, spec.hgt + 0.06, 0.6);
+      model.sirenBlue = new THREE.Vector3(0.35, spec.hgt + 0.06, 0.6);
+      break;
     case 'van':
     case 'bus':
     case 'bike':

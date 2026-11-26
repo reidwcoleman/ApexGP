@@ -27,6 +27,8 @@ export class Human {
   rage = false;
   /** walks along looking at a phone */
   texting = false;
+  /** down on the pavement waiting for an ambulance */
+  injured = false;
   armor = 0;
   dead = false;
   down = 0; // seconds left lying down
