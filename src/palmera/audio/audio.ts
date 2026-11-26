@@ -481,6 +481,48 @@ export class AudioSys {
     s.stop(t0 + 1.8);
   }
 
+  /** fireworks: a rising whistle at launch; a deep boom (late, across the water) or a crackle at the burst */
+  firework(dist: number, kind: 'launch' | 'boom' | 'crackle') {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    const t0 = c.currentTime + (kind === 'launch' ? 0 : dist / 343);
+    const vol = 0.9 / (1 + dist * 0.012);
+    if (kind === 'launch') {
+      const o = c.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(900, t0);
+      o.frequency.exponentialRampToValueAtTime(2400, t0 + 1.6);
+      const g = c.createGain();
+      o.connect(g).connect(this.sfx);
+      this.env(g, t0, 0.05, vol * 0.05, 1.7);
+      o.start(t0);
+      o.stop(t0 + 1.8);
+      return;
+    }
+    const s = this.noiseSrc(false);
+    const f = c.createBiquadFilter();
+    const g = c.createGain();
+    if (kind === 'boom') {
+      f.type = 'lowpass';
+      f.frequency.setValueAtTime(900, t0);
+      f.frequency.exponentialRampToValueAtTime(60, t0 + 1.6);
+      this.env(g, t0, 0.004, vol * 0.9, 2.0);
+    } else {
+      // crackle: highpassed noise chopped into pops
+      f.type = 'highpass';
+      f.frequency.value = 2200;
+      g.gain.setValueAtTime(0, t0);
+      for (let k = 0; k < 26; k++) {
+        const tk = t0 + 0.25 + Math.random() * 1.6;
+        g.gain.setValueAtTime(vol * 0.35, tk);
+        g.gain.setValueAtTime(0, tk + 0.015);
+      }
+    }
+    s.connect(f).connect(g).connect(this.sfx);
+    s.start(t0, Math.random());
+    s.stop(t0 + 2.2);
+  }
+
   splash() {
     if (!this.ctx) return;
     const c = this.ctx;

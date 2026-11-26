@@ -51,6 +51,7 @@ import { Herons } from './herons';
 import { Stunts } from './stunts';
 import { MarshPlants } from '../world/marsh';
 import { Pier } from '../world/pier';
+import { Fireworks } from './fireworks';
 import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
@@ -137,6 +138,7 @@ export class Game {
   stunts!: Stunts;
   marsh!: MarshPlants;
   pier!: Pier;
+  fireworks!: Fireworks;
   /** real seconds of slow motion left (a stunt jump) */
   slowmo = 0;
   interiors!: Interiors;
@@ -205,6 +207,7 @@ export class Game {
     this.gators = new Gators(this);
     this.marsh = new MarshPlants(this.scene, this.map);
     this.pier = new Pier(this.scene, this.map);
+    this.fireworks = new Fireworks(this);
     this.herons = new Herons(this);
     this.stunts = new Stunts(this);
     this.street = new StreetEvents(this);
@@ -1068,6 +1071,7 @@ export class Game {
       this.gators.update(sdt);
       this.marsh.update(this.camera.position);
       this.pier.update(sdt, this.sky.night, this);
+      this.fireworks.update(sdt);
       this.herons.update(sdt);
       this.stunts.update(sdt, dt);
       this.reactions.update(sdt);
