@@ -406,6 +406,21 @@ export class Game {
 
   private onImpact(v: Vehicle, speed: number, x: number, y: number, z: number, other: Vehicle | null) {
     const camD = this.camera.position.distanceTo(v.pos);
+    // a hit reported at the car's centre (a wall, a drop): it took it on the nose or the tail
+    if (Math.abs(x - v.pos.x) < 0.01 && Math.abs(z - v.pos.z) < 0.01) {
+      const s = v.forwardSpeed >= 0 ? 1 : -1;
+      x += v.fwdX() * v.spec.len * 0.5 * s;
+      z += v.fwdZ() * v.spec.len * 0.5 * s;
+      y = v.pos.y + 0.6;
+    }
+    if (camD < 160 && speed > 4) {
+      v.dent(x, y, z, speed);
+      other?.dent(x, y, z, speed);
+      if (speed > 9) {
+        // glass and trim fly off
+        this.effects.debris(x, y, z, speed, v.color);
+      }
+    }
     if (camD < 120) {
       this.effects.sparks(x, y, z, Math.min(20, Math.floor(speed)));
       this.audio.crash(speed, camD);

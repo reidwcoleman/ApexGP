@@ -120,6 +120,65 @@ export class Vehicle {
     this.root.userData.vehicle = this;
   }
 
+  private dented = false;
+  /** total crumple so far (glass breaks, the bonnet gives) */
+  crumple = 0;
+  private readonly tv = new THREE.Vector3();
+
+  /**
+   * Crumple the body where it was hit (world point, strength in m/s of closing speed): vertices
+   * near the hit are pushed in toward the car's middle with a little noise, and only the
+   * triangles touched get new (faceted) normals, so the dent catches the light like bent metal.
+   */
+  dent(x: number, y: number, z: number, strength: number) {
+    if (this.isBoat || this.wrecked || strength < 3) return;
+    if (!this.dented) {
+      this.body.geometry = this.body.geometry.clone();
+      this.dented = true;
+    }
+    const g = this.body.geometry;
+    const pos = g.getAttribute('position') as THREE.BufferAttribute;
+    const nor = g.getAttribute('normal') as THREE.BufferAttribute;
+    const p = this.body.worldToLocal(this.tv.set(x, y, z));
+    const r = 0.55 + Math.min(1.1, strength * 0.06);
+    const push = Math.min(0.32, strength * 0.016);
+    let nx = -p.x, nz = -p.z;
+    const nl = Math.hypot(nx, nz) || 1;
+    nx /= nl;
+    nz /= nl;
+    const touched: number[] = [];
+    for (let i = 0; i < pos.count; i++) {
+      const dx = pos.getX(i) - p.x, dy = pos.getY(i) - p.y, dz = pos.getZ(i) - p.z;
+      const d = Math.sqrt(dx * dx + dy * dy * 0.6 + dz * dz);
+      if (d > r) continue;
+      const f = (1 - d / r) ** 2;
+      const n = Math.sin(pos.getX(i) * 9.1 + pos.getZ(i) * 7.7) * 0.15 + 0.85;
+      pos.setXYZ(i, pos.getX(i) + nx * push * f * n, pos.getY(i) - push * 0.35 * f * n, pos.getZ(i) + nz * push * f * n);
+      touched.push(Math.floor(i / 3));
+    }
+    if (!touched.length) return;
+    // faceted normals on the bent triangles
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+    for (const t of new Set(touched)) {
+      const i = t * 3;
+      if (i + 2 >= pos.count) continue;
+      a.fromBufferAttribute(pos, i);
+      b.fromBufferAttribute(pos, i + 1);
+      c.fromBufferAttribute(pos, i + 2);
+      b.sub(a);
+      c.sub(a);
+      const fn = b.cross(c).normalize();
+      for (let k = 0; k < 3; k++) {
+        const ox = nor.getX(i + k), oy = nor.getY(i + k), oz = nor.getZ(i + k);
+        const s = fn.x * ox + fn.y * oy + fn.z * oz < 0 ? -1 : 1;
+        nor.setXYZ(i + k, ox * 0.72 + fn.x * s * 0.28, oy * 0.72 + fn.y * s * 0.28, oz * 0.72 + fn.z * s * 0.28);
+      }
+    }
+    pos.needsUpdate = true;
+    nor.needsUpdate = true;
+    this.crumple += push;
+  }
+
   get isBoat() {
     return this.type === 'boat';
   }

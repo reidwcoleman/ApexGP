@@ -117,7 +117,10 @@ export class Effects {
   private poolData: { x: number; y: number; z: number; s: number; target: number; rot: number }[] = [];
   private scorchIdx = 0;
 
+  private scene: THREE.Scene;
+
   constructor(scene: THREE.Scene) {
+    this.scene = scene;
     const g = glowTexture();
     this.smoke = new PointPool(scene, 900, false, g);
     this.glow = new PointPool(scene, 600, true, g);
@@ -155,6 +158,32 @@ export class Effects {
     this.scorches.count = 0;
     this.scorches.frustumCulled = false;
     scene.add(this.scorches);
+  }
+
+  private chunks: { m: THREE.Mesh; v: THREE.Vector3; w: THREE.Vector3; life: number }[] = [];
+  private chunkGeo = [new THREE.BoxGeometry(0.5, 0.08, 0.3), new THREE.BoxGeometry(0.9, 0.15, 0.22), new THREE.BoxGeometry(0.25, 0.25, 0.05)];
+  private chunkMats = new Map<number, THREE.MeshStandardMaterial>();
+  /** a crash: glass glitter and a few panels / trim pieces thrown off, which tumble and settle */
+  debris(x: number, y: number, z: number, speed: number, paint: number) {
+    const r = Math.random;
+    for (let i = 0; i < Math.min(26, speed * 1.2); i++)
+      this.glow.add({ x, y: y + 0.3, z, vx: (r() - 0.5) * 7, vy: 1 + r() * 4, vz: (r() - 0.5) * 7, life: 0.6 + r() * 0.6, max: 1.2, s0: 0.08, s1: 0.05, r: 0.75, g: 0.88, b: 1, a: 0.9, grav: 12, drag: 0.6 });
+    const n = Math.min(4, Math.floor(speed / 8));
+    const scene = this.scene;
+    for (let i = 0; i < n; i++) {
+      if (this.chunks.length > 40) {
+        const old = this.chunks.shift()!;
+        scene.remove(old.m);
+      }
+      const dark = i % 2 === 1;
+      let mat = this.chunkMats.get(dark ? 0x151515 : paint);
+      if (!mat) this.chunkMats.set(dark ? 0x151515 : paint, (mat = new THREE.MeshStandardMaterial({ color: dark ? 0x151515 : paint, roughness: 0.4, metalness: 0.4 })));
+      const m = new THREE.Mesh(this.chunkGeo[i % 3], mat);
+      m.position.set(x, y + 0.2, z);
+      m.castShadow = true;
+      scene.add(m);
+      this.chunks.push({ m, v: new THREE.Vector3((r() - 0.5) * speed * 0.5, 2 + r() * speed * 0.25, (r() - 0.5) * speed * 0.5), w: new THREE.Vector3(r() * 12, r() * 12, r() * 12), life: 25 });
+    }
   }
 
   /** a spent case thrown out of the ejection port, to the right */
@@ -347,6 +376,35 @@ export class Effects {
     }
     this.shellMesh.count = k;
     this.shellMesh.instanceMatrix.needsUpdate = true;
+    // crash debris tumbles, bounces and lies there
+    for (let i = this.chunks.length - 1; i >= 0; i--) {
+      const c = this.chunks[i];
+      c.life -= dt;
+      if (c.life <= 0) {
+        c.m.parent?.remove(c.m);
+        this.chunks.splice(i, 1);
+        continue;
+      }
+      if (c.v.lengthSq() < 0.0004) continue;
+      c.v.y -= 9.81 * dt;
+      c.m.position.addScaledVector(c.v, dt);
+      c.m.rotation.x += c.w.x * dt;
+      c.m.rotation.y += c.w.y * dt;
+      c.m.rotation.z += c.w.z * dt;
+      const gy = groundAt(c.m.position.x, c.m.position.z, c.m.position.y + 0.3) + 0.05;
+      if (c.m.position.y < gy) {
+        c.m.position.y = gy;
+        c.v.y = -c.v.y * 0.25;
+        c.v.x *= 0.55;
+        c.v.z *= 0.55;
+        c.w.multiplyScalar(0.5);
+        if (Math.abs(c.v.y) < 0.6) {
+          c.v.set(0, 0, 0);
+          c.m.rotation.x = Math.round(c.m.rotation.x / Math.PI) * Math.PI;
+          c.m.rotation.z = Math.round(c.m.rotation.z / Math.PI) * Math.PI;
+        }
+      }
+    }
     // pools spread
     k = 0;
     for (const p of this.poolData) {
