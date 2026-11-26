@@ -9,7 +9,7 @@ const wheelCache = new Map<string, THREE.BufferGeometry>();
 function wheelFor(r: number, wid: number) {
   const k = r.toFixed(3) + ':' + wid;
   let g = wheelCache.get(k);
-  if (!g) wheelCache.set(k, (g = alloyWheel(r, wid > 1.95 ? 0.3 : 0.25)));
+  if (!g) wheelCache.set(k, (g = alloyWheel(r, wid < 1 ? 0.16 : wid > 1.95 ? 0.3 : 0.25)));
   return g;
 }
 
@@ -486,7 +486,8 @@ export class Vehicle {
     }
     const vLong = this.forwardSpeed;
     const accelPitch = clamp(this.input.thr * 0.02 * (Math.abs(vLong) < s.maxSpeed * 0.9 ? 1 : 0), -0.03, 0.03);
-    const rollT = clamp(this.yawRate * vLong * 0.004, -0.09, 0.09);
+    // cars roll out of a corner; a bike leans into it, as far as the corner needs
+    const rollT = this.type === 'bike' ? clamp(Math.atan((this.yawRate * vLong) / 9.81) * -1, -0.7, 0.7) : clamp(this.yawRate * vLong * 0.004, -0.09, 0.09);
     if (this.isBoat) tp -= clamp(Math.abs(vLong) * 0.006, 0, 0.12);
     if (dt > 0) {
       this.pitch = damp(this.pitch, tp - accelPitch, 10, dt);
@@ -499,9 +500,9 @@ export class Vehicle {
     // wheels
     if (this.wheels.length) {
       this.wheelSpin += (vLong / s.wheelR) * dt;
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < this.wheels.length; i++) {
         const w = this.wheels[i];
-        w.rotation.set(this.wheelSpin, i < 2 ? this.steerAngle : 0, 0, 'YXZ');
+        w.rotation.set(this.wheelSpin, w.position.z > 0 ? this.steerAngle : 0, 0, 'YXZ');
       }
     }
     // rpm for audio

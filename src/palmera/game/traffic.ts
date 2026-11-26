@@ -227,7 +227,7 @@ export class FleeAI extends TrafficAI {
 }
 
 // ---------------------------------------------------------------- manager
-const TYPES: [CarType, number][] = [['sedan', 34], ['suv', 18], ['pickup', 12], ['taxi', 14], ['sports', 10], ['van', 9], ['bus', 4], ['police', 5]];
+const TYPES: [CarType, number][] = [['sedan', 34], ['suv', 18], ['pickup', 12], ['taxi', 14], ['sports', 10], ['van', 9], ['bus', 4], ['bike', 6], ['police', 5]];
 function randomType(): CarType {
   const tot = TYPES.reduce((a, b) => a + b[1], 0);
   let r = Math.random() * tot;
@@ -337,7 +337,7 @@ export class Traffic {
           let clear = true;
           for (const u of g.vehicles) if (Math.abs(u.pos.x - s.x) < 5 && Math.abs(u.pos.z - s.z) < 5) { clear = false; break; }
           if (!clear) continue;
-          const type: CarType = s.region === 'downtown' ? pick(['sedan', 'sports', 'suv', 'taxi', 'van'] as CarType[]) : s.region === 'swamp' ? pick(['pickup', 'pickup', 'suv'] as CarType[]) : pick(['sedan', 'suv', 'pickup', 'sports', 'sedan', 'van'] as CarType[]);
+          const type: CarType = s.region === 'downtown' ? pick(['sedan', 'sports', 'suv', 'taxi', 'van', 'bike'] as CarType[]) : s.region === 'swamp' ? pick(['pickup', 'pickup', 'suv'] as CarType[]) : pick(['sedan', 'suv', 'pickup', 'sports', 'sedan', 'van'] as CarType[]);
           const v = new Vehicle(type);
           v.place(s.x, s.z, s.h);
           g.addVehicle(v);

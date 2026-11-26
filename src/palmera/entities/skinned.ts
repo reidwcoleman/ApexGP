@@ -120,7 +120,7 @@ export class SkinnedCrowd {
           p.root.position.copy(v.seat!);
           if (i === 1) p.root.position.x *= -1;
           p.play('sit', { offset: (v.vid % 100) / 100 });
-          v.root.add(p.root);
+          (v.type === 'bike' ? v.body : v.root).add(p.root);
           ps.push(p);
         }
         this.seated.set(v, { p: ps, key });
