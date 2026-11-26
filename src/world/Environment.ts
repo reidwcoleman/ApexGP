@@ -610,7 +610,9 @@ export function createEnvironment(
     const skyHot = 1 + FILM.skyHot * L.sunVis * filmDay * THREE.MathUtils.smoothstep(P.elevation, 8, 30);
     // (and a dry grey day's sky: a camera metering the land under a deck leaves the sky a bright grey-
     // white, as in overcast race footage — the deck the dome draws is the light's, dim beside that)
-    const greyHot = 1 + 0.25 * L.overcast * (1 - wetK) * filmDay;
+    // (0.25 → 0.75, 2026-11-26: with the land exposed down for a grey day (presets OVER) the deck went a dull
+    // grey; AC's overcast Monza keeps it near white over a dark park — sky/ground 2.6)
+    const greyHot = 1 + 0.75 * L.overcast * (1 - wetK) * filmDay;
     // (a broadcast camera in a storm is set for the land and its knee holds the sky back: the deck
     // stays a dark, textured grey, where a light shower's sky goes near white)
     const skyComp = Math.pow(adapt, -FILM.skyComp) * skyHot * greyHot * (1 - FILM.stormSky * stormK) * THREE.MathUtils.lerp(1, FILM.skyExposure, filmDay);
