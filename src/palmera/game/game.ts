@@ -35,6 +35,7 @@ import { BodyShop } from './bodyshop';
 import { Wardrobe } from './wardrobe';
 import { Pigeons } from './pigeons';
 import { Exports } from './exports';
+import { Chopper } from './chopper';
 import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
@@ -104,6 +105,7 @@ export class Game {
   wardrobe!: Wardrobe;
   pigeons!: Pigeons;
   exports!: Exports;
+  chopper!: Chopper;
   interiors!: Interiors;
   saveGame!: SaveGame;
   phone!: Phone;
@@ -156,6 +158,7 @@ export class Game {
     this.wardrobe = new Wardrobe(this);
     this.pigeons = new Pigeons(this);
     this.exports = new Exports(this);
+    this.chopper = new Chopper(this);
     this.interiors = new Interiors(this);
     this.saveGame = new SaveGame(this);
     this.phone = new Phone(this);
@@ -897,7 +900,8 @@ export class Game {
         this.input.endFrame();
         return;
       }
-      if (!this.overlayKind) this.playerCtl.update(sdt);
+      if (!this.overlayKind && !this.chopper?.flying) this.playerCtl.update(sdt);
+      else if (this.chopper?.flying) this.playerCtl.look(sdt);
       else this.setDesired(p, 0, 0);
       this.focus.copy(p.vehicle ? p.vehicle.pos : p.pos);
     }
@@ -914,6 +918,7 @@ export class Game {
       this.weapons.update(sdt, this.elapsed);
       this.shop.update();
       this.heli.update(sdt, this.elapsed);
+      this.chopper.update(sdt);
       this.reactions.update(sdt);
       this.activities.update(sdt);
       this.robbery.update(sdt);

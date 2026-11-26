@@ -48,16 +48,21 @@ export class PlayerController {
 
   constructor(private game: Game) {}
 
-  update(dt: number) {
-    const g = this.game;
-    const inp = g.input;
-    const p = g.player;
-    // mouse look
+  /** mouse look (also while flying, when the rest of update is skipped) */
+  look(dt: number) {
+    const inp = this.game.input;
     if (inp.mouseDX || inp.mouseDY) this.mouseIdle = 0;
     else this.mouseIdle += dt;
     const sens = TUNING.mouseSens * (this.aiming ? 0.6 : 1);
     this.camYaw -= inp.mouseDX * sens;
     this.camPitch = clamp(this.camPitch + inp.mouseDY * sens, -0.65, 1.1);
+  }
+
+  update(dt: number) {
+    const g = this.game;
+    const inp = g.input;
+    const p = g.player;
+    this.look(dt);
     if (p.dead) {
       g.setDesired(p, 0, 0);
       return;
@@ -234,7 +239,18 @@ export class PlayerController {
     const cam = g.camera;
     const v = p.vehicle;
     let dist: number, height: number, fov: number, side = 0;
-    if (v) {
+    const air = g.chopper?.camera();
+    if (air) {
+      // the helicopter: well back and above, following its heading unless you've looked around
+      if (this.mouseIdle > 1.2) {
+        this.camYaw += wrapAngle(air.yaw - this.camYaw) * clamp(dt * 1.6, 0, 1);
+        this.camPitch = damp(this.camPitch, 0.22, 2, dt);
+      }
+      dist = 13 + Math.min(air.speed, 45) * 0.08;
+      height = 1.6;
+      fov = lerp(TUNING.fovFoot, TUNING.fovCarMax, clamp(air.speed / 60, 0, 1));
+      this.camTarget.set(air.x, air.y + height, air.z);
+    } else if (v) {
       const sp = v.speed;
       const fwdSpeed = v.forwardSpeed;
       // follow the car heading unless the player has looked around recently

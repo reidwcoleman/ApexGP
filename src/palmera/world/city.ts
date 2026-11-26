@@ -774,7 +774,7 @@ export class City {
   /** towers reshaped (twisted, set back): no box cornice or parapet on them */
   grass: Grass | null = null;
   private landmarks = new Set<BuildingSpec>();
-  private helipads = new Set<BuildingSpec>();
+  readonly helipads = new Set<BuildingSpec>();
   private ledges: Inst[] = [];
 
   private buildBuildingDetail() {
