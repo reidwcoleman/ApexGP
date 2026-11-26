@@ -1274,7 +1274,10 @@ export class City {
     const metal = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.5 });
     chunked(this.scene, this.chunks, plant, box1, metal, { far: 900, shadow: true });
     const kit = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.35 });
-    chunked(this.scene, this.chunks, acs, roofKitGeometry('ac'), kit, { far: 700, shadow: true });
+    // a city of rooftop AC units (1,500 in view from the suburbs): a plain box at range and for shadows
+    const acBox = new THREE.BoxGeometry(1.4, 0.95, 1.0).translate(0, 0.48, 0);
+    acBox.setAttribute('color', new THREE.Float32BufferAttribute(new Array(acBox.getAttribute('position').count * 3).fill(0.58), 3));
+    chunked(this.scene, this.chunks, acs, roofKitGeometry('ac'), kit, { far: 700, shadow: true, lodGeo: acBox, lodDist: 60, shadowGeo: acBox });
     chunked(this.scene, this.chunks, vents, roofKitGeometry('vent'), kit, { far: 500, shadow: false });
     chunked(this.scene, this.chunks, tanks, roofKitGeometry('tank'), kit, { far: 1100, shadow: true });
     chunked(this.scene, this.chunks, masts, roofKitGeometry('mast'), kit, { far: 1400, shadow: false });
@@ -1328,10 +1331,10 @@ export class City {
     const tLeaf = leafMat(), cLeaf = leafMat();
     this.palmMats.push(tLeaf, cLeaf);
     const trees = groups.get('tree') ?? [], cyp = groups.get('cypress') ?? [];
-    chunked(this.scene, this.chunks, trees, trunkGeometry(2.6, 0.22, 4, 5, 4.2, 2.4), std({ roughness: 0.95 }), { far: 420, shadow: true });
+    chunked(this.scene, this.chunks, trees, trunkGeometry(2.6, 0.22, 4, 5, 4.2, 2.4), std({ roughness: 0.95 }), { far: 420, shadow: true, shadowGeo: trunkGeometry(2.6, 0.22, 0, 5, 4.2, 2.4) });
     const treeLo = crownGeometry({ cy: 4.5, rx: 2.6, ry: 1.8, cards: 18, size: 2.6, seed: 9, tint: 0xd8ecc0, filler: true });
     chunked(this.scene, this.chunks, trees, crownGeometry({ cy: 4.5, rx: 2.7, ry: 1.9, cards: 70, size: 1.7, seed: 9, tint: 0xd8ecc0, filler: true }), tLeaf, { far: 420, shadow: true, lodGeo: treeLo, lodDist: 110, shadowGeo: treeLo });
-    chunked(this.scene, this.chunks, cyp, trunkGeometry(5.5, 0.3, 5, 21, 7.2, 1.6, 0x6a5c4b), std({ roughness: 0.95 }), { far: 420, shadow: true });
+    chunked(this.scene, this.chunks, cyp, trunkGeometry(5.5, 0.3, 5, 21, 7.2, 1.6, 0x6a5c4b), std({ roughness: 0.95 }), { far: 420, shadow: true, shadowGeo: trunkGeometry(5.5, 0.3, 0, 21, 7.2, 1.6, 0x6a5c4b) });
     const cypCrown = () => {
       const parts = [crownGeometry({ cy: 6.6, rx: 1.7, ry: 1.6, cards: 34, size: 1.4, seed: 31, tint: 0xc4d4a4, filler: true }), crownGeometry({ cy: 8.6, rx: 1.3, ry: 1.4, cards: 26, size: 1.3, seed: 57, tint: 0xc4d4a4, filler: true })];
       const side = ni(crownGeometry({ cy: 6.0, rx: 1.0, ry: 0.9, cards: 14, size: 1.2, seed: 83, tint: 0xc4d4a4, filler: false }));
