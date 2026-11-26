@@ -26,6 +26,7 @@ interface SaveData {
   exported?: string[];
   wearing?: string;
   garage?: (import('./garage').StoredCar | null)[];
+  stunts?: number[];
 }
 
 export class SaveGame {
@@ -64,6 +65,7 @@ export class SaveGame {
       savedAt: Date.now(),
       cash: g.cash,
       done: [...g.missions.done],
+      stunts: [...g.stunts.done],
       owned: [...lo.owned],
       clip: { ...lo.clip },
       reserve: { ...lo.reserve },
@@ -104,6 +106,7 @@ export class SaveGame {
     const g = this.game;
     g.cash = d.cash;
     g.missions.done = new Set(d.done);
+    if (d.stunts) g.stunts.done = new Set(d.stunts);
     const lo = g.loadout;
     lo.owned = new Set(d.owned);
     Object.assign(lo.clip, d.clip);

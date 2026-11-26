@@ -673,7 +673,7 @@ export class Vehicle {
       const gf = groundAt(this.pos.x + fx * h, this.pos.z + fz * h, this.pos.y + 1.5);
       const gb = groundAt(this.pos.x - fx * h, this.pos.z - fz * h, this.pos.y + 1.5);
       tp = -Math.atan2(gf - gb, h * 2);
-    }
+    } else if (!this.isBoat && this.airborne) tp = clamp(-Math.atan2(this.vy, Math.max(6, Math.abs(this.forwardSpeed))) * 0.7, -0.5, 0.5);
     const vLong = this.forwardSpeed;
     const accelPitch = clamp(this.input.thr * 0.02 * (Math.abs(vLong) < s.maxSpeed * 0.9 ? 1 : 0), -0.03, 0.03);
     // cars roll out of a corner; a bike leans into it, as far as the corner needs

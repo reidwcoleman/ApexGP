@@ -48,6 +48,7 @@ import { Patrol } from './patrol';
 import { Parachute } from './parachute';
 import { Gators } from './gators';
 import { Herons } from './herons';
+import { Stunts } from './stunts';
 import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
@@ -131,6 +132,9 @@ export class Game {
   chute!: Parachute;
   gators!: Gators;
   herons!: Herons;
+  stunts!: Stunts;
+  /** real seconds of slow motion left (a stunt jump) */
+  slowmo = 0;
   interiors!: Interiors;
   saveGame!: SaveGame;
   phone!: Phone;
@@ -196,6 +200,7 @@ export class Game {
     this.chute = new Parachute(this);
     this.gators = new Gators(this);
     this.herons = new Herons(this);
+    this.stunts = new Stunts(this);
     this.street = new StreetEvents(this);
     this.interiors = new Interiors(this);
     this.saveGame = new SaveGame(this);
@@ -991,6 +996,10 @@ export class Game {
     }
     let sdt = dt;
     if (this.overlayKind) sdt = dt * 0.35;
+    else if (this.slowmo > 0) {
+      sdt = dt * 0.3;
+      this.slowmo -= dt;
+    }
     this.elapsed += sdt;
     const p = this.player;
 
@@ -1052,6 +1061,7 @@ export class Game {
       this.patrol.update(sdt);
       this.gators.update(sdt);
       this.herons.update(sdt);
+      this.stunts.update(sdt, dt);
       this.reactions.update(sdt);
       this.activities.update(sdt);
       this.robbery.update(sdt);

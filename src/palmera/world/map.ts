@@ -112,6 +112,22 @@ export function pondDip(x: number, z: number): number {
   return dip;
 }
 
+/** stunt ramps: a wedge rising along heading h (fwd = sin h, cos h) to ht at its lip */
+export interface Ramp {
+  x: number;
+  z: number;
+  h: number;
+  len: number;
+  wid: number;
+  ht: number;
+  y0: number;
+  /** the distance to clear */
+  target: number;
+  /** bounding half-size, for a quick reject */
+  rr: number;
+}
+export const ramps: Ramp[] = [];
+
 export function groundAt(x: number, z: number, refY = 1e9): number {
   let g = groundBase(x, z);
   if (x < -470) g += pondDip(x, z);
@@ -129,6 +145,15 @@ export function groundAt(x: number, z: number, refY = 1e9): number {
       continue;
     }
     g = Math.max(g, p.y);
+  }
+  for (let i = 0; i < ramps.length; i++) {
+    const r = ramps[i];
+    const dx = x - r.x, dz = z - r.z;
+    if (dx > r.rr || dx < -r.rr || dz > r.rr || dz < -r.rr) continue;
+    const s = dx * Math.sin(r.h) + dz * Math.cos(r.h), q = dx * Math.cos(r.h) - dz * Math.sin(r.h);
+    if (Math.abs(q) > r.wid / 2 || Math.abs(s) > r.len / 2) continue;
+    const y = r.y0 + (r.ht * (s + r.len / 2)) / r.len;
+    if (refY > y - 2.2) g = Math.max(g, y);
   }
   return g;
 }
