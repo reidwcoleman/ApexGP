@@ -4,6 +4,7 @@ import { runSelfTest } from './game/selftest';
 import type { CarType } from './entities/carModels';
 import { loadCarKit } from './entities/carKit';
 import { loadPropKit } from './world/furniture';
+import { loadFoliageKit } from './world/vegetation';
 import { loadSkinnedKit } from './entities/skinned';
 
 const params = new URLSearchParams(location.search);
@@ -117,4 +118,4 @@ function boot() {
   }
 }
 
-void Promise.all([loadCarKit(), loadSkinnedKit(), loadPropKit()]).then(boot);
+void Promise.all([loadCarKit(), loadSkinnedKit(), loadPropKit(), loadFoliageKit()]).then(boot);

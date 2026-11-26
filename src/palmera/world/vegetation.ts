@@ -2,6 +2,7 @@
 // (masked by a 1 px-per-metre map of where grass actually grows, so none comes up through roads,
 // sidewalks, drives, pools or houses), plus shrubs, hedges and flower beds round houses and parks.
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 const ni = (g: THREE.BufferGeometry) => (g.index ? g.toNonIndexed() : g);
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MAIN, SIDEWALK, type CityMap } from './map';
@@ -170,6 +171,71 @@ vTint = mix(vTint, vec3(0.95, 0.85, 0.5), mk.g * 0.75);`);
 }
 
 // ---------------------------------------------------------------- shrubs and flowers
+/**
+ * Leaf-card shrubs from Blender (tools/palmera/foliage.py): a rendered leaf atlas (leaves.webp,
+ * alpha-cut) on quads around each bush's shell, normals pointing out from the bush's middle so the
+ * whole bush shades as one soft volume. Falls back to the lumpy icosahedra below.
+ */
+const foliageKit = new Map<string, THREE.BufferGeometry>();
+let leafTex: THREE.Texture | null = null;
+
+export async function loadFoliageKit(): Promise<void> {
+  const base = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'palmera/';
+  try {
+    const [gl, tex] = await Promise.all([new GLTFLoader().loadAsync(base + 'foliage.glb'), new THREE.TextureLoader().loadAsync(base + 'leaves.webp')]);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    leafTex = tex;
+    gl.scene.updateMatrixWorld(true);
+    gl.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      const r = /^fol_(\w+)$/.exec(o.name);
+      if (!m.isMesh || !r) return;
+      let g = m.geometry.clone();
+      g.applyMatrix4(m.matrixWorld);
+      if (g.index) g = g.toNonIndexed();
+      const p = g.getAttribute('position');
+      const src = g.getAttribute('color');
+      const n = p.count;
+      const col = new Float32Array(n * 3), nor = new Float32Array(n * 3);
+      g.computeBoundingBox();
+      const cy = (g.boundingBox!.min.y + g.boundingBox!.max.y) * 0.5;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < n; i++) {
+        col.set(src ? [src.getX(i), src.getY(i), src.getZ(i)] : [1, 1, 1], i * 3);
+        v.set(p.getX(i), (p.getY(i) - cy) * 1.4 + 0.3, p.getZ(i)).normalize();
+        nor.set([v.x, v.y, v.z], i * 3);
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+      for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color', 'uv'].includes(k)) g.deleteAttribute(k);
+      g.computeBoundingSphere();
+      foliageKit.set(r[1], g);
+    });
+  } catch (e) {
+    console.warn('palmera: foliage kit failed, using the lumpy shrubs', e);
+  }
+}
+
+/** the leaf-card version of a shrub kind (or its _lod), if the kit loaded */
+export function foliageGeometry(name: string): THREE.BufferGeometry | null {
+  const g = foliageKit.get(name);
+  return g ? g.clone() : null;
+}
+
+let foliageMat: THREE.MeshStandardMaterial | null = null;
+/** alpha-cut leaves, lit from both sides as the bush's volume (no back-face normal flip) */
+export function foliageMaterial(): THREE.MeshStandardMaterial | null {
+  if (!leafTex) return null;
+  if (foliageMat) return foliageMat;
+  const m = new THREE.MeshStandardMaterial({ map: leafTex, alphaTest: 0.45, side: THREE.DoubleSide, vertexColors: true, roughness: 0.75 });
+  m.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n  normal = normalize(vNormal);');
+  };
+  m.customProgramCacheKey = () => 'palmera-foliage-v1';
+  foliageMat = m;
+  return m;
+}
 function lobed(lobes: number, seed: number, cols: [number, number]): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   let s = seed;
@@ -202,15 +268,15 @@ function lobed(lobes: number, seed: number, cols: [number, number]): THREE.Buffe
 }
 
 export function shrubGeometry(): THREE.BufferGeometry {
-  return lobed(7, 7, [0x172a0e, 0x4f6e26]);
+  return foliageGeometry('shrub') ?? lobed(7, 7, [0x172a0e, 0x4f6e26]);
 }
 export function hedgeGeometry(): THREE.BufferGeometry {
-  return lobed(5, 19, [0x15260c, 0x3f5e1e]);
+  return foliageGeometry('hedge') ?? lobed(5, 19, [0x15260c, 0x3f5e1e]);
 }
 /** a cluster of blossoms (white, tinted per instance) that sits on a small mound */
 /** the low mound under a flower bed */
 export function moundGeometry(): THREE.BufferGeometry {
-  return lobed(3, 23, [0x15260c, 0x3f5e1e]);
+  return foliageGeometry('mound') ?? lobed(3, 23, [0x15260c, 0x3f5e1e]);
 }
 export function blossomGeometry(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
@@ -242,6 +308,8 @@ export function placePlants(map: CityMap): { shrubs: PlantInst[]; hedges: PlantI
   const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
   const put = (list: PlantInst[], x: number, z: number, sc: number, sy = sc, c?: THREE.Color) => {
     q.setFromAxisAngle(up, r() * Math.PI * 2);
+    // not across a front path or a driveway (world/houses.ts lays them before the plants go in)
+    for (const pv of map.paved) if (x > pv.x0 - 0.8 && x < pv.x1 + 0.8 && z > pv.z0 - 0.8 && z < pv.z1 + 0.8) return;
     list.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(x, 0.03, z), q, new THREE.Vector3(sc, sy, sc)), c });
   };
   const bed = (x: number, z: number) => {

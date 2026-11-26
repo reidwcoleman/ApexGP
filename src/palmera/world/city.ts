@@ -11,7 +11,7 @@ import {
 import * as T from './textures';
 import { addDetail as D } from '../render/detail';
 import { palmKit } from './palms';
-import { Grass, moundGeometry, crownGeometry, leafTexture, trunkGeometry, blossomGeometry, hedgeGeometry, placePlants, shrubGeometry } from './vegetation';
+import { Grass, moundGeometry, crownGeometry, leafTexture, trunkGeometry, blossomGeometry, hedgeGeometry, placePlants, shrubGeometry, foliageMaterial, foliageGeometry } from './vegetation';
 import { furnitureGeometry, placeFurniture, type FurnitureKind, propGeometry } from './furniture';
 
 // ------------------------------------------------------------ simple mesh builder
@@ -1204,12 +1204,13 @@ export class City {
     chunked(this.scene, this.chunks, cyp, cypCrown(), cLeaf, { far: 420, shadow: true });
     void treeGeometry;
     void cypressGeometry;
-    chunked(this.scene, this.chunks, groups.get('bush') ?? [], shrubGeometry(), std(), { far: 250, shadow: false });
+    const cardMat = foliageMaterial();
+    chunked(this.scene, this.chunks, groups.get('bush') ?? [], shrubGeometry(), cardMat ?? std(), { far: 250, shadow: false, lodGeo: cardMat ? foliageGeometry('shrub_lod')! : undefined, lodDist: 45 });
     // shrubs, hedges and flower beds round houses and parks; the grass field
     const pl = placePlants(this.map);
-    chunked(this.scene, this.chunks, pl.shrubs, shrubGeometry(), std({ roughness: 0.9 }), { far: 170, shadow: false, lodGeo: bushGeometry(), lodDist: 45 });
-    chunked(this.scene, this.chunks, pl.hedges, hedgeGeometry(), std({ roughness: 0.9 }), { far: 150, shadow: false, lodGeo: bushGeometry(), lodDist: 45 });
-    chunked(this.scene, this.chunks, pl.mounds, moundGeometry(), std({ roughness: 0.9 }), { far: 90, shadow: false });
+    chunked(this.scene, this.chunks, pl.shrubs, shrubGeometry(), cardMat ?? std({ roughness: 0.9 }), { far: 170, shadow: false, lodGeo: cardMat ? foliageGeometry('shrub_lod')! : bushGeometry(), lodDist: 45 });
+    chunked(this.scene, this.chunks, pl.hedges, hedgeGeometry(), cardMat ?? std({ roughness: 0.9 }), { far: 150, shadow: false, lodGeo: cardMat ? foliageGeometry('hedge_lod')! : bushGeometry(), lodDist: 45 });
+    chunked(this.scene, this.chunks, pl.mounds, moundGeometry(), cardMat ?? std({ roughness: 0.9 }), { far: 90, shadow: false, lodGeo: cardMat ? foliageGeometry('mound_lod')! : undefined, lodDist: 30 });
     chunked(this.scene, this.chunks, pl.blossoms, blossomGeometry(), new THREE.MeshStandardMaterial({ roughness: 0.7 }), { far: 90, shadow: false });
     this.grass = new Grass(this.scene, this.map);
     chunked(this.scene, this.chunks, groups.get('lamp') ?? [], lampGeometry(), std({ roughness: 0.5, metalness: 0.5 }), { far: 380, shadow: true });
