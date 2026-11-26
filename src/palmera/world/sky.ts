@@ -294,7 +294,7 @@ export class SkySystem {
         this.scene.environment = env;
       }
       // never fully dark: the city's glow and the moon keep a little light in the reflections
-      this.scene.environmentIntensity = Math.max(target / Math.max(1e-4, (m < 0.5 ? pa.lum : pb.lum) / base), 0.18 * this.night);
+      this.scene.environmentIntensity = Math.max(target / Math.max(1e-4, (m < 0.5 ? pa.lum : pb.lum) / base), 0.08 * this.night);
     } else {
       const dayZ = new THREE.Color(0.1, 0.32, 0.78), dayH = new THREE.Color(0.6, 0.76, 0.9);
       this.zenith.copy(dayZ).multiplyScalar(target);
@@ -338,7 +338,7 @@ export class SkySystem {
     // a little fill under the IBL at night (the dusk photo dimmed to black leaves nothing)
     this.hemi.color.setRGB(0.3, 0.38, 0.65);
     this.hemi.groundColor.setRGB(0.12, 0.1, 0.08);
-    this.hemi.intensity = 0.42 * this.night;
+    this.hemi.intensity = 0.2 * this.night;
 
     // weather
     this.weatherT -= dt;
@@ -365,7 +365,7 @@ export class SkySystem {
     fog.color.lerp(new THREE.Color(0.5, 0.53, 0.57).multiplyScalar(0.15 + 0.85 * this.day), rn * 0.8);
     // exposure: keep the frame bright as the light falls (eyes adapt), but let night be night
     const e = this.sunDir.y;
-    this.exposure = lerp(1, 1.75, 1 - smoothstep(-0.18, 0.2, e)) * lerp(1, 1.12, this.sunset);
+    this.exposure = lerp(1, 1.5, 1 - smoothstep(-0.18, 0.2, e)) * lerp(1, 1.12, this.sunset);
   }
 
   clockString(): string {
