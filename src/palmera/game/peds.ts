@@ -56,6 +56,7 @@ export class Peds {
       if (d < minD || d > maxD) continue;
       if (d < 90 && g.inView(x, 1, z)) continue;
       const h = new Human('ped');
+      h.texting = Math.random() < 0.16;
       h.pos.set(x, groundAt(x, z), z);
       h.blockId = pi;
       h.dir = Math.random() < 0.5 ? 1 : -1;

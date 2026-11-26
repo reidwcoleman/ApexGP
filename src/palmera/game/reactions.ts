@@ -159,6 +159,8 @@ export function reactionArms(h: Human): { r?: THREE.Vector3; l?: THREE.Vector3 }
   const fx = Math.sin(h.yaw), fz = Math.cos(h.yaw);
   const rx = -fz, rz = fx;
   if (h.state === 'handsup') return { r: new THREE.Vector3(fx * 0.15 - rx * 0.25, 1, fz * 0.15 - rz * 0.25).normalize(), l: new THREE.Vector3(fx * 0.15 + rx * 0.25, 1, fz * 0.15 + rz * 0.25).normalize() };
+  // walking along looking at a phone: forearm up in front of the chest
+  if (h.texting && !h.dead && h.animSpeed > 0.3 && h.animSpeed < 2.2 && h.state !== 'flee') return { l: new THREE.Vector3(fx * 0.85 + rx * 0.2, -0.35, fz * 0.85 + rz * 0.2).normalize() };
   if (h.state === 'phone') return { l: new THREE.Vector3(fx * 0.5 + rx * 0.35, 0.6, fz * 0.5 + rz * 0.35).normalize() };
   return null;
 }

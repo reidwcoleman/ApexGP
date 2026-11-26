@@ -25,6 +25,8 @@ export class Human {
   maxHealth = 100;
   /** a driver you hit: keeps after you even in your car */
   rage = false;
+  /** walks along looking at a phone */
+  texting = false;
   armor = 0;
   dead = false;
   down = 0; // seconds left lying down

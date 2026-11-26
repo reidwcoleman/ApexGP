@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { Human } from '../entities/humans';
 import { BEACH, ISLAND, groundAt, isWater } from '../world/map';
+import { placeFurniture } from '../world/furniture';
 import type { Game } from './game';
 
 const TOWEL_COLS = [0xff6f61, 0x29b6c4, 0xffd23f, 0x7b6cff, 0xff8fc4, 0x5fd38a, 0xffffff];
@@ -14,9 +15,24 @@ export class Life {
   private towelSlots: { h: Human; x: number; z: number; r: number; c: THREE.Color }[] = [];
   private loungers: { x: number; z: number; r: number; used: Human | null }[];
   private readonly m4 = new THREE.Matrix4();
+  /** seats on the city's benches (two each) and spots under the bus shelters */
+  private seats: { x: number; z: number; yaw: number; used: Human | null }[] = [];
+  private stops: { x: number; z: number; yaw: number; n: number }[] = [];
   private readonly q = new THREE.Quaternion();
 
   constructor(private game: Game) {
+    const v = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), e = new THREE.Euler();
+    for (const it of placeFurniture(game.map)) {
+      if (it.kind !== 'bench' && it.kind !== 'shelter') continue;
+      it.m.decompose(v, q, sc);
+      const yaw = e.setFromQuaternion(q, 'YXZ').y;
+      const at = (lx: number, lz: number) => ({ x: v.x + Math.cos(yaw) * lx + Math.sin(yaw) * lz, z: v.z - Math.sin(yaw) * lx + Math.cos(yaw) * lz });
+      if (it.kind === 'bench') for (const lx of [-0.45, 0.45]) this.seats.push({ ...at(lx, -0.06), yaw, used: null });
+      else {
+        for (const lx of [-0.9, -0.1]) this.seats.push({ ...at(lx, -0.5), yaw, used: null });
+        this.stops.push({ ...at(0.6, 0.35), yaw, n: 0 });
+      }
+    }
     this.loungers = game.map.props.filter((p) => p.kind === 'lounger').map((p) => ({ x: p.x, z: p.z, r: p.r, used: null }));
     const tg = new THREE.PlaneGeometry(0.9, 1.9);
     tg.rotateX(-Math.PI / 2);
@@ -53,6 +69,9 @@ export class Life {
       const f = g.focus;
       // talkers on the sidewalks
       for (let i = 0; i < 3 && this.count('chat') < (day ? 22 : 10); i++) this.spawnGroup(f);
+      // people on benches and waiting for the bus
+      for (let i = 0; i < 2 && this.count('bench') < (day ? 12 : 4); i++) this.spawnSitter(f);
+      for (let i = 0; i < 2 && this.count('busstop') < (day ? 8 : 3); i++) this.spawnWaiter(f);
       // the beach (by day)
       const nearBeach = Math.abs(f.x - (BEACH.x0 + 60)) < 260;
       if (day && nearBeach) {
@@ -106,6 +125,28 @@ export class Life {
       }
       return;
     }
+  }
+
+  private spawnSitter(f: THREE.Vector3) {
+    for (const s of this.seats) if (s.used && (s.used.state !== 'bench' || !this.game.npcs.includes(s.used))) s.used = null;
+    const free = this.seats.filter((s) => !s.used && this.ok(s.x, s.z, f, 15, 110));
+    if (!free.length) return;
+    const s = free[Math.floor(Math.random() * free.length)];
+    const h = this.newPed(s.x, s.z, 'bench', 'sit', 40 + Math.random() * 90);
+    h.yaw = s.yaw;
+    h.texting = Math.random() < 0.3;
+    s.used = h;
+  }
+
+  private spawnWaiter(f: THREE.Vector3) {
+    const free = this.stops.filter((s) => s.n < 2 && this.ok(s.x, s.z, f, 15, 110));
+    if (!free.length) return;
+    const s = free[Math.floor(Math.random() * free.length)];
+    const h = this.newPed(s.x + (Math.random() - 0.5) * 1.2, s.z + (Math.random() - 0.5) * 0.6, 'busstop', 'idle', 60 + Math.random() * 60);
+    h.yaw = s.yaw + (Math.random() - 0.5) * 0.8;
+    h.target.set(s.x, 0, s.z);
+    s.n++;
+    (h as Human & { stop?: typeof s }).stop = s;
   }
 
   private spawnLounger(f: THREE.Vector3) {
@@ -169,6 +210,36 @@ export class Life {
       case 'wait':
         g.setDesired(h, 0, 0);
         return true;
+      case 'bench': {
+        h.stateT -= dt;
+        g.setDesired(h, 0, 0);
+        if (h.stateT <= 0) {
+          h.state = 'walk';
+          h.clip = '';
+          return false;
+        }
+        return true;
+      }
+      case 'busstop': {
+        h.stateT -= dt;
+        g.setDesired(h, 0, 0);
+        const stop = (h as Human & { stop?: { n: number } }).stop;
+        // a bus pulls in: on they get
+        for (const v of g.vehicles) {
+          if (v.type === 'bus' && v.speed < 0.8 && Math.hypot(v.pos.x - h.pos.x, v.pos.z - h.pos.z) < 9) {
+            if (stop) stop.n = Math.max(0, stop.n - 1);
+            g.removeNpc(h);
+            return true;
+          }
+        }
+        if (h.stateT <= 0) {
+          if (stop) stop.n = Math.max(0, stop.n - 1);
+          h.state = 'walk';
+          h.clip = '';
+          return false;
+        }
+        return true;
+      }
       case 'chat':
       case 'lounge':
       case 'towel':
