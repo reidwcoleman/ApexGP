@@ -1,5 +1,8 @@
 // All game audio is synthesised with WebAudio: no sound files.
+import { Radio } from './radio';
+
 export class AudioSys {
+  readonly radio = new Radio();
   ctx: AudioContext | null = null;
   private master!: GainNode;
   private sfx!: GainNode;
@@ -39,6 +42,8 @@ export class AudioSys {
     this.buildHorn();
     this.buildScreech();
     this.buildAmbient();
+    this.radio.station = 1;
+    this.radio.attach(ctx, this.master, this.noise);
   }
 
   private noiseSrc(loop = true): AudioBufferSourceNode {

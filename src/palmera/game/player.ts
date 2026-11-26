@@ -201,6 +201,8 @@ export class PlayerController {
     v.input.thr = thr;
     v.input.steer = steer;
     v.input.hand = inp.down('Space');
+    // the radio
+    if (inp.hit('KeyQ') || inp.hit('KeyE')) g.hud.toast(g.audio.radio.tune(inp.hit('KeyE') ? 1 : -1));
     const horn = inp.down('KeyH');
     g.audio.setHorn(horn);
     if (horn) g.alertDanger(v.pos, 12, false, true);

@@ -284,6 +284,7 @@ export class Game {
   }
 
   enterVehicle(v: Vehicle) {
+    if (!v.isBoat && this.audio.radio.station > 0) setTimeout(() => this.hud.toast(this.audio.radio.tune(0) + '  ·  Q / E to change'), 700);
     const p = this.player;
     if (v.wrecked || v.sinking) return;
     if (v.driver === 'npc') this.ejectDriver(v, false);
@@ -890,6 +891,7 @@ export class Game {
     this.wet += ((this.sky.rain > 0.15 ? 1 : 0) - this.wet) * Math.min(1, sdt * (this.sky.rain > 0.15 ? 0.15 : 0.02));
     detailUniforms.dWet.value = this.wet;
     this.audio.setRain(this.sky.rain);
+    this.audio.radio.setOn(!!this.player.vehicle && this.mode === 'play' && !this.player.dead);
     const dl = (0.08 + 0.92 * this.sky.day) * (1 - 0.4 * this.sky.rain);
     this.ambient.update(sdt, this.elapsed, this.focus, this.sky.day, this.ambLight.setRGB(dl, dl, dl * 0.97));
     this.skinned.update(dt, this.humans, cam);
