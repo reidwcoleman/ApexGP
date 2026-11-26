@@ -280,7 +280,7 @@ const TONE_CONTRAST = 1.0;
  */
 const LOOK_EXPOSURE = 0.84;
 /** overcast (AC reference): exposure down, contrast and saturation up, a touch warm (see dExposure) */
-export const OVER = { dim: 0.24, contrast: 0.1, sat: 0.12, warm: 0.045 };
+export const OVER = { dim: 0.22, contrast: 0.13, sat: 0.12, warm: 0.045 };
 const OVER_DIM = OVER.dim, OVER_CONTRAST = OVER.contrast, OVER_SAT = OVER.sat, OVER_WARM = OVER.warm;
 const LOOK_FILL = 0.9;
 const LOOK_SHADOW: [number, number, number] = [1.0, 1.0, 0.95];
