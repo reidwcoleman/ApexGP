@@ -56,6 +56,11 @@ export class TrafficAI implements CarAI {
   reverseT = 0;
   honkT = 0;
   busT = 10 + Math.random() * 15;
+  /** going round something stopped in our lane (a bus at its stop, a wreck, a stalled car) */
+  passing: Vehicle | null = null;
+  passT = 0;
+  private stuckBehind: Vehicle | null = null;
+  private stuckT = 0;
   constructor(public game: Game, public from: number, public to: number) {
     this.cruise = 10 + Math.random() * 4;
     this.next = this.choose(to, from);
@@ -80,6 +85,25 @@ export class TrafficAI implements CarAI {
       return opts[0];
     }
     return pick(opts);
+  }
+
+  /** the other lane, from a little behind to well ahead, is empty (cars and people) */
+  laneClear(v: Vehicle, fx: number, fz: number, rx: number, rz: number) {
+    for (const u of this.game.vehicles) {
+      if (u === v) continue;
+      const ox = u.pos.x - v.pos.x, oz = u.pos.z - v.pos.z;
+      if (Math.abs(ox) > 70 || Math.abs(oz) > 70) continue;
+      const along = ox * fx + oz * fz, lat = ox * rx + oz * rz;
+      if (lat < -2 * LANE_OFF - 2.5 || lat > -1.2) continue;
+      if (along > -6 && along < 60) return false;
+    }
+    for (const h of this.game.humans) {
+      if (h.vehicle || h.dead || h.hidden) continue;
+      const ox = h.pos.x - v.pos.x, oz = h.pos.z - v.pos.z;
+      const along = ox * fx + oz * fz, lat = ox * rx + oz * rz;
+      if (lat > -2 * LANE_OFF - 2 && lat < 0 && along > 0 && along < 25) return false;
+    }
+    return true;
   }
 
   drive(v: Vehicle, dt: number) {
@@ -153,8 +177,9 @@ export class TrafficAI implements CarAI {
     const fx = v.fwdX(), fz = v.fwdZ();
     const rx = -fz, rz = fx;
     let blockedByPlayer = false;
+    let nearest: Vehicle | null = null, nearestGap = 1e9;
     for (const u of g.vehicles) {
-      if (u === v) continue;
+      if (u === v || u === this.passing) continue;
       const ox = u.pos.x - v.pos.x, oz = u.pos.z - v.pos.z;
       if (Math.abs(ox) > 30 || Math.abs(oz) > 30) continue;
       const along = ox * fx + oz * fz;
@@ -164,7 +189,32 @@ export class TrafficAI implements CarAI {
       const gap = along - (v.spec.len + u.spec.len) / 2;
       target = Math.min(target, Math.max(0, gap - 2.5) * 0.8);
       if (u.driver === 'player' && gap < 8) blockedByPlayer = true;
+      if (gap < nearestGap) (nearestGap = gap), (nearest = u);
     }
+    // overtaking: something stopped right in front of us for a while, no junction or light close
+    // ahead, nothing coming the other way: indicate, pull out into the other lane, pass, pull back in
+    if (this.passing) {
+      const u = this.passing;
+      this.passT += dt;
+      const behind = (u.pos.x - v.pos.x) * fx + (u.pos.z - v.pos.z) * fz < -(v.spec.len + u.spec.len) / 2 - 2;
+      if (behind || this.passT > 12 || L.remaining < 14 || this.panic > 0) this.passing = null;
+      else {
+        L = { ...L, tx: L.tx + L.dz * 2 * LANE_OFF, tz: L.tz - L.dx * 2 * LANE_OFF };
+        target = Math.min(target, 7);
+        v.signal = -1;
+      }
+    } else if (nearest && nearestGap < 9 && nearest.driver !== 'player' && Math.abs(nearest.forwardSpeed) < 0.6 && this.panic <= 0 && !pull) {
+      const busStop = nearest.ai instanceof TrafficAI && nearest.type === 'bus' && nearest.ai.busT < 0;
+      const parked = !nearest.ai || nearest.wrecked;
+      if (nearest === this.stuckBehind) this.stuckT += dt;
+      else (this.stuckBehind = nearest), (this.stuckT = 0);
+      const lightNear = Bn.light && L.remaining < 45;
+      if ((busStop || parked || this.stuckT > 6) && this.stuckT > 1.5 && !lightNear && L.remaining > 30 && this.laneClear(v, fx, fz, rx, rz)) {
+        this.passing = nearest;
+        this.passT = 0;
+        this.stuckBehind = null;
+      } else if (this.stuckT > 1) v.signal = -1;
+    } else this.stuckBehind = null;
     for (const h of g.humans) {
       if (h.vehicle || h.dead || h.hidden) continue;
       const ox = h.pos.x - v.pos.x, oz = h.pos.z - v.pos.z;
