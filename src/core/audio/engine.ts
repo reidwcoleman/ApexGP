@@ -616,7 +616,9 @@ export class OpponentVoice {
     const att = clamp(7 / (2 + d), 0, 1.4) * level * (1 - 0.3 * behind);
     // air absorption with distance; the exhaust faces away when it's coming at us (duller),
     // straight at us once it has passed (brighter); occluded from behind
-    const bright = (2000 + 14000 * Math.exp(-d / 55)) * (v < 0 ? 1.15 : 0.8) * (1 - 0.55 * behind);
+    // (2026-11-26: 2000 + 14000·e^(−d/55) let a passing car's full fizz through — against Assetto Corsa's
+    // trackside audio (centroid ~760 Hz) the field measured 1330; a car is heard by its body, not its rasp)
+    const bright = (1300 + 5200 * Math.exp(-d / 45)) * (v < 0 ? 1.15 : 0.8) * (1 - 0.55 * behind);
     setT(this.g.gain, att, t, 0.04);
     setT(this.lp.frequency, clamp(bright, 600, 20000), t, 0.05);
     setT(this.pan.pan, clamp(o.pan, -1, 1) * 0.9, t, 0.04);

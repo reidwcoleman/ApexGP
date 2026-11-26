@@ -110,19 +110,22 @@ const VIEWS: Record<AudioView, ViewMix> = {
   // (balanced against real onboard footage of a V6 turbo hybrid: the band energy sits ~70 % in
   // 150–600 Hz with a heavy floor of wind, buffeting and road rumble under it, and little above
   // 2 kHz — the helmet and the tub swallow the fizz; tools/audiocheck.mjs --bands)
+  // (2026-11-26, against Assetto Corsa's Monza onboard (yt WrepkeRJpHw): the intake's near-pure firing
+  // tone was 68 % of the energy in one octave; AC's onboard is the exhaust's spread — 16 % an octave
+  // under the firing note, 20 % an octave over. Exhaust up, intake down, half the chassis boom)
   cockpit: {
-    exhaust: 0.32, rasp: 0.25, pops: 0.5, intake: 1.0, roar: 0.6, mech: 0.5, whistle: 0.7, gear: 0.7, ers: 1.0,
-    tyres: 1.25, wind: 1.9, buffet: 2.0, nearDirect: 1, outsideLP: 1900, reverb: 0.03, body: 8, opponents: 0.7,
+    exhaust: 1.0, rasp: 0.4, pops: 0.5, intake: 0.32, roar: 0.42, mech: 0.36, whistle: 0.7, gear: 0.7, ers: 1.0,
+    tyres: 1.25, wind: 1.9, buffet: 2.0, nearDirect: 1, outsideLP: 1900, reverb: 0.03, body: 4, opponents: 0.7,
   },
   // (outside, the footage is still dark and heavy: the exhaust's body, not its fizz — the air and the
   // distance take the top off, the wind and the road fill the bottom)
   chase: {
-    exhaust: 1.0, rasp: 0.55, pops: 1.0, intake: 0.3, roar: 0.25, mech: 0.18, whistle: 0.45, gear: 0.3, ers: 0.5,
-    tyres: 1.1, wind: 1.0, buffet: 0, nearDirect: 1, outsideLP: 7000, reverb: 0.08, body: 6, opponents: 1.0,
+    exhaust: 1.0, rasp: 0.4, pops: 1.0, intake: 0.3, roar: 0.18, mech: 0.13, whistle: 0.45, gear: 0.3, ers: 0.5,
+    tyres: 1.1, wind: 1.0, buffet: 0, nearDirect: 1, outsideLP: 4200, reverb: 0.08, body: 6, opponents: 1.0,
   },
   tv: {
-    exhaust: 1.0, rasp: 0.5, pops: 0.9, intake: 0.14, roar: 0.12, mech: 0.06, whistle: 0.25, gear: 0.12, ers: 0.35,
-    tyres: 0.8, wind: 0.4, buffet: 0, nearDirect: 0, outsideLP: 5000, reverb: 0.3, body: 0, opponents: 1.0,
+    exhaust: 1.0, rasp: 0.3, pops: 0.55, intake: 0.14, roar: 0.07, mech: 0.04, whistle: 0.25, gear: 0.12, ers: 0.35,
+    tyres: 0.8, wind: 0.4, buffet: 0, nearDirect: 0, outsideLP: 2600, reverb: 0.3, body: 0, opponents: 1.0,
   },
 };
 
