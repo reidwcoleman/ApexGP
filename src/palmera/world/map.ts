@@ -82,8 +82,39 @@ export interface Platform {
 export const platforms: Platform[] = [];
 
 /** Ground height at (x,z) for something currently at height refY. */
+/** the swamp ponds are shallow dips you wade through (water to the shins), looked up through a coarse grid */
+type PondRef = { x: number; z: number; w: number; d: number };
+const PG = 40;
+const pondGrid = new Map<number, PondRef[]>();
+const pk = (i: number, j: number) => i * 10007 + j;
+export function registerPond(f: PondRef) {
+  for (let i = Math.floor((f.x - f.w / 2) / PG); i <= Math.floor((f.x + f.w / 2) / PG); i++)
+    for (let j = Math.floor((f.z - f.d / 2) / PG); j <= Math.floor((f.z + f.d / 2) / PG); j++) {
+      const k = pk(i, j);
+      let l = pondGrid.get(k);
+      if (!l) pondGrid.set(k, (l = []));
+      l.push(f);
+    }
+}
+/** how far the ground dips here (0 outside a pond, down to -0.6 a couple of metres in from the edge) */
+export function pondDip(x: number, z: number): number {
+  const l = pondGrid.get(pk(Math.floor(x / PG), Math.floor(z / PG)));
+  if (!l) return 0;
+  let dip = 0;
+  for (const f of l) {
+    const u = (x - f.x) / (f.w / 2), v = (z - f.z) / (f.d / 2);
+    const r = Math.hypot(u, v);
+    if (r > 1.3) continue;
+    const edge = pondShape(f, Math.atan2(-v, u));
+    if (r >= edge) continue;
+    dip = Math.min(dip, -0.6 * Math.min(1, ((edge - r) * Math.min(f.w, f.d)) / 2 / 2.5));
+  }
+  return dip;
+}
+
 export function groundAt(x: number, z: number, refY = 1e9): number {
   let g = groundBase(x, z);
+  if (x < -470) g += pondDip(x, z);
   if (Math.abs(z - BRIDGE.z) < BRIDGE.half && x > BRIDGE.x0 - 1 && x < BRIDGE.x1 + 1) {
     const d = bridgeDeckY(x);
     if (refY > d - 2.2) g = Math.max(g, d);
@@ -702,6 +733,7 @@ export class CityMap {
       const w = rng.range(16, 52), d = rng.range(16, 60);
       if (!roadClear(x, z, Math.max(w, d) / 2 + 8)) continue;
       this.flats.push({ x, z, w, d, kind: 'pond' });
+      registerPond({ x, z, w, d });
     }
     // cypress in groves (and standing in the ponds), not sprinkled evenly
     const groves: [number, number][] = [];

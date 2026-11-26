@@ -722,6 +722,16 @@ export class Game {
           if (isP) this.audio.splash();
         }
       }
+      // wading through a swamp pond: heavy going, and it splashes
+      if (h.onGround && !h.swimming && h.pos.x < -470 && h.pos.y < -0.2) {
+        // you can't run in water to the thighs
+        const ws = Math.hypot(h.vx, h.vz), cap = 3.2;
+        if (ws > cap) {
+          h.vx *= cap / ws;
+          h.vz *= cap / ws;
+        }
+        if (Math.hypot(h.vx, h.vz) > 1.2 && Math.random() < dt * (isP ? 7 : 2) && h.pos.distanceToSquared(this.camera.position) < 60 * 60) this.effects.puff(h.pos.x, 0.06, h.pos.z, 'splash');
+      }
       // buildings and props
       const res = this.map.colliders.resolveCircle(h.pos.x, h.pos.z, 0.35, h.pos.y + 0.35, h.pos.y + 1.8, tb);
       if (res) {
@@ -823,6 +833,21 @@ export class Game {
         v.input.hand = true;
       }
       v.update(dt, this.map.colliders, this.events, this.elapsed);
+      // a car in a swamp pond bogs down and throws up spray
+      if (!v.isBoat && !v.airborne && v.pos.x < -470 && v.pos.y < -0.2) {
+        const f = Math.exp(-1.1 * dt);
+        v.vx *= f;
+        v.vz *= f;
+        const ws = Math.hypot(v.vx, v.vz);
+        if (ws > 9) {
+          v.vx *= 9 / ws;
+          v.vz *= 9 / ws;
+        }
+        if (v.speed > 3 && Math.random() < dt * 14 && v.pos.distanceToSquared(cam) < 90 * 90) {
+          const s = Math.random() < 0.5 ? 1 : -1;
+          this.effects.puff(v.pos.x + v.fwdZ() * s * v.spec.wid * 0.5, 0.1, v.pos.z - v.fwdX() * s * v.spec.wid * 0.5, 'splash');
+        }
+      }
       v.setSirenVisual(this.elapsed);
       // burning and explosions
       if (v.burnTimer > 0 && !v.wrecked) {
