@@ -5,7 +5,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { box, cyl, merge, prep } from '../core/geo';
 import { Rng, clamp } from '../core/math';
 import {
-  BEACH, BRIDGE, CityMap, ISLAND, MAIN, ROAD_HALF, SIDEWALK, WATER_Y, bridgeDeckY, groundAt, groundBase,
+  BEACH, BRIDGE, CityMap, ISLAND, MAIN, ROAD_HALF, SIDEWALK, WATER_Y, bridgeDeckY, groundAt, groundBase, pondShape,
   type BuildingSpec, type PropSpec,
 } from './map';
 import * as T from './textures';
@@ -579,7 +579,8 @@ export class City {
     this.add(g2.geo(), D(new THREE.MeshStandardMaterial({ map: conc, roughness: 0.9, color: 0xf2ece2 }), 'concrete_pavement', { scale: 4, albedo: 0.8, normal: 0.8, rough: [0.6, 0.95] }));
     const g3 = new MB();
     g3.flat(MAIN.x0, MAIN.z0, -480, MAIN.z1, 0, 20);
-    this.add(g3.geo(), D(new THREE.MeshStandardMaterial({ map: mud, roughness: 1 }), 'leafy_grass', { scale: 3, albedo: 0.6, normal: 0.8 }));
+    // the marsh: wet olive-brown, not lawn
+    this.add(g3.geo(), D(new THREE.MeshStandardMaterial({ map: mud, roughness: 0.9, color: 0x9c946a }), 'leafy_grass', { scale: 3, albedo: 0.45, normal: 0.8 }));
     // beach: flat sand then a slope into the sea
     const b = new MB();
     const xs = [BEACH.x0, ISLAND.x1, 735, 770, 860];
@@ -682,7 +683,7 @@ export class City {
     const kinds: Record<string, { mb: MB; mat: THREE.Material; y: number; rep: number }> = {
       pool: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ color: 0x38c6e6, roughness: 0.05, metalness: 0.1, emissive: 0x0a3a48 }), y: 0.07, rep: 4 },
       rim: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.8 }), y: 0.05, rep: 4 },
-      pond: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ color: 0x2f3a22, roughness: 0.08, metalness: 0.3 }), y: 0.04, rep: 8 },
+      pond: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ color: 0x1c2213, roughness: 0.22, metalness: 0.2 }), y: 0.04, rep: 8 },
       court: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ map: T.courtTexture(), roughness: 0.9 }), y: 0.04, rep: 1 },
       lot: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.lotTexture(), roughness: 0.92 }), 'asphalt_02', { scale: 6, albedo: 0.7, normal: 0.9, rough: [0.55, 0.95] }), y: 0.03, rep: 10 },
       plaza: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.concreteTexture(), color: 0xf7e2c8, roughness: 0.85 }), 'terrazzo_tiles', { scale: 3, albedo: 0.8, normal: 0.6, rough: [0.3, 0.7] }), y: 0.04, rep: 3 },
@@ -693,6 +694,17 @@ export class City {
       const x0 = f.x - f.w / 2, x1 = f.x + f.w / 2, z0 = f.z - f.d / 2, z1 = f.z + f.d / 2;
       if (f.kind === 'court') {
         k.mb.quad([x0, k.y, z1], [x1, k.y, z1], [x1, k.y, z0], [x0, k.y, z0], [0, 0], [1, 0], [1, 1], [0, 1]);
+      } else if (f.kind === 'pond') {
+        // a lumpy oval, not a rectangle
+        const N = 32, c = [f.x, k.y, f.z];
+        const pt = (i: number) => {
+          const a = (i / N) * Math.PI * 2, r = pondShape(f, a);
+          return [f.x + Math.cos(a) * (f.w / 2) * r, k.y, f.z - Math.sin(a) * (f.d / 2) * r];
+        };
+        for (let i = 0; i < N; i++) {
+          const p = pt(i), q = pt(i + 1);
+          k.mb.quad(c, p, q, q, [0, 0], [0, 0], [0, 0], [0, 0]);
+        }
       } else k.mb.flat(x0, z0, x1, z1, k.y, k.rep);
       if (f.kind === 'pool') kinds.rim.mb.flat(x0 - 0.8, z0 - 0.8, x1 + 0.8, z1 + 0.8, kinds.rim.y, 4);
     }

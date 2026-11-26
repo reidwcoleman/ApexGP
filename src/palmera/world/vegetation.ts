@@ -20,7 +20,7 @@ function grassMask(map: CityMap): THREE.Texture {
   c.fillRect(0, 0, W, H);
   const rect = (x0: number, z0: number, x1: number, z1: number) => c.fillRect(x0 - X0, z0 - Z0, x1 - x0, z1 - z0);
   // the swamp: tall and patchy
-  c.fillStyle = 'rgb(85,255,0)';
+  c.fillStyle = 'rgb(200,190,0)';
   rect(MAIN.x0, MAIN.z0, -480, MAIN.z1);
   // lawns: suburban block interiors
   c.fillStyle = 'rgb(235,40,0)';
@@ -142,7 +142,7 @@ transformed.y += 0.02;
 vH = position.y;
 float dry = smoothstep(0.55, 0.95, sin(cell.x * 0.09 + 1.3) * sin(cell.y * 0.11) * 0.5 + 0.5 + aRnd.y * 0.25);
 vTint = mix(mix(vec3(0.85, 1.0, 0.85), vec3(1.08, 1.04, 0.8), aRnd.z), vec3(1.3, 1.05, 0.6), dry * 0.25);
-vTint = mix(vTint, vec3(0.72, 0.8, 0.52), mk.g * 0.7);`);
+vTint = mix(vTint, vec3(0.95, 0.85, 0.5), mk.g * 0.75);`);
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', '#include <common>\nvarying float vH; varying vec3 vTint;')
         .replace('vec4 diffuseColor = vec4( diffuse, opacity );', 'vec4 diffuseColor = vec4(mix(vec3(0.065, 0.14, 0.03), vec3(0.17, 0.33, 0.075), vH) * vTint, 1.0);')

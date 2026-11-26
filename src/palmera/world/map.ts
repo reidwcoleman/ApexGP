@@ -56,6 +56,13 @@ export function bridgeDeckY(x: number): number {
 }
 
 /** Terrain height ignoring bridge and docks. */
+/** a pond's outline: radius factor (of its half width/depth) at angle a, a lumpy oval */
+export function pondShape(f: { x: number; z: number }, a: number): number {
+  const s1 = Math.sin(f.x * 12.9898 + f.z * 78.233) * 43758.5453, s2 = Math.sin(f.x * 39.346 + f.z * 11.135) * 24634.6345;
+  const p1 = (s1 - Math.floor(s1)) * 6.283, p2 = (s2 - Math.floor(s2)) * 6.283;
+  return 0.86 + 0.12 * Math.sin(a * 2 + p1) + 0.08 * Math.sin(a * 3 + p2) + 0.04 * Math.sin(a * 5 + p1 * 2);
+}
+
 export function groundBase(x: number, z: number): number {
   if (x >= MAIN.x0 && x <= MAIN.x1 && z >= MAIN.z0 && z <= MAIN.z1) return 0;
   if (z >= ISLAND.z0 && z <= ISLAND.z1 && x >= ISLAND.x0) {
@@ -690,14 +697,20 @@ export class CityMap {
       for (const sz of SWAMP_Z) if (Math.abs(z - sz) < m && x > -566) return false;
       return true;
     };
-    for (let i = 0; i < 26; i++) {
+    for (let i = 0; i < 90; i++) {
       const x = rng.range(-710, -500), z = rng.range(-600, 600);
-      const w = rng.range(14, 40), d = rng.range(14, 50);
+      const w = rng.range(16, 52), d = rng.range(16, 60);
       if (!roadClear(x, z, Math.max(w, d) / 2 + 8)) continue;
       this.flats.push({ x, z, w, d, kind: 'pond' });
     }
-    for (let i = 0; i < 520; i++) {
-      const x = rng.range(-715, -486), z = rng.range(-615, 615);
+    // cypress in groves (and standing in the ponds), not sprinkled evenly
+    const groves: [number, number][] = [];
+    for (let i = 0; i < 40; i++) groves.push([rng.range(-712, -490), rng.range(-610, 610)]);
+    for (let i = 0; i < 760; i++) {
+      const gv = groves[i % groves.length];
+      const near = rng.chance(0.75);
+      const x = near ? gv[0] + rng.range(-22, 22) : rng.range(-715, -486), z = near ? gv[1] + rng.range(-22, 22) : rng.range(-615, 615);
+      if (x < -718 || x > -484 || z < -616 || z > 616) continue;
       if (!roadClear(x, z, 9)) continue;
       this.props.push({ x, z, s: rng.range(0.7, 1.4), r: rng.range(0, 6.28), kind: rng.chance(0.8) ? 'cypress' : 'bush' });
     }
