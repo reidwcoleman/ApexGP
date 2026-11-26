@@ -3366,7 +3366,10 @@ export class Game {
   private readonly visor: HTMLDivElement;
   private visorOn = false;
   private syncAllViews(dt: number, ghosts?: CarPhysics[]) {
-    CarView.lodScale = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2) / Math.tan(THREE.MathUtils.degToRad(25));
+    // (Low / Medium: the other cars drop to their lighter models sooner — 20 near-detail cars are ~700 k
+    // triangles and ~350 draws; a slower GPU spends them where you can't tell)
+    const lodQ = this.gfx.qualityLevel === 'low' ? 2.2 : this.gfx.qualityLevel === 'medium' ? 1.4 : 1;
+    CarView.lodScale = (lodQ * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) / Math.tan(THREE.MathUtils.degToRad(25));
     this.camPos.copy(this.camera.position);
     const onboardEye = INSIDE_CAR[this.cams.view] === true;
     const visor = this.cams.view === 'helmet' && (this.state === 'race' || this.state === 'intro' || this.state === 'paused');
@@ -4282,7 +4285,9 @@ export class Game {
     // so the kerbs, the barriers and the trees streak hard down the straights
     const kmh = st === 'race' || st === 'intro' || st === 'flashback' ? Math.max(0, this.race.player.car.vx * 3.6) : 0;
     const fast = THREE.MathUtils.smoothstep(kmh, 140, 320);
-    g.motionBlur = live ? MOTION_SHUTTER[this.menu.settings.motionBlur ?? 'cinematic'] * (1 + MOTION_SPEED_GAIN * fast) : 0;
+    // (Low: no motion blur — its velocity buffer and gather are two full-screen passes a slow GPU can't spare)
+    const lowGfx = g.qualityLevel === 'low';
+    g.motionBlur = live && !lowGfx ? MOTION_SHUTTER[this.menu.settings.motionBlur ?? 'cinematic'] * (1 + MOTION_SPEED_GAIN * fast) : 0;
     const eye = (st === 'race' || st === 'intro' || st === 'flashback' || st === 'paused') && INSIDE_CAR[this.cams.view];
     g.onboardCar = eye ? (this.rigs.get(this.race.player.entry)?.root ?? null) : null;
     // (its steering wheel turns inside it: the TAA and the motion blur follow the wheel's own turn)
@@ -4327,9 +4332,11 @@ export class Game {
     // (with camera motion blur on, the real per-pixel streaks replace the radial approximation)
     const chaseCam = this.cams.view === 'chase' || this.cams.view === 'far' || this.cams.view === 'lowchase';
     const k = chaseCam ? Math.max(0, Math.min(1, (kmh - 190) / 150)) : 0;
-    const radial = (this.menu.settings.motionBlur ?? 'cinematic') === 'off';
+    // (Low: neither the radial blur nor the colour fringe — each is a full-screen pass of its own)
+    const lowGfx = this.gfx.qualityLevel === 'low';
+    const radial = (this.menu.settings.motionBlur ?? 'cinematic') === 'off' && !lowGfx;
     this.gfx.setSpeedBlur(radial ? k * k * 0.006 + (chaseCam && car.ersDeploying ? 0.001 : 0) : 0);
-    this.gfx.setAberration(k * 0.0004);
+    this.gfx.setAberration(lowGfx ? 0 : k * 0.0004);
     // rain on the lens for the onboard cameras, plus spray thrown up by the car ahead
     const w = this.race.weatherState;
     const cam = this.cams.view;
@@ -4536,6 +4543,12 @@ export class Game {
           this.leanOn = true;
           this.env.setLean(true);
           aq.settleUntil = now + 1.5;
+        }
+      } else if (gfx.dynamicScale <= gfx.minDynamic + 0.001 && st.autoQuality && (gfx.qualityLevel === 'high' || gfx.qualityLevel === 'medium')) {
+        // (auto, on a slower machine: lean High still short → Medium → Low, the session only)
+        if (++aq.slowAtFloor >= 6) {
+          aq.slowAtFloor = 0;
+          this.setAutoQuality(gfx.qualityLevel === 'high' ? 'medium' : 'low');
         }
       } else aq.slowAtFloor = 0;
     } else if (roomy && fps >= 57) {

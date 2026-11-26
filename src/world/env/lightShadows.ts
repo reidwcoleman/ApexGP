@@ -30,6 +30,7 @@ const _c = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _up = new THREE.Vector3();
 const _eye = new THREE.Vector3();
+const _zero = new THREE.Vector3();
 
 export class FocusSunShadow extends SunLightShadow {
   /** world point the focus cascade is centred on */
@@ -56,8 +57,28 @@ export class FocusSunShadow extends SunLightShadow {
   /** a long lens centres the view cascade on the followed car (see updateMatrices; dev A/B) */
   followLens = true;
 
+  /**
+   * (perf, Low / Medium) the view cascade is drawn on one shadow update in `farEvery`; in between it
+   * keeps its map and its matrix (so it still lines up), and only the focus cascade round the car is
+   * redrawn — the scissor keeps the atlas clear off the view cascade's half
+   */
+  farEvery = 1;
+  private farTick = 0;
+  private skipFar = false;
+  private farMap: THREE.WebGLRenderTarget | null = null;
   override updateMatrices(light: THREE.Light, viewCamera?: THREE.Camera) {
     if (!viewCamera) return;
+    {
+      // (the viewport count stays 2 — the lights' uniforms and the programs depend on it: a skipped
+      // view cascade is culled to nothing and scissored off instead)
+      const map = this.map as THREE.WebGLRenderTarget | null;
+      this.skipFar = this.farEvery > 1 && map !== null && map === this.farMap && ++this.farTick % this.farEvery !== 0;
+      this.farMap = map;
+      if (map) {
+        map.scissorTest = this.skipFar;
+        if (this.skipFar) map.scissor.set(0, 0, map.width / 2, map.height);
+      }
+    }
     const self = this as unknown as {
       _viewports: THREE.Vector4[];
       _cameras: THREE.OrthographicCamera[];
@@ -107,7 +128,11 @@ export class FocusSunShadow extends SunLightShadow {
     const ahead0 = this.farSize * this.farAhead;
     const ahead = narrow > 0 && along > ahead0 ? THREE.MathUtils.lerp(ahead0, Math.min(along, 2500), narrow) : ahead0;
 
-    for (let i = 0; i < 2; i++) {
+    if (this.skipFar) {
+      const f = (this as unknown as { _frustums: THREE.Frustum[] })._frustums[1];
+      for (const pl of f.planes) pl.set(_zero, -1e12);
+    }
+    for (let i = 0; i < (this.skipFar ? 1 : 2); i++) {
       const size = i === 0 ? this.nearSize : this.farSize;
       const half = size / 2;
       if (i === 0) _c.copy(this.focus);
@@ -294,7 +319,7 @@ export interface SunRig {
   sun: SunLight;
   shadow: FocusSunShadow;
   setDirection(dir: THREE.Vector3): void;
-  setQuality(mapSize: number, farSize: number): void;
+  setQuality(mapSize: number, farSize: number, farEvery?: number): void;
 }
 
 export function createSun(): SunRig {
@@ -316,7 +341,8 @@ export function createSun(): SunRig {
       sun.position.copy(dir).normalize();
       sun.updateMatrixWorld();
     },
-    setQuality(mapSize, farSize) {
+    setQuality(mapSize, farSize, farEvery = 1) {
+      shadow.farEvery = farEvery;
       if (shadow.mapSize.x !== mapSize) {
         shadow.mapSize.set(mapSize, mapSize);
         if (shadow.map) {

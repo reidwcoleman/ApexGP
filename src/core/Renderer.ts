@@ -1,3 +1,4 @@
+import { setGpuName } from './deviceTier.ts';
 import * as THREE from 'three';
 import {
   BlendFunction,
@@ -1165,6 +1166,7 @@ export class Renderer {
     const dbg = gl.getExtension('WEBGL_debug_renderer_info');
     const gpuName = String(dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
     this.gpuName = gpuName;
+    setGpuName(gpuName);
     this.timerTrusted = !/apple|m1|m2|m3|m4/i.test(gpuName);
     // (perf) …so there they aren't run at all (?gputime for the readout): reading a result back asks
     // the GPU process whether the timer was disjoint, a blocking round trip behind the frame just sent
@@ -1311,7 +1313,13 @@ export class Renderer {
     this.grade.adaptLinks.push(this.film);
     // (the grain lives in the print stage now — sensor noise that follows the light; `grain` stays as
     // the knob: its opacity is the base amount)
-    this.composer.addPass(new EffectPass(camera, new SanitizeEffect(), this.ssao, this.shafts, this.bloom, this.grade, this.toneMapping, this.film, this.vignette));
+    const sanitize = new SanitizeEffect();
+    this.printFull = [sanitize, this.ssao, this.shafts, this.bloom, this.grade, this.toneMapping, this.film, this.vignette];
+    // (Low: the print stage without the AO, the shafts and the bloom — bloom's mip chain alone is a dozen
+    // render targets a frame, and the three cost a slower GPU more than the whole scene does)
+    this.printLean = [sanitize, this.grade, this.toneMapping, this.film, this.vignette];
+    this.printPass = new EffectPass(camera, ...this.printFull);
+    this.composer.addPass(this.printPass);
 
     this.aberration = new ChromaticAberrationEffect({
       offset: new THREE.Vector2(0, 0),
@@ -1335,6 +1343,10 @@ export class Renderer {
   // ------------------------------------------------------------------ perf plumbing
 
   private readonly smaa: SMAAEffect;
+  private readonly printPass: EffectPass;
+  private readonly printFull: Effect[];
+  private readonly printLean: Effect[];
+  private printIsLean = false;
   /** temporal anti-aliasing (High/Ultra; SMAA below): taa.ts */
   private readonly taa: TAAPass;
   /** TAA is running (the game keeps the tracked cars listed for its reprojection even with motion blur off) */
@@ -1528,6 +1540,12 @@ export class Renderer {
     this.smaaPass.enabled = !sharpenOn;
     this.renderer.shadowMap.enabled = true;
     this.shafts.active = q !== 'low';
+    if ((q === 'low') !== this.printIsLean) {
+      this.printIsLean = q === 'low';
+      (this.printPass as unknown as { setEffects(e: Effect[]): void }).setEffects(this.printIsLean ? this.printLean : this.printFull);
+      // (sized again by the resize below; the AO keeps the depth texture the composer gave it)
+      this.printPass.recompile();
+    }
     this.motion.maxTaps = q === 'low' ? 6 : q === 'medium' ? 12 : q === 'high' ? 20 : 32;
     this.motion.velScale = q === 'low' || q === 'medium' ? 0.5 : 1;
     this.onboard.twoSided = q === 'high' || ultraUp(q);
@@ -1591,7 +1609,8 @@ export class Renderer {
   private shimmer = 0;
   /** heat haze over hot asphalt, 0 … 1 (weather; shares the lens pass) */
   setHeatShimmer(amount: number) {
-    const k = THREE.MathUtils.clamp(amount, 0, 1);
+    // (Low: no heat haze — it holds the lens pass, a full-screen pass, on through every sunny race)
+    const k = this.quality === 'low' ? 0 : THREE.MathUtils.clamp(amount, 0, 1);
     if (Math.abs(k - this.shimmer) < 0.002) return;
     this.shimmer = k;
     this.lensRain.uniforms.get('shimmer')!.value = k;

@@ -1,6 +1,6 @@
 import { ALL_CIRCUITS, CIRCUITS, SCENIC, isScenic } from '../world/Circuits.ts';
 import type { CircuitDef } from '../world/CircuitGen.ts';
-import { RANKS, SCENIC_STARS, START_OPEN, STARS, TOUR_LAPS, UNLOCK_POS, medalFor, type Career, type Medal } from '../career/Career.ts';
+import { RANKS, SCENIC_STARS, START_OPEN, STARS, TOUR_LAPS, UNLOCK_ALL, UNLOCK_POS, medalFor, type Career, type Medal } from '../career/Career.ts';
 import { GEO, PIN_OFFSET } from '../career/Season.ts';
 import { WORLD_BORDERS, WORLD_GRATICULE, WORLD_H, WORLD_LAND, WORLD_OUTLINE, WORLD_PROJ, WORLD_W } from '../career/worldLand.ts';
 import { stillFor } from './loadingArt.ts';
@@ -181,11 +181,11 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
   map.insertAdjacentHTML(
     'beforeend',
     `<div class="tr-head"><div class="eyebrow">Career · ${esc(rk.name)}</div><div class="tr-title">World <span>Tour</span></div>` +
-      `<div class="tr-sub">Race any open circuit, in any order. A first top ${UNLOCK_POS} at a circuit earns a Tour pass: spend it to open any circuit you like.</div>` +
+      `<div class="tr-sub">${UNLOCK_ALL ? 'Every circuit is open: race them in any order. Each one has three stars to win and a bonus challenge.' : `Race any open circuit, in any order. A first top ${UNLOCK_POS} at a circuit earns a Tour pass: spend it to open any circuit you like.`}</div>` +
       `<div class="tr-stats"><div class="ts big"><b>${stars}<small>/${maxStars}</small></b><span>${starsSvg(1, 11)}Stars</span></div>` +
       `<div class="ts"><b>${opened}<small>/${ALL_CIRCUITS.length}</small></b><span>Circuits open</span></div>` +
       `<div class="ts med"><b><i class="md gold"></i>${med.gold}<i class="md silver"></i>${med.silver}<i class="md bronze"></i>${med.bronze}</b><span>Medals</span></div>` +
-      `<div class="ts pass${passes ? ' have' : ''}"><b><svg viewBox="0 0 16 16" width="20" height="20"><path d="M2 4.5h12v2.2a1.6 1.6 0 0 0 0 3.1v2.2H2V9.8a1.6 1.6 0 0 0 0-3.1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M9.5 5v6" stroke="currentColor" stroke-width="1.2" stroke-dasharray="1.4 1.4"/></svg>${passes}</b><span>Tour pass${passes === 1 ? '' : 'es'}</span></div></div>` +
+      `<div class="ts pass${passes ? ' have' : ''}"${UNLOCK_ALL ? ' hidden' : ''}><b><svg viewBox="0 0 16 16" width="20" height="20"><path d="M2 4.5h12v2.2a1.6 1.6 0 0 0 0 3.1v2.2H2V9.8a1.6 1.6 0 0 0 0-3.1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M9.5 5v6" stroke="currentColor" stroke-width="1.2" stroke-dasharray="1.4 1.4"/></svg>${passes}</b><span>Tour pass${passes === 1 ? '' : 'es'}</span></div></div>` +
       `<div class="tr-rank"><div class="rk-top"><span class="rk-i">${rk.index + 1}</span><b>${esc(rk.name)}</b>${rk.next ? `<em>${rk.toNext} star${rk.toNext === 1 ? '' : 's'} to ${esc(rk.next)}</em>` : '<em>Top rank</em>'}</div>` +
       `<div class="rk-bar">${RANKS.slice(1).map((r, i) => `<i class="${i < rk.index ? 'on' : i === rk.index ? 'cur' : ''}" style="--k:${i === rk.index ? rk.k.toFixed(3) : i < rk.index ? 1 : 0}"></i>`).join('')}</div></div>` +
       (recent.length
@@ -453,7 +453,7 @@ export function renderTour(p: HTMLElement, ctx: TourCtx) {
         `<span>Raced <b>${rec.races}×</b>${b !== undefined ? ` · best <b>P${b}</b>` : ''}${rec.last ? ` · last ${rec.last.dnf ? '<b>DNF</b>' : `<b>P${rec.last.pos}</b>`} ${ago}` : ''}${m === 'gold' ? ' · every star here is yours' : m ? ' · race again for more stars' : ''}</span>`,
       );
     } else {
-      el('div', 'tr-why', body, `<span>Not raced yet. <b>Top ${UNLOCK_POS}</b> ${scenic ? 'earns its first star' : 'earns a star and a Tour pass'}.</span>`);
+      el('div', 'tr-why', body, `<span>Not raced yet. <b>Top ${UNLOCK_POS}</b> ${scenic || UNLOCK_ALL ? 'earns its first star' : 'earns a star and a Tour pass'}.</span>`);
     }
     const openable = st === 'locked' && !scenic && passes > 0;
     lapsRow.hidden = st === 'locked';

@@ -1,3 +1,4 @@
+import { deviceTier } from '../core/deviceTier.ts';
 import { TEAMS } from '../race/Teams.ts';
 import type { QualityLevel } from '../core/Renderer.ts';
 import type { CameraMode } from '../game/Cameras.ts';
@@ -169,7 +170,7 @@ function forecastStrip(w: WeatherChoice, t: TimeChoice, laps: number, km: number
 }
 const TYRE_CHOICES: (Compound | 'auto')[] = ['auto', ...COMPOUND_ORDER];
 const QUALITY: QualityLevel[] = ['low', 'medium', 'high', 'ultra', 'tuned'];
-const SETTINGS_V = 4;
+const SETTINGS_V = 5;
 const DAMAGE: DamageMode[] = ['full', 'cosmetic', 'off'];
 const DAMAGE_LABEL: Record<DamageMode, string> = { full: 'Full · cars can be destroyed', cosmetic: 'Visual only', off: 'Off' };
 
@@ -406,14 +407,21 @@ export class Menu {
     // (2026-11-10, Reid: the best picture the game can draw, whatever it costs — Ultra, and the governor
     // no longer steps the level down on its own; the resolution still adapts. Settings › Graphics has
     // the cheaper levels and "auto")
-    this.settings = load<Settings>('apexgp.settings', { v: SETTINGS_V, quality: 'ultra', camera: 'chase', volume: 0.8, music: 0.35, autoQuality: false });
+    // (2026-11-26: a slower machine starts lower, with auto on, so it holds its frame rate: deviceTier.ts;
+    // an Apple-silicon Mac or a gaming card still starts on Ultra, held)
+    const tier = deviceTier();
+    this.settings = load<Settings>('apexgp.settings', { v: SETTINGS_V, quality: tier.quality, camera: 'chase', volume: 0.8, music: 0.35, autoQuality: tier.auto });
     // (driving cameras only: a save from before may hold the helicopter, the tactical map or the TV director)
     this.settings.camera = driveCamera(this.settings.camera);
     if (typeof this.settings.music !== 'number') this.settings.music = 0.35;
     if (this.settings.autoQuality === undefined) this.settings.autoQuality = true;
     // older saves start again from Ultra, held (see above)
+    if ((this.settings.v ?? 0) < 4) this.settings = { ...this.settings, v: 4, quality: this.settings.quality === 'tuned' ? 'tuned' : 'ultra', autoQuality: false };
+    // (v5: the forced Ultra of v4 on a machine that can't carry it goes to that machine's level, auto on;
+    // a level the player picked themselves since is kept)
     if ((this.settings.v ?? 0) < SETTINGS_V) {
-      this.settings = { ...this.settings, v: SETTINGS_V, quality: this.settings.quality === 'tuned' ? 'tuned' : 'ultra', autoQuality: false };
+      if (!tier.strong && this.settings.quality === 'ultra' && !this.settings.autoQuality) this.settings = { ...this.settings, quality: tier.quality, autoQuality: tier.auto };
+      this.settings.v = SETTINGS_V;
       save('apexgp.settings', this.settings);
     }
     for (const id of ['title', 'setup', 'settings', 'assists', 'camera', 'controls', 'pause', 'results'] as ScreenId[]) {
@@ -606,7 +614,7 @@ export class Menu {
       const pz = this.career.passes();
       el('div', 'eyebrow', box, `World Tour · ${this.career.rank().name} · ${st} of ${this.career.maxStars()} stars`);
       el('div', 'title', box, tc ? `Next up: ${tc.short}` : pz ? 'Open a new circuit' : 'Go for the wins');
-      el('div', 'meta', box, pz ? `You have ${pz} Tour pass${pz === 1 ? '' : 'es'}: open any circuit on the map.` : tc ? `Top ${UNLOCK_POS} at ${tc.short} earns a star and a Tour pass to open any circuit.` : 'Every win is three stars. Race any open circuit, in any order.');
+      el('div', 'meta', box, pz ? `You have ${pz} Tour pass${pz === 1 ? '' : 'es'}: open any circuit on the map.` : tc ? `Top ${UNLOCK_POS} at ${tc.short} earns a star${UNLOCK_ALL ? `. All ${ALL_CIRCUITS.length} circuits are open.` : ' and a Tour pass to open any circuit.'}` : 'Every win is three stars. Race any open circuit, in any order.');
       const go = el('div', 'cta home-go', box, tc ? `Race ${tc.short}` : 'World Tour');
       this.action(go, () => (tc ? this.cb.onCareerRace(tc.id) : this.setTab('career')));
       const map = el('div', 'home-quick', box, 'World Tour map ›');
@@ -1112,7 +1120,7 @@ export class Menu {
       const scenic = ri < 0;
       el('div', 'pcap round', ht, scenic ? 'World Tour · Scenic road' : `World Tour · Round ${ri + 1} of ${CIRCUITS.length}`);
       const m = medalFor(this.career.data.best[st.track]);
-      goal = !m ? (scenic ? `Top ${UNLOCK_POS} earns your first star here.` : `Top ${UNLOCK_POS} earns a star and a Tour pass.`) : m === 'gold' ? 'All three stars won here. Race for the fun of it.' : `Your best here is P${this.career.data.best[st.track]}. Beat it for more stars.`;
+      goal = !m ? (scenic || UNLOCK_ALL ? `Top ${UNLOCK_POS} earns your first star here.` : `Top ${UNLOCK_POS} earns a star and a Tour pass.`) : m === 'gold' ? 'All three stars won here. Race for the fun of it.' : `Your best here is P${this.career.data.best[st.track]}. Beat it for more stars.`;
     } else el('div', 'pcap round', ht, this.mode === 'race' ? 'Race' : 'Time trial');
     el('h2', '', ht, def.name);
     if (!career) goal = this.mode === 'race' ? 'Standing start from the grid.' : 'Flying lap. Beat your best.';
@@ -1459,10 +1467,19 @@ export class Menu {
     el('p', 'lede', p, 'Changes apply straight away.');
     const st = this.settings;
     const label: Record<QualityLevel, string> = { low: 'Low', medium: 'Medium', high: 'High', ultra: 'Ultra', tuned: 'Ultra Tuned' };
-    this.opt(p, 'Graphics', () => label[st.quality] + (st.autoQuality ? ' <span class="dim">· auto</span>' : ''), (d) => {
-      const i = QUALITY.indexOf(st.quality);
-      st.quality = QUALITY[(i + d + QUALITY.length) % QUALITY.length];
-      st.autoQuality = false;
+    // (first in the cycle: Auto — this machine's starting level, stepped down by the governor while the
+    // frame rate won't hold; then the fixed levels)
+    this.opt(p, 'Graphics', () => (st.autoQuality ? `Auto <span class="dim">· ${label[st.quality]}</span>` : label[st.quality]), (d) => {
+      const n = QUALITY.length + 1;
+      const i = st.autoQuality ? 0 : QUALITY.indexOf(st.quality) + 1;
+      const j = (i + d + n) % n;
+      if (j === 0) {
+        st.autoQuality = true;
+        st.quality = deviceTier().quality;
+      } else {
+        st.autoQuality = false;
+        st.quality = QUALITY[j - 1];
+      }
     }, true);
     this.opt(p, 'Motion blur', () => MOTION_BLUR_LABEL[st.motionBlur ?? 'cinematic'], (d) => {
       const i = MOTION_BLUR.indexOf(st.motionBlur ?? 'cinematic');

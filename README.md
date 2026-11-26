@@ -27,6 +27,8 @@ npm run check    # tsc --noEmit
 - **Autodromo Nazionale Monza** — the real Temple of Speed, 5.793 km, built from a surveyed
   centreline (within ~4 m of the real track): the Rettifilo chicane, Curva Grande, Roggia, both
   Lesmos, the Serraglio under the old banking, Ascari and the Parabolica, in the Parco di Monza.
+- **Every circuit open from the start** on the World Tour (`UNLOCK_ALL` in Career.ts; the 13 other
+  circuits and the three scenic roads removed on 2026-11-10 were restored on 2026-11-26).
 - **Nine real circuits**, each from a surveyed centreline, with real elevation, named corners,
   DRS zones and landmarks: Monza, Spa-Francorchamps (Eau Rouge), Silverstone (the Wing, Maggotts–
   Becketts), Suzuka (the figure-8 bridge, the Ferris wheel), Montréal (Wall of Champions, the
@@ -603,7 +605,15 @@ npm run check    # tsc --noEmit
   proportion to how far the frame rate is short (one step to about 58 fps, not several), each step resizes the
   internal buffers only (the canvas and the composer are left alone unless the window changes), and a race
   starts a step above the scale the last one settled on at that graphics level (`apexgp.dynscale` in the
-  browser) rather than walking down from full resolution with a hitch per step. The front and rear
+  browser) rather than walking down from full resolution with a hitch per step.
+  Slower machines: the first visit picks the graphics level from the GPU name, cores and memory
+  (`src/core/deviceTier.ts`; an Apple-silicon Mac or a gaming card starts on Ultra, held there; an
+  integrated or phone GPU starts on Medium or Low with Auto on; `?device=low|medium|high|strong` forces
+  it). Settings › Graphics has Auto first; Auto steps down High → lean High → Medium → Low while the frame
+  rate won't hold, each after the resolution floor. Low drops the motion blur, radial blur, colour fringe,
+  heat haze, bloom, sun shafts and screen-space AO, redraws the far shadow cascade every other frame
+  (`FocusSunShadow.farEvery`, also on Medium; the focus cascade round the car stays every frame), and
+  swaps the other cars to their lighter models sooner (`CarView.lodScale`). The front and rear
   suspension links are live: they run from the chassis pickups to the upright clevises and follow
   the steering and the body's motion.
 - **F1-game mechanics** — flashback (rewind up to 30 s, press R again to go further back, Enter to

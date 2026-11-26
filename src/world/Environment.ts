@@ -153,9 +153,10 @@ const NIGHT_FLOOD = 0;
 const NIGHT_MAX_ADAPT = 2.2;
 const floodScale = (night: number) => THREE.MathUtils.lerp(1, NIGHT_FLOOD, THREE.MathUtils.smoothstep(night, 0.5, 1));
 
-const QUALITY: Record<QualityLevel, { shadowMap: number; farSize: number; rain: number }> = {
-  low: { shadowMap: 1024, farSize: 280, rain: 0.45 },
-  medium: { shadowMap: 1536, farSize: 320, rain: 0.7 },
+// (farEvery: the view cascade redrawn on every n-th frame — see FocusSunShadow.farEvery)
+const QUALITY: Record<QualityLevel, { shadowMap: number; farSize: number; rain: number; farEvery?: number }> = {
+  low: { shadowMap: 1024, farSize: 280, rain: 0.45, farEvery: 2 },
+  medium: { shadowMap: 1536, farSize: 320, rain: 0.7, farEvery: 2 },
   high: { shadowMap: 2048, farSize: 360, rain: 1 },
   ultra: { shadowMap: 3072, farSize: 420, rain: 1 },
   // (Ultra Tuned: 4K shadow maps over a longer reach — crisp shadows of the fences, the wires, the
@@ -283,7 +284,7 @@ export function createEnvironment(
   const rig = createSun();
   const sun = rig.sun;
   group.add(sun);
-  rig.setQuality(QUALITY[quality].shadowMap, QUALITY[quality].farSize);
+  rig.setQuality(QUALITY[quality].shadowMap, QUALITY[quality].farSize, QUALITY[quality].farEvery);
 
   const hemi = new THREE.HemisphereLight(0xbfd4ff, 0x4a4030, 0.1);
   group.add(hemi);
@@ -959,7 +960,7 @@ export function createEnvironment(
     lean = on;
     if (on) {
       if (parts.trees) scenery.setQuality('medium');
-      if (parts.shadows) rig.setQuality(1536, 300);
+      if (parts.shadows) rig.setQuality(1536, 300, 2);
     } else setQuality(quality);
   }
   function setQuality(q: QualityLevel) {
@@ -967,7 +968,7 @@ export function createEnvironment(
     lean = false;
     const Q = QUALITY[q];
     clouds.setQuality(q);
-    rig.setQuality(Q.shadowMap, Q.farSize);
+    rig.setQuality(Q.shadowMap, Q.farSize, Q.farEvery);
     rain.setDensity(Q.rain);
     scenery.setQuality(q);
     // (the env map keeps its size on every level: cars hold a reference to scene.environment,
