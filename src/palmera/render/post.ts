@@ -111,7 +111,10 @@ class ShaftsEffect extends Effect {
     (this.uniforms.get('uSun')!.value as THREE.Vector2).set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5);
     (this.uniforms.get('uSunCol')!.value as THREE.Color).copy(sunCol);
     const lowSun = THREE.MathUtils.smoothstep(sunDir.y, -0.02, 0.06) * (1 - THREE.MathUtils.smoothstep(sunDir.y, 0.35, 0.8));
-    this.uniforms.get('uStrength')!.value = 1.1 * day * facing * onScreen * (0.35 + 0.65 * Math.max(lowSun, sunset));
+    // shafts are a ground-level thing, broken up by buildings; from a roof or a helicopter they'd lay a
+    // milky veil over the whole city, so they fade out with height
+    const high = 1 / (1 + Math.max(0, camera.position.y - 15) / 20);
+    this.uniforms.get('uStrength')!.value = 1.1 * day * facing * onScreen * (0.35 + 0.65 * Math.max(lowSun, sunset)) * high;
   }
 }
 

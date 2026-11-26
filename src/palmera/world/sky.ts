@@ -380,6 +380,8 @@ export class SkySystem {
     // haze: the horizon's colour pulled toward the sky's blue (a white fog bleaches the skyline)
     fog.color.copy(this.horizon).lerp(this.zenith, 0.45).multiplyScalar(0.85);
     fog.density = lerp(0.00032, 0.0008, this.night) + this.sunset * 0.00012 + rn * 0.0032;
+    // haze sits low: from a rooftop or a helicopter you see through more of it
+    fog.density /= 1 + Math.max(0, camPos.y - 25) / 85;
     fog.color.lerp(new THREE.Color(0.5, 0.53, 0.57).multiplyScalar(0.15 + 0.85 * this.day), rn * 0.8);
     // exposure: keep the frame bright as the light falls (eyes adapt), but let night be night
     const e = this.sunDir.y;
