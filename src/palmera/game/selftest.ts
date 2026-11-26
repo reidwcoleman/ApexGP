@@ -74,8 +74,9 @@ export async function runSelfTest(game: Game): Promise<SelfTestResult> {
   game.weapons.select('fist');
 
   // drive: spawn a sedan next to the player, press F, hold W
-  // (clear the street first: with denser traffic another car could box the test car in)
+  // (clear the street first: with denser traffic and crowds a car or a pedestrian could block the test car)
   for (const u of [...game.vehicles]) if (u.driver !== 'player' && Math.hypot(u.pos.x - p.pos.x, u.pos.z - p.pos.z) < 25) game.removeVehicle(u);
+  for (const h of [...game.npcs]) if (Math.hypot(h.pos.x - p.pos.x, h.pos.z - p.pos.z) < 25) game.removeNpc(h);
   const car = game.spawnCar('sedan', p.pos.x - fz * 6.0, p.pos.z + fx * 6.0, p.yaw); // on the quiet side, clear of palms
   car.persistent = true;
   await waitGame(game, 0.2);
@@ -103,7 +104,7 @@ export async function runSelfTest(game: Game): Promise<SelfTestResult> {
   steps.push({
     step: 'act',
     passed: jumped > 0.4 && punched && fired && entered && drove > 5,
-    detail: `jumped ${jumped.toFixed(2)} m, punch ${punched ? 'hit' : 'missed'} (ped hp ${h0}->${Math.round(ped.health)}), pistol ${fired ? 'fired' : 'did not fire'}, entered car ${entered}, drove ${drove.toFixed(1)} m reaching ${(topSpeed * 2.237).toFixed(0)} mph, exited ${exited}`,
+    detail: `${[jumped > 0.4 ? '' : 'jump', punched ? '' : 'punch', fired ? '' : 'pistol', entered ? '' : 'enter', drove > 5 ? '' : 'drive'].filter(Boolean).map((x) => 'FAILED-' + x + ' ').join('')}jumped ${jumped.toFixed(2)} m, punch ${punched ? 'hit' : 'missed'} (ped hp ${h0}->${Math.round(ped.health)}), pistol ${fired ? 'fired' : 'did not fire'}, entered car ${entered}, drove ${drove.toFixed(1)} m reaching ${(topSpeed * 2.237).toFixed(0)} mph, exited ${exited}`,
   });
 
   // ---- wanted: punching raised heat?
