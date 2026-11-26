@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import { Vehicle } from '../entities/vehicle';
 import { BEACH, groundAt } from '../world/map';
 import type { Game } from './game';
-import { FleeAI, TrafficAI } from './traffic';
+import { FleeAI, TrafficAI, steerTo } from './traffic';
+import type { CarAI } from '../entities/vehicle';
 
 export interface Blip {
   x: number;
@@ -613,6 +614,142 @@ export const MISSIONS: MissionDef[] = [
     },
   },
 ];
+
+
+/** the smuggler's airboat: runs pond to pond across the swamp, away from you when you're close */
+class SmugglerAI implements CarAI {
+  tx = 0;
+  tz = 0;
+  t = 99;
+  constructor(private game: Game) {}
+  private pick(v: Vehicle) {
+    const ponds = this.game.map.flats.filter((f) => f.kind === 'pond');
+    const p = this.game.player.vehicle ? this.game.player.vehicle.pos : this.game.player.pos;
+    let best = ponds[0], bs = -1e9;
+    for (let k = 0; k < 10; k++) {
+      const f = ponds[Math.floor(Math.random() * ponds.length)];
+      const dv = Math.hypot(f.x - v.pos.x, f.z - v.pos.z);
+      if (dv < 30 || dv > 200) continue;
+      const sc = Math.hypot(f.x - p.x, f.z - p.z) - dv * 0.3;
+      if (sc > bs) { bs = sc; best = f; }
+    }
+    this.tx = best.x;
+    this.tz = best.z;
+    this.t = 0;
+  }
+  drive(v: Vehicle, dt: number) {
+    this.t += dt;
+    if (this.t > 14 || Math.hypot(this.tx - v.pos.x, this.tz - v.pos.z) < 10) this.pick(v);
+    // a touch slower than yours, so a good line catches him
+    v.input.thr = 0.85;
+    v.input.hand = false;
+    v.input.steer = steerTo(v, this.tx, this.tz);
+  }
+}
+
+const sawgrass: MissionDef = {
+  id: 7,
+  title: 'Sawgrass',
+  contact: 'Dell Aucoin',
+  start: { x: -474, z: 80 },
+  reward: 4500,
+  color: '#b5d36b',
+  intro: [
+    'DELL: A boy from the coast has been running cases through my marsh on a red airboat, and not paying the toll.',
+    'DELL: Take one of my skimmers, run him down and knock the fight out of his boat. Bring the case to my shack on the water.',
+  ],
+  create(game) {
+    const ponds = game.map.flats.filter((f) => f.kind === 'pond');
+    const start = ponds.filter((f) => Math.hypot(f.x + 600, f.z - 80) < 160).sort(() => Math.random() - 0.5)[0] ?? ponds[0];
+    const smug = new Vehicle('airboat', 0x9a2a24);
+    smug.place(start.x, start.z, Math.random() * 6.28);
+    smug.persistent = true;
+    smug.urgent = true;
+    smug.driver = 'npc';
+    const ai = new SmugglerAI(game);
+    smug.ai = ai;
+    game.addVehicle(smug);
+    const shack = game.map.buildings.filter((b) => b.x < -490 && b.h < 6).sort((a, b) => Math.hypot(a.x + 520, a.z - 74) - Math.hypot(b.x + 520, b.z - 74))[0];
+    const drop = shack ? { x: shack.x + shack.w / 2 + 3, z: shack.z } : { x: -500, z: 74 };
+    const mkCase = new Marker(game.scene, 0xb5d36b, 1.6, 3);
+    mkCase.group.visible = false;
+    const mkDrop = new Marker(game.scene, 0xb5d36b, 4, 5).at(drop.x, drop.z);
+    mkDrop.group.visible = false;
+    let stage: 'board' | 'chase' | 'case' | 'deliver' = 'board';
+    let time = 150;
+    const cs = { x: 0, z: 0 };
+    const a: ActiveMission = {
+      objective: 'Take one of Dell’s airboats',
+      timer: null,
+      blips: [],
+      update(dt) {
+        mkCase.spin(game.elapsed);
+        mkDrop.spin(game.elapsed);
+        const p = game.player;
+        const ref = p.vehicle ? p.vehicle.pos : p.pos;
+        if (stage === 'board') {
+          const boats = game.vehicles.filter((v) => v.type === 'airboat' && v !== smug);
+          a.blips = boats.map((v) => ({ x: v.pos.x, z: v.pos.z, color: '#b5d36b', label: 'Airboat', kind: 'car' as const }));
+          if (p.vehicle && p.vehicle.type === 'airboat' && p.vehicle !== smug) {
+            stage = 'chase';
+            game.hud.subtitle('DELL: That red one. He has seen you. Hit him hard, and mind my gators.');
+          }
+          return 'running';
+        }
+        if (stage === 'chase') {
+          time -= dt;
+          a.timer = time;
+          const d = Math.hypot(ref.x - smug.pos.x, ref.z - smug.pos.z);
+          a.objective = d > 160 ? 'He is getting away! Close the gap' : 'Ram the red airboat until it gives up';
+          a.blips = [{ x: smug.pos.x, z: smug.pos.z, color: '#ff4040', label: 'Smuggler', kind: 'target' }];
+          if (smug.health <= smug.spec.health * 0.35 || smug.wrecked) {
+            stage = 'case';
+            a.timer = null;
+            smug.ai = null;
+            smug.driver = null;
+            smug.input.thr = 0;
+            cs.x = smug.pos.x + 3;
+            cs.z = smug.pos.z;
+            mkCase.at(cs.x, cs.z);
+            mkCase.group.visible = true;
+            game.audio.cue('pass');
+            game.hud.subtitle('DELL: He is over the side and swimming. The case went in the shallows. Grab it.');
+            return 'running';
+          }
+          if (time <= 0 || d > 320 || !game.vehicles.includes(smug)) {
+            a.failReason = 'The smuggler got away';
+            return 'failed';
+          }
+          return 'running';
+        }
+        if (stage === 'case') {
+          a.objective = 'Pick up the case';
+          a.blips = [{ x: cs.x, z: cs.z, color: '#b5d36b', label: 'Case', kind: 'dest' }];
+          if (Math.hypot(ref.x - cs.x, ref.z - cs.z) < 4.5) {
+            stage = 'deliver';
+            mkCase.group.visible = false;
+            mkDrop.group.visible = true;
+            game.audio.cue('pickup');
+            game.hud.subtitle('DELL: Good. Now bring it home.');
+          }
+          return 'running';
+        }
+        const dd = Math.hypot(ref.x - drop.x, ref.z - drop.z);
+        a.objective = `Bring the case to Dell’s shack · ${Math.round(dd)} m`;
+        a.blips = [{ x: drop.x, z: drop.z, color: '#b5d36b', label: 'Shack', kind: 'dest' }];
+        return dd < 8 ? 'passed' : 'running';
+      },
+      cleanup() {
+        mkCase.dispose(game.scene);
+        mkDrop.dispose(game.scene);
+        smug.persistent = false;
+        smug.urgent = false;
+      },
+    };
+    return a;
+  },
+};
+MISSIONS.push(sawgrass);
 
 export class Missions {
   active: ActiveMission | null = null;
