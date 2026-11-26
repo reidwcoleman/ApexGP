@@ -56,6 +56,8 @@ interface Chunk {
   r: number;
   far: number;
   lodDist: number;
+  /** a cheap stand-in drawn only into the shadow map (layer 1), for chunks near enough to be in it */
+  shadow?: THREE.InstancedMesh;
 }
 
 export class ChunkManager {
@@ -69,6 +71,8 @@ export class ChunkManager {
         c.mesh.visible = vis && near;
         c.lod.visible = vis && !near;
       } else c.mesh.visible = vis;
+      // the sun's shadow box is 70 m either side of you: only chunks reaching into it cast
+      if (c.shadow) c.shadow.visible = vis && d < 90;
     }
   }
 }
@@ -83,7 +87,7 @@ const CHUNK = 280;
 
 function chunked(
   scene: THREE.Scene, cm: ChunkManager, items: Inst[], geo: THREE.BufferGeometry, mat: THREE.Material,
-  opt: { far: number; shadow?: boolean; receive?: boolean; lodGeo?: THREE.BufferGeometry; lodDist?: number; attr?: { name: string; size: number } },
+  opt: { far: number; shadow?: boolean; receive?: boolean; lodGeo?: THREE.BufferGeometry; lodDist?: number; attr?: { name: string; size: number }; shadowGeo?: THREE.BufferGeometry },
 ) {
   const buckets = new Map<string, Inst[]>();
   const v = new THREE.Vector3();
@@ -124,11 +128,35 @@ function chunked(
     const mesh = make(geo);
     const lod = opt.lodGeo ? make(opt.lodGeo, mesh) : undefined;
     if (lod) lod.castShadow = false;
+    // shadows from a cheaper shape: the seen meshes stop casting, a stand-in on layer 1 (which only
+    // the sun's shadow camera renders) casts for them
+    let shadow: THREE.InstancedMesh | undefined;
+    if (opt.shadow && opt.shadowGeo) {
+      mesh.castShadow = false;
+      shadow = make(opt.shadowGeo, mesh);
+      // three's shadow pass tests layers against the main camera, so the camera sees layer 1 too and
+      // the stand-in draws nothing on screen: an unlit material with colour and depth writes off that
+      // keeps only what shapes the shadow (the leaf alpha cut)
+      shadow.material = Array.isArray(mat) ? (mat as THREE.Material[]).map(shadowOnly) : shadowOnly(mat);
+      shadow.castShadow = true;
+      shadow.receiveShadow = false;
+      shadow.layers.set(1);
+    }
     const bs = mesh.boundingSphere!;
-    cm.chunks.push({ mesh, lod, x: bs.center.x, z: bs.center.z, r: bs.radius, far: opt.far, lodDist: opt.lodDist ?? 0 });
+    cm.chunks.push({ mesh, lod, shadow, x: bs.center.x, z: bs.center.z, r: bs.radius, far: opt.far, lodDist: opt.lodDist ?? 0 });
     out.push(mesh);
   }
   return out;
+}
+
+const shadowOnlyCache = new Map<THREE.Material, THREE.Material>();
+function shadowOnly(m: THREE.Material): THREE.Material {
+  let s = shadowOnlyCache.get(m);
+  if (s) return s;
+  const src = m as THREE.MeshStandardMaterial;
+  s = new THREE.MeshBasicMaterial({ map: src.alphaTest ? src.map : null, alphaTest: src.alphaTest, side: src.side, colorWrite: false, depthWrite: false });
+  shadowOnlyCache.set(m, s);
+  return s;
 }
 
 // ------------------------------------------------------------ building material
@@ -701,8 +729,8 @@ function bushGeometry(): THREE.BufferGeometry {
   return merge([prep(g, C(0.3, 0.42, 0.2))]);
 }
 
-function lampGeometry(): THREE.BufferGeometry {
-  const modelled = propGeometry('lamp');
+function lampGeometry(modelledOk = true): THREE.BufferGeometry {
+  const modelled = modelledOk ? propGeometry('lamp') : null;
   if (modelled) return modelled;
   return merge([
     cyl(0.09, 0.14, 7.2, 6, 0, 3.6, 0, 0x4a5056),
@@ -1291,8 +1319,8 @@ export class City {
     const pk = palmKit();
     const tm = swayMaterial(pk.trunkMat, 8), fm = swayMaterial(pk.frondMat, 8), dm = swayMaterial(pk.dryMat, 8);
     this.palmMats.push(tm, fm, dm);
-    chunked(this.scene, this.chunks, palms, pk.trunk, tm, { far: 520, shadow: true, lodGeo: pk.trunkLo, lodDist: 140 });
-    chunked(this.scene, this.chunks, palms, pk.crown, [fm, dm] as unknown as THREE.Material, { far: 520, shadow: true, lodGeo: pk.crownLo, lodDist: 140 });
+    chunked(this.scene, this.chunks, palms, pk.trunk, tm, { far: 520, shadow: true, lodGeo: pk.trunkLo, lodDist: 140, shadowGeo: pk.trunkLo });
+    chunked(this.scene, this.chunks, palms, pk.crown, [fm, dm] as unknown as THREE.Material, { far: 520, shadow: true, lodGeo: pk.crownLo, lodDist: 140, shadowGeo: pk.crownLo });
     void palmMat;
     // broadleaf trees and swamp cypress: branching trunks under canopies of leaf cards
     const leafTex = leafTexture();
@@ -1301,7 +1329,8 @@ export class City {
     this.palmMats.push(tLeaf, cLeaf);
     const trees = groups.get('tree') ?? [], cyp = groups.get('cypress') ?? [];
     chunked(this.scene, this.chunks, trees, trunkGeometry(2.6, 0.22, 4, 5, 4.2, 2.4), std({ roughness: 0.95 }), { far: 420, shadow: true });
-    chunked(this.scene, this.chunks, trees, crownGeometry({ cy: 4.5, rx: 2.7, ry: 1.9, cards: 70, size: 1.7, seed: 9, tint: 0xd8ecc0, filler: true }), tLeaf, { far: 420, shadow: true, lodGeo: crownGeometry({ cy: 4.5, rx: 2.6, ry: 1.8, cards: 18, size: 2.6, seed: 9, tint: 0xd8ecc0, filler: true }), lodDist: 110 });
+    const treeLo = crownGeometry({ cy: 4.5, rx: 2.6, ry: 1.8, cards: 18, size: 2.6, seed: 9, tint: 0xd8ecc0, filler: true });
+    chunked(this.scene, this.chunks, trees, crownGeometry({ cy: 4.5, rx: 2.7, ry: 1.9, cards: 70, size: 1.7, seed: 9, tint: 0xd8ecc0, filler: true }), tLeaf, { far: 420, shadow: true, lodGeo: treeLo, lodDist: 110, shadowGeo: treeLo });
     chunked(this.scene, this.chunks, cyp, trunkGeometry(5.5, 0.3, 5, 21, 7.2, 1.6, 0x6a5c4b), std({ roughness: 0.95 }), { far: 420, shadow: true });
     const cypCrown = () => {
       const parts = [crownGeometry({ cy: 6.6, rx: 1.7, ry: 1.6, cards: 34, size: 1.4, seed: 31, tint: 0xc4d4a4, filler: true }), crownGeometry({ cy: 8.6, rx: 1.3, ry: 1.4, cards: 26, size: 1.3, seed: 57, tint: 0xc4d4a4, filler: true })];
@@ -1322,7 +1351,7 @@ export class City {
     chunked(this.scene, this.chunks, pl.mounds, moundGeometry(), cardMat ?? std({ roughness: 0.9 }), { far: 90, shadow: false, lodGeo: cardMat ? foliageGeometry('mound_lod')! : undefined, lodDist: 30 });
     chunked(this.scene, this.chunks, pl.blossoms, blossomGeometry(), new THREE.MeshStandardMaterial({ roughness: 0.7 }), { far: 90, shadow: false });
     this.grass = new Grass(this.scene, this.map);
-    chunked(this.scene, this.chunks, groups.get('lamp') ?? [], lampGeometry(), std({ roughness: 0.5, metalness: 0.5 }), { far: 380, shadow: true });
+    chunked(this.scene, this.chunks, groups.get('lamp') ?? [], lampGeometry(), std({ roughness: 0.5, metalness: 0.5 }), { far: 380, shadow: true, shadowGeo: lampGeometry(false) });
     chunked(this.scene, this.chunks, lampHeads, new THREE.BoxGeometry(1, 1, 1), this.lampHeadMat, { far: 600, shadow: false, receive: false });
     const poolGeo = new THREE.PlaneGeometry(1, 1);
     const pm = chunked(this.scene, this.chunks, pools, poolGeo, this.poolMat, { far: 260, shadow: false, receive: false });
@@ -1372,7 +1401,7 @@ export class City {
       this.map.colliders.add(pv.x - r, pv.z - r, pv.x + r, pv.z + r, pv.y - 0.2, pv.y + sz[1], true);
     }
     for (const [kind, list] of by) {
-      chunked(this.scene, this.chunks, list, furnitureGeometry(kind), kind === 'shelter' ? glassy : mat, { far: kind === 'shelter' || kind === 'sign' ? 380 : 220, shadow: true });
+      chunked(this.scene, this.chunks, list, furnitureGeometry(kind), kind === 'shelter' ? glassy : mat, { far: kind === 'shelter' || kind === 'sign' ? 380 : 220, shadow: true, shadowGeo: propGeometry(kind) ? furnitureGeometry(kind, false) : undefined });
     }
     // the planters' greenery: a leaf-card shrub seated in the soil and a cluster of blossoms on top
     // (the modelled pot is just the pot)

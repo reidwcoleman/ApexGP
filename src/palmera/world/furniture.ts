@@ -52,8 +52,8 @@ export function propGeometry(name: string): THREE.BufferGeometry | null {
 
 export type FurnitureKind = 'bench' | 'bin' | 'hydrant' | 'news' | 'meter' | 'planter' | 'sign' | 'shelter';
 
-export function furnitureGeometry(kind: FurnitureKind): THREE.BufferGeometry {
-  const modelled = propGeometry(kind);
+export function furnitureGeometry(kind: FurnitureKind, modelledOk = true): THREE.BufferGeometry {
+  const modelled = modelledOk ? propGeometry(kind) : null;
   if (modelled) return modelled;
   const P: THREE.BufferGeometry[] = [];
   switch (kind) {

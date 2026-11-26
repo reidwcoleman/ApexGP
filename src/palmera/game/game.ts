@@ -166,6 +166,8 @@ export class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.15, 2600);
+    // layer 1: the shadow stand-ins (world/city.ts) - three casts shadows only from layers this camera sees
+    this.camera.layers.enable(1);
     this.scene.add(this.camera);
 
     this.map = new CityMap();

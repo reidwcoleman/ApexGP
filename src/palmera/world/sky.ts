@@ -250,6 +250,9 @@ export class SkySystem {
     s.camera.bottom = -this.shadowSize;
     s.camera.near = 1;
     s.camera.far = 500;
+    // layer 1 holds the cheap shadow stand-ins (world/city.ts chunked shadowGeo); the main camera enables
+    // it too (three tests casters against it) and their material draws nothing on screen
+    s.camera.layers.enable(1);
     s.bias = -0.0003;
     s.normalBias = 0.03;
     s.radius = 2.5;
