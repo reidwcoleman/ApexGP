@@ -221,6 +221,24 @@ vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office
   }
   // furniture silhouettes low in the room
   if (office < 1.5 && h.y < cellSz.y * 0.32 && t != tf.y && h.z > depth * 0.35) col *= 0.45;
+  // somebody home: about a third of offices and flats have a person in them, a worker standing at a
+  // desk or a resident pacing slowly about the room (a silhouette against the lamp at night)
+  if (office < 1.5) {
+    float sh = bhash(vec3(seed * 23.0, 7.0, 1.0));
+    if (sh < 0.36) {
+      float k = sh / 0.36;
+      float ph = uTime * (0.08 + 0.1 * k) + k * 50.0;
+      float u = office > 0.5 ? 0.0 : clamp(sin(ph) * 1.3, -1.0, 1.0);
+      float px = cellSz.x * (office > 0.5 ? 0.25 + 0.5 * k : 0.5 + 0.3 * u);
+      float sc = min(1.0, cellSz.y / 2.4) * (0.92 + 0.16 * k);
+      float hit = bPerson(ro, rd, depth * (0.3 + 0.35 * k), px, sc, ph * 9.0, office > 0.5 ? 0.0 : 0.15 * smoothstep(0.0, 0.4, 1.0 - abs(u)), t);
+      if (hit > 0.5) {
+        vec3 topC = office > 0.5 ? mix(vec3(0.85, 0.86, 0.88), vec3(0.2, 0.24, 0.32), step(0.5, fract(k * 5.3))) : 0.35 + 0.4 * cos(6.2832 * (fract(k * 7.7) + vec3(0.0, 0.33, 0.67)));
+        col = hit > 2.5 ? mix(vec3(0.8, 0.58, 0.45), vec3(0.34, 0.23, 0.16), fract(k * 3.9)) : hit > 1.5 ? vec3(0.14, 0.15, 0.2) : topC;
+        col *= 0.8;
+      }
+    }
+  }
   // a shop: one of four kinds, by the window's seed
   if (office > 1.5) {
     float kind = floor(fract(seed * 13.7) * 4.0);
@@ -467,7 +485,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v7';
+  mat.customProgramCacheKey = () => 'palmera-building-v8';
   return mat;
 }
 
