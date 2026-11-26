@@ -11,7 +11,7 @@ interface Item {
   owned?: () => boolean;
 }
 
-const ANCHORS = [
+export const ANCHORS = [
   { x: 640, z: -60 },
   { x: 120, z: -150 },
   { x: -260, z: 160 },

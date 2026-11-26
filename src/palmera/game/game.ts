@@ -30,6 +30,7 @@ import { Reactions } from './reactions';
 import { Activities } from './activities';
 import { Robbery } from './robbery';
 import { Interiors } from './interiors';
+import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
 
@@ -94,6 +95,7 @@ export class Game {
   activities!: Activities;
   robbery!: Robbery;
   interiors!: Interiors;
+  phone!: Phone;
   rain!: Rain;
   wet = 0;
   private ambLight = new THREE.Color();
@@ -138,6 +140,7 @@ export class Game {
     this.activities = new Activities(this);
     this.robbery = new Robbery(this);
     this.interiors = new Interiors(this);
+    this.phone = new Phone(this);
     this.rain = new Rain(this.scene);
     this.missions = new Missions(this);
     this.hud = new Hud(this);
@@ -897,6 +900,7 @@ export class Game {
       this.activities.update(sdt);
       this.robbery.update(sdt);
       this.interiors.update(sdt);
+      this.phone.update();
       this.missions.update(sdt);
       this.playerCtl.updateCamera(dt);
       if (p.health <= 0 && !this.overlayKind) this.die();
