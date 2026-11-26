@@ -135,13 +135,30 @@ export const cityUniforms = {
   uNight: { value: 0 },
   uTime: { value: 0 },
   uWind: { value: 1 },
+  /** the shop interiors rendered in Blender (tools/palmera/shops.py): an atlas, and whether it's loaded */
+  uShops: { value: new THREE.Texture() as THREE.Texture },
+  uShopsOn: { value: 0 },
 };
+
+// the shop atlas: 4 shops x (back wall, wall at x = 0, wall at x = W, floor); until it arrives the
+// windows keep their painted interiors
+{
+  const base = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'palmera/';
+  new THREE.TextureLoader().load(base + 'shops.webp', (t) => {
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    cityUniforms.uShops.value = t;
+    cityUniforms.uShopsOn.value = 1;
+  });
+}
 
 function buildingMaterial(): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0.0 });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uNight = cityUniforms.uNight;
     sh.uniforms.uTime = cityUniforms.uTime;
+    sh.uniforms.uShops = cityUniforms.uShops;
+    sh.uniforms.uShopsOn = cityUniforms.uShopsOn;
     sh.vertexShader = sh.vertexShader
       .replace(
         '#include <common>',
@@ -170,7 +187,7 @@ vStyle = aStyle;`,
       .replace(
         '#include <common>',
         `#include <common>
-uniform float uNight; uniform float uTime;
+uniform float uNight; uniform float uTime; uniform sampler2D uShops; uniform float uShopsOn;
 varying vec3 vBN; varying vec3 vLP; varying vec3 vBS; varying vec2 vStyle; varying vec3 vBW;
 float bhash(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719)))*43758.5453); }
 // a person in a room: a cut-out figure standing at depth zp, centred on x = px, scale sc, legs
@@ -304,6 +321,15 @@ vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office
         }
       }
     }
+    // the rooms modelled and lit in Blender: walls and floor from the atlas (the ceiling stays painted)
+    if (uShopsOn > 0.5 && !(t == tf.y && rd.y > 0.0)) {
+      vec2 uv; float ci;
+      if (t == tf.z) { uv = h.xy / cellSz; ci = 0.0; }
+      else if (t == tf.x) { uv = vec2(h.z / depth, h.y / cellSz.y); ci = rd.x < 0.0 ? 1.0 : 2.0; }
+      else { uv = vec2(h.x / cellSz.x, h.z / depth); ci = 3.0; }
+      vec2 a = (vec2(ci, 3.0 - kind) + clamp(uv, 0.006, 0.994)) / 4.0;
+      col = texture2D(uShops, a).rgb * 1.6;
+    }
     // shoppers (and the cafe's barista): pacing slowly between the shelves, stopping to look
     float tCut = t;
     {
@@ -320,7 +346,7 @@ vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office
     }
     // cut-outs standing in the room, in front of whatever the ray reached: a mannequin in the boutique
     // window, the counter in the cafe
-    if (kind > 0.5 && kind < 2.5 && abs(rd.z) > 1e-3) {
+    if (kind > 0.5 && kind < 2.5 && (kind < 1.5 || uShopsOn < 0.5) && abs(rd.z) > 1e-3) {
       float zp = kind < 1.5 ? depth * 0.18 : depth * 0.5;
       float tp = (zp - ro.z) / rd.z;
       if (tp > 0.0 && tp < t) {
@@ -485,7 +511,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v8';
+  mat.customProgramCacheKey = () => 'palmera-building-v9';
   return mat;
 }
 
