@@ -1038,8 +1038,8 @@ export class Game {
         this.input.endFrame();
         return;
       }
-      if (!this.overlayKind && !this.chopper?.flying) this.playerCtl.update(sdt);
-      else if (this.chopper?.flying) this.playerCtl.look(sdt);
+      if (!this.overlayKind && !this.chopper?.flying && !this.pier?.riding) this.playerCtl.update(sdt);
+      else if (this.chopper?.flying || this.pier?.riding) this.playerCtl.look(sdt);
       else this.setDesired(p, 0, 0);
       this.focus.copy(p.vehicle ? p.vehicle.pos : p.pos);
     }
@@ -1067,7 +1067,7 @@ export class Game {
       this.patrol.update(sdt);
       this.gators.update(sdt);
       this.marsh.update(this.camera.position);
-      this.pier.update(sdt, this.sky.night);
+      this.pier.update(sdt, this.sky.night, this);
       this.herons.update(sdt);
       this.stunts.update(sdt, dt);
       this.reactions.update(sdt);

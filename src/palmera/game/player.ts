@@ -495,7 +495,7 @@ export class PlayerController {
     const cam = g.camera;
     const v = p.vehicle;
     let dist: number, height: number, fov: number, side = 0;
-    const air = g.chopper?.camera();
+    const air = g.chopper?.camera() ?? g.pier?.rideCamera();
     if (air) {
       // the helicopter: well back and above, following its heading unless you've looked around
       if (this.mouseIdle > 1.2) {

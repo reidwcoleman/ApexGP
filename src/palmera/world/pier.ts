@@ -5,11 +5,14 @@
 import * as THREE from 'three';
 import { box, cyl, merge, prep } from '../core/geo';
 import { groundBase, platforms, type CityMap } from './map';
+import type { Game } from '../game/game';
 
 const Z = 140, X0 = 712, X1 = 860, W = 12, DECK = 1.25;
 /** where the pier is, for the people walking on it */
 export const PIER = { z: Z, x0: X0, x1: X1, w: W, deck: DECK, endX: X1 + 26, endHalf: 15 };
 const HUB = { x: 868, y: DECK + 24, z: Z }, R = 20, N = 20;
+/** the loading platform's top */
+const LOAD = DECK + 0.92;
 
 export class Pier {
   private wheel = new THREE.Group();
@@ -17,6 +20,11 @@ export class Pier {
   private bulbMat: THREE.MeshBasicMaterial;
   private stringMat: THREE.MeshBasicMaterial;
   private t = 0;
+  /** the gondola you're riding in, if any */
+  riding: THREE.Object3D | null = null;
+  private rideT = 0;
+  private wantOff = false;
+  private wv = new THREE.Vector3();
   private neonMat: THREE.MeshBasicMaterial;
 
   constructor(scene: THREE.Scene, map: CityMap) {
@@ -81,8 +89,11 @@ export class Pier {
       list.push(prep(g, color));
     };
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) tube([HUB.x + sx * 3.2, DECK, HUB.z + sz * 11], [HUB.x + sx * 1.6, HUB.y, HUB.z], 0.45, 0xf2f2f0);
-    frame.push(box(12, 2.2, 6, HUB.x, DECK + 1.1, HUB.z, 0x2f6f8f));
-    frame.push(box(13, 0.3, 7, HUB.x, DECK + 2.3, HUB.z, 0xf2f2f0));
+    // the loading platform under the wheel: the gondolas clear it by a hand's width at the bottom
+    frame.push(box(12, 0.8, 6, HUB.x, DECK + 0.4, HUB.z, 0x2f6f8f));
+    frame.push(box(13, 0.12, 7, HUB.x, DECK + 0.86, HUB.z, 0xf2f2f0));
+    for (let k = 0; k < 3; k++) frame.push(box(1.6, 0.3 * (k + 1), 0.5, HUB.x - 7.3, DECK + 0.15 * (k + 1), HUB.z - 1 + k * 0.5 - 0.5, 0xf2f2f0));
+    platforms.push({ x0: HUB.x - 6.5, z0: HUB.z - 3.5, x1: HUB.x + 6.5, z1: HUB.z + 3.5, y: LOAD });
     tube([HUB.x - 2.2, HUB.y, HUB.z], [HUB.x + 2.2, HUB.y, HUB.z], 0.9, 0xd0d4d8);
     const fm = new THREE.Mesh(merge(frame), steel);
     fm.castShadow = true;
@@ -202,14 +213,78 @@ export class Pier {
     root.add(sb);
   }
 
-  update(dt: number, night: number) {
+  /** where the camera should follow while you ride (the same shape as the helicopter's) */
+  rideCamera(): { x: number; y: number; z: number; yaw: number; speed: number } | null {
+    if (!this.riding) return null;
+    this.riding.getWorldPosition(this.wv);
+    return { x: this.wv.x, y: this.wv.y - 2.6, z: this.wv.z, yaw: -Math.PI / 2, speed: 0 };
+  }
+
+  /** how far the gondola is from the bottom of its turn (0 = at the loading platform) */
+  private fromBottom(g: THREE.Object3D) {
+    g.getWorldPosition(this.wv);
+    return Math.hypot(this.wv.y - (HUB.y - R), this.wv.z - HUB.z);
+  }
+
+  update(dt: number, night: number, game?: Game) {
     this.t += dt;
-    // a slow turn: about four minutes a revolution
-    this.wheel.rotation.x += dt * 0.026;
+    // a slow turn: about four minutes a revolution (one a minute while you're aboard)
+    this.wheel.rotation.x += dt * (this.riding ? 0.1 : 0.026);
+    if (game) this.ride(dt, game);
     for (const g of this.gondolas) g.rotation.x = -this.wheel.rotation.x;
     this.bulbMat.color.setScalar(0.8 + night * 1.6 * (0.85 + 0.15 * Math.sin(this.t * 2.1)));
     this.neonMat.opacity = Math.min(1, night * 1.3);
     this.neonMat.color.setHSL((this.t * 0.03) % 1, 1, 0.5).multiplyScalar(2.5);
+
     this.stringMat.color.setRGB(1, 0.886, 0.66).multiplyScalar(0.7 + night * 2.6);
+  }
+
+  private ride(dt: number, g: Game) {
+    const p = g.player;
+    if (!this.riding) {
+      if (p.vehicle || p.dead || p.hidden || g.chopper?.flying) return;
+      if (Math.hypot(p.pos.x - HUB.x, p.pos.z - HUB.z) > 4.5 || p.pos.y < LOAD - 0.3) return;
+      if (g.wanted.level > 0) {
+        g.hud.prompt('The wheel is closed to you while the police are after you');
+        return;
+      }
+      g.hud.prompt(`<kbd>F</kbd> Ride the wheel · $5`);
+      if (!g.input.hit('KeyF')) return;
+      if (g.cash < 5) {
+        g.hud.toast('Not enough cash');
+        return;
+      }
+      g.addCash(-5);
+      // board whichever gondola is lowest
+      let best = this.gondolas[0], bd = 1e9;
+      for (const c of this.gondolas) {
+        const d = this.fromBottom(c);
+        if (d < bd) (bd = d), (best = c);
+      }
+      this.riding = best;
+      this.rideT = 0;
+      this.wantOff = false;
+      p.hidden = true;
+      p.vx = p.vz = p.vy = 0;
+      g.audio.cue('pickup');
+      g.hud.toast('Round we go · F to get off at the bottom');
+      return;
+    }
+    this.rideT += dt;
+    this.riding.getWorldPosition(this.wv);
+    p.pos.set(this.wv.x, this.wv.y - 3.0, this.wv.z);
+    // F any time: you step off when your gondola next comes round to the platform
+    if (this.rideT > 1 && g.input.hit('KeyF')) this.wantOff = !this.wantOff;
+    const low = this.fromBottom(this.riding) < 3;
+    if (this.rideT > 1) g.hud.prompt(this.wantOff ? 'Getting off at the bottom · <kbd>F</kbd> stay on' : '<kbd>F</kbd> Get off at the bottom · look around with the mouse');
+    if (low && this.rideT > 4) {
+      if (this.wantOff) {
+        this.riding = null;
+        p.hidden = false;
+        p.pos.set(HUB.x - 2.5, LOAD, HUB.z - 2.2);
+        p.vy = 0;
+        p.onGround = true;
+      }
+    }
   }
 }
