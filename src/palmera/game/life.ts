@@ -172,7 +172,8 @@ export class Life {
     if (!free.length) return;
     const l = free[Math.floor(Math.random() * free.length)];
     const h = this.newPed(l.x, l.z, 'lounge', 'sit', 60 + Math.random() * 120);
-    h.yaw = l.r + Math.PI;
+    // back to the backrest (at the lounger's -z end), feet down the seat
+    h.yaw = l.r;
     h.shirt.setHSL(Math.random(), 0.5, 0.55);
     l.used = h;
   }

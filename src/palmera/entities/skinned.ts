@@ -278,7 +278,7 @@ export class SkinnedCrowd {
     const towel = h.state === 'towel' && !h.dead;
     const lie = towel ? 1 : h.fall;
     const lounge = h.state === 'lounge' ? 1 : 0;
-    p.root.position.set(h.pos.x - Math.sin(h.yaw) * lounge * 0.25, h.pos.y + lie * 0.12 + (h.swimming ? -1.15 : 0) + lounge * 0.38, h.pos.z - Math.cos(h.yaw) * lounge * 0.25);
+    p.root.position.set(h.pos.x - Math.sin(h.yaw) * lounge * 0.25, h.pos.y + lie * 0.12 + (h.swimming ? -1.15 : 0) + lounge * 0.2, h.pos.z - Math.cos(h.yaw) * lounge * 0.25);
     p.root.rotation.set(towel ? -Math.PI / 2 : -lie * 1.5 - lounge * 0.75, h.yaw, 0, 'YXZ');
     // vaulting: lean into it, and roll onto a hip across a car bonnet
     if (h.sky === 1) p.root.rotation.x += 1.25;

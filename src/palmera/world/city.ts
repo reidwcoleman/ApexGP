@@ -633,7 +633,8 @@ function umbrellaGeometry(): THREE.BufferGeometry {
 
 function loungerGeometry(): THREE.BufferGeometry {
   const back = new THREE.BoxGeometry(0.62, 0.06, 0.7);
-  back.rotateX(-0.7);
+  // the backrest rises away from the seat
+  back.rotateX(0.7);
   back.translate(0, 0.55, -0.9);
   return merge([box(0.62, 0.06, 1.4, 0, 0.32, 0.15, 0xffffff), prep(back, 0xffffff), box(0.05, 0.3, 0.05, 0.27, 0.15, 0.7, 0xcccccc), box(0.05, 0.3, 0.05, -0.27, 0.15, 0.7, 0xcccccc)]);
 }
