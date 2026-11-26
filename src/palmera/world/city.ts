@@ -875,11 +875,13 @@ export class City {
       // shop awnings over the street floor
       if ((b.style === 3 || b.style === 1) && b.y0 === 0 && len > 6) {
         const c = new THREE.Color(rng.pick(awnCols));
+        const depth = 1.5 + rng.next() * 0.5;
         for (const sgn of [-1, 1]) {
-          const off = (alongZ ? b.w : b.d) / 2 + 0.7;
-          const tilt = new THREE.Quaternion().setFromAxisAngle(alongZ ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0), (alongZ ? -sgn : sgn) * 0.32);
-          if (alongZ) put(awn, b.x + sgn * off, 3.65, b.z, 1.5, 0.06, len * 0.9, c, tilt);
-          else put(awn, b.x, 3.65, b.z + sgn * off, len * 0.9, 0.06, 1.5, c, tilt);
+          // fixed to the wall at the top, sloping out over the pavement (local +z points away from the wall)
+          const off = (alongZ ? b.w : b.d) / 2 + 0.02;
+          const face = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), alongZ ? sgn * Math.PI / 2 : sgn > 0 ? 0 : Math.PI);
+          if (alongZ) put(awn, b.x + sgn * off, 4.05, b.z, len * 0.9, 1, depth, c, face);
+          else put(awn, b.x, 4.05, b.z + sgn * off, len * 0.9, 1, depth, c, face);
         }
       }
     }
@@ -890,8 +892,7 @@ export class City {
     chunked(this.scene, this.chunks, rail, box1, stucco, { far: 450, shadow: true });
     const metal = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.5 });
     chunked(this.scene, this.chunks, plant, box1, metal, { far: 900, shadow: true });
-    const canvas = new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide });
-    chunked(this.scene, this.chunks, awn, box1, canvas, { far: 420, shadow: true });
+    chunked(this.scene, this.chunks, awn, awningGeometry(), awningMaterial(), { far: 420, shadow: true });
     chunked(this.scene, this.chunks, signs, new THREE.PlaneGeometry(1, 1), this.signMat, { far: 1500, shadow: false, receive: false, attr: { name: 'aCell', size: 1 } });
   }
 
@@ -1189,4 +1190,67 @@ function helipadTexture(): THREE.CanvasTexture {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
+}
+
+/**
+ * A shop awning in unit space: x across the shopfront (-0.5..0.5), z out from the wall (0..1), the
+ * canopy sloping down 0.5 m to a valance whose hem is scalloped in the shader. aPart: 0 canopy,
+ * 1 valance, 2 side cheeks (plain colour).
+ */
+function awningGeometry(): THREE.BufferGeometry {
+  const pos: number[] = [], part: number[] = [];
+  const quad = (a: number[], b: number[], c: number[], d: number[], k: number) => {
+    pos.push(...a, ...b, ...c, ...a, ...c, ...d);
+    for (let i = 0; i < 6; i++) part.push(k);
+  };
+  const drop = -0.5, hem = -0.78;
+  quad([-0.5, 0, 0], [0.5, 0, 0], [0.5, drop, 1], [-0.5, drop, 1], 0);
+  quad([-0.5, drop, 1], [0.5, drop, 1], [0.5, hem, 1], [-0.5, hem, 1], 1);
+  for (const x of [-0.5, 0.5]) {
+    pos.push(x, 0, 0, x, drop, 1, x, hem, 1);
+    pos.push(x, 0, 0, x, hem, 1, x, hem * 0.35, 0.12);
+    for (let i = 0; i < 6; i++) part.push(2);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('aPart', new THREE.Float32BufferAttribute(part, 1));
+  g.computeVertexNormals();
+  return g;
+}
+
+/** striped canvas: stripes ~0.45 m wide whatever the awning's length, white over the awning colour */
+function awningMaterial(): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ roughness: 0.88, side: THREE.DoubleSide });
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aPart;\nvarying float vPart;\nvarying float vU;\nvarying float vY;')
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+vPart = aPart;
+vY = position.y;
+#ifdef USE_INSTANCING
+vU = position.x * length(instanceMatrix[0].xyz);
+#else
+vU = position.x;
+#endif`,
+      );
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vPart;\nvarying float vU;\nvarying float vY;')
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+if (vPart < 1.5) {
+  // the hem: a scallop every stripe
+  float s = fract(vU / 0.9);
+  if (vPart > 0.5 && vY < -0.66 - 0.12 * sin(s * 3.14159)) discard;
+  float stripe = step(0.5, fract(vU / 0.9));
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92, 0.9, 0.85), stripe);
+}
+// the underside in its own shade, a touch of light through the canvas
+if (!gl_FrontFacing) diffuseColor.rgb *= 0.82;`,
+      );
+  };
+  m.customProgramCacheKey = () => 'palmera-awning-v1';
+  return m;
 }
