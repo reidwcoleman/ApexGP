@@ -73,8 +73,46 @@ export async function loadCarKit(): Promise<void> {
   kit.set('bike', bikeParts());
   // vehicles modelled whole in Blender (tools/palmera/bike.py, bus.py): bodywork, trim, lamps, glass
   // and a wheel of their own; the built versions above stay as the fallback
-  await Promise.all(['bike', 'bus'].map((id) => loadOwnModel(id)));
+  await Promise.all([...['bike', 'bus'].map((id) => loadOwnModel(id)), loadInterior()]);
 }
+
+/** the cabin kit from Blender (tools/palmera/interior.py): seats, bench, dash, wheel, console */
+const interior = new Map<string, THREE.BufferGeometry>();
+async function loadInterior() {
+  try {
+    const gl = await new GLTFLoader().loadAsync(BASE + 'interior.glb');
+    gl.scene.updateMatrixWorld(true);
+    gl.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      const r = /^int_(seat|bench|dash|wheel|console)$/.exec(o.name);
+      if (!m.isMesh || !r) return;
+      const g = m.geometry.clone();
+      g.applyMatrix4(m.matrixWorld);
+      interior.set(r[1], withColor(g, null));
+    });
+  } catch (e) {
+    console.warn('palmera: interior.glb failed, using the box cabins', e);
+  }
+}
+
+/** a cabin part placed and scaled, its colours multiplied by the trim tint (black parts stay black) */
+function cabinPart(name: string, x: number, y: number, z: number, s: [number, number, number], tint: [number, number, number]): THREE.BufferGeometry | null {
+  const src = interior.get(name);
+  if (!src) return null;
+  const g = src.clone();
+  g.applyMatrix4(new THREE.Matrix4().makeScale(s[0], s[1], s[2]).setPosition(x, y, z));
+  const c = g.getAttribute('color') as THREE.BufferAttribute;
+  for (let i = 0; i < c.count; i++) {
+    const v = c.getX(i);
+    // only the near-white fabric and grey plastics take the tint; dials, wheel, screen keep their own
+    if (v > 0.3) c.setXYZ(i, c.getX(i) * tint[0], c.getY(i) * tint[1], c.getZ(i) * tint[2]);
+  }
+  return g;
+}
+
+const TRIMS: [number, number, number][] = [[0.075, 0.075, 0.08], [0.42, 0.36, 0.28], [0.26, 0.15, 0.08], [0.16, 0.16, 0.17]];
+/** sports two-seaters, the pickup's short cab and the van's cargo box get no rear bench */
+const NO_BENCH = new Set(['super', 'coupe', 'pickup', 'van']);
 
 async function loadOwnModel(id: string) {
   try {
@@ -394,10 +432,33 @@ export function kitModel(type: CarType, spec: CarSpec, variant: number): KitMode
     q.translate(x, y, z);
     cab.push(withColor(q, c));
   };
-  boxAt(cw, belt - 0.3, b.L * 0.42, 0, 0.3 + (belt - 0.3) / 2, -b.L * 0.06, [0.05, 0.05, 0.055]);
-  boxAt(cw, 0.14, 0.4, 0, belt + 0.02, b.L * 0.16, [0.03, 0.03, 0.032]);
-  for (const sx of [-1, 1]) boxAt(cw * 0.38, 0.62, 0.12, sx * cw * 0.25, belt + 0.12, -b.L * 0.05, [0.09, 0.08, 0.075]);
-  boxAt(cw * 0.92, 0.04, b.L * 0.34, 0, b.H - 0.08, -b.L * 0.06, [0.42, 0.41, 0.39]);
+  if (interior.has('seat') && id !== 'bus' && id !== 'bike') {
+    // the modelled cabin: seats low enough that back and headrest clear the headliner (shortened in
+    // the low cars), a floor and door cards, dash, wheel on the driver's side (+x), console, bench
+    const tint = type === 'taxi' ? TRIMS[1] : type === 'police' ? TRIMS[0] : TRIMS[(id.length * 7 + id.charCodeAt(0)) % TRIMS.length];
+    const yC = Math.max(0.42, b.H - 0.98);
+    const k = Math.min(1, Math.max(0.6, (b.H - 0.1 - yC) / 0.9));
+    const floorY = yC - 0.3 * k;
+    const dashZ = b.L * 0.16 - 0.2;
+    const zF = -b.L * 0.05;
+    boxAt(cw, 0.06, b.L * 0.42, 0, floorY, -b.L * 0.06, [tint[0] * 0.5, tint[1] * 0.5, tint[2] * 0.5]);
+    for (const sx of [-1, 1]) boxAt(0.05, belt - 0.03 - floorY, b.L * 0.42, sx * (cw / 2 + 0.02), (belt - 0.03 + floorY) / 2, -b.L * 0.06, [tint[0] * 0.7, tint[1] * 0.7, tint[2] * 0.7]);
+    const parts = [
+      cabinPart('seat', cw * 0.25, yC, zF, [1, k, 1], tint),
+      cabinPart('seat', -cw * 0.25, yC, zF, [1, k, 1], tint),
+      cabinPart('dash', 0, belt + 0.09, dashZ, [cw / 1.5, 1, 1], tint),
+      cabinPart('wheel', cw * 0.25, belt + 0.02, dashZ - 0.12, [1, 1, 1], tint),
+      cabinPart('console', 0, yC + 0.02 * k, dashZ, [1, k, 1], tint),
+      NO_BENCH.has(id) ? null : cabinPart('bench', 0, yC + 0.02, zF - 0.85, [(cw * 0.88) / 1.3, k, 1], tint),
+    ];
+    for (const g of parts) if (g) cab.push(g);
+  } else {
+    boxAt(cw, belt - 0.3, b.L * 0.42, 0, 0.3 + (belt - 0.3) / 2, -b.L * 0.06, [0.05, 0.05, 0.055]);
+    boxAt(cw, 0.14, 0.4, 0, belt + 0.02, b.L * 0.16, [0.03, 0.03, 0.032]);
+    for (const sx of [-1, 1]) boxAt(cw * 0.38, 0.62, 0.12, sx * cw * 0.25, belt + 0.12, -b.L * 0.05, [0.09, 0.08, 0.075]);
+  }
+  // headliner: kept inside the roof (it used to poke out through the raked windscreen)
+  boxAt(cw * 0.8, 0.03, b.L * 0.22, 0, b.H - 0.12, -b.L * 0.09, [0.42, 0.41, 0.39]);
   if (type === 'ambulance') {
     // a red band round the body and a white light bar
     for (const s of [-1, 1]) boxAt(0.03, 0.22, b.L * 0.86, s * (b.W / 2 + 0.012), b.H * 0.52, -b.L * 0.04, [0.78, 0.06, 0.08]);
