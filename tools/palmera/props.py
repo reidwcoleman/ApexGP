@@ -255,6 +255,15 @@ def signal():
         finish(o, D, 0)
 
 
+def planter():
+    """a round concrete planter: tapered pot, a rolled lip, dark soil (the shrub is a leaf-card instance)"""
+    C = 0xd9d2c4
+    smooth_cyl(cyl(0.45, 0.55, 0.5, (0, 0.25, 0), C, seg=28))  # radius1 is the base: wider at the top
+    torus(0.54, 0.04, (0, 0.52, 0), hexc(0xcfc7b8))
+    cyl(0.5, 0.5, 0.03, (0, 0.5, 0), 0x3a2a1c, seg=28)
+    cyl(0.47, 0.47, 0.04, (0, 0.02, 0), 0xa9a296, seg=28)
+
+
 def ground():
     bpy.ops.mesh.primitive_plane_add(size=12, location=(0, 0, 0))
     return bpy.context.active_object
@@ -267,7 +276,7 @@ sc.world = bpy.data.worlds.new('w')
 sc.world.light_settings.distance = 0.5
 made = []
 for name, fn in (('bench', bench), ('bin', bin_), ('hydrant', hydrant), ('news', news), ('meter', meter), ('sign', sign),
-                 ('shelter', shelter), ('lamp', lamp), ('signal', signal)):
+                 ('shelter', shelter), ('lamp', lamp), ('signal', signal), ('planter', planter)):
     fn()
     o = build(name)
     # AO over a ground plane into the colours (floor 0.45: soft contact shading, not soot)

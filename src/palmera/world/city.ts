@@ -1246,6 +1246,25 @@ export class City {
     for (const [kind, list] of by) {
       chunked(this.scene, this.chunks, list, furnitureGeometry(kind), kind === 'shelter' ? glassy : mat, { far: kind === 'shelter' || kind === 'sign' ? 380 : 220, shadow: true });
     }
+    // the planters' greenery: a leaf-card shrub seated in the soil and a cluster of blossoms on top
+    // (the modelled pot is just the pot)
+    const cardMat = foliageMaterial();
+    const pots = by.get('planter');
+    if (pots && cardMat && propGeometry('planter')) {
+      const shrubs: Inst[] = [], flowers: Inst[] = [];
+      const cols = [0xff5f8f, 0xffd23f, 0xffffff, 0xff7b3a, 0xc77dff, 0xe2496b];
+      let s = 77;
+      const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+      const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
+      for (const it of pots) {
+        q.setFromAxisAngle(up, r() * Math.PI * 2);
+        const k = 0.55 + r() * 0.12;
+        shrubs.push({ m: it.m.clone().multiply(new THREE.Matrix4().compose(new THREE.Vector3(0, 0.45, 0), q, new THREE.Vector3(k, k * 0.85, k))) });
+        if (r() < 0.75) flowers.push({ m: it.m.clone().multiply(new THREE.Matrix4().compose(new THREE.Vector3(0, 0.45 + k * 0.62, 0), q, new THREE.Vector3(0.95, 0.9, 0.95))), c: new THREE.Color(cols[Math.floor(r() * cols.length)]) });
+      }
+      chunked(this.scene, this.chunks, shrubs, shrubGeometry(), cardMat, { far: 220, shadow: false, lodGeo: foliageGeometry('shrub_lod')!, lodDist: 45 });
+      chunked(this.scene, this.chunks, flowers, blossomGeometry(), new THREE.MeshStandardMaterial({ roughness: 0.7 }), { far: 90, shadow: false });
+    }
   }
 
   private buildBridge() {
