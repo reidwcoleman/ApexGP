@@ -74,8 +74,8 @@ export async function runSelfTest(game: Game): Promise<SelfTestResult> {
   game.weapons.select('fist');
 
   // drive: spawn a sedan next to the player, press F, hold W
-  // (clear the street first: with denser traffic and crowds a car or a pedestrian could block the test car)
-  for (const u of [...game.vehicles]) if (u.driver !== 'player' && Math.hypot(u.pos.x - p.pos.x, u.pos.z - p.pos.z) < 25) game.removeVehicle(u);
+  // (clear the street first: cars within 60 m, since one arriving at speed during the 2 s drive could hit the test car; people within 25 m)
+  for (const u of [...game.vehicles]) if (u.driver !== 'player' && Math.hypot(u.pos.x - p.pos.x, u.pos.z - p.pos.z) < 60) game.removeVehicle(u);
   for (const h of [...game.npcs]) if (Math.hypot(h.pos.x - p.pos.x, h.pos.z - p.pos.z) < 25) game.removeNpc(h);
   const car = game.spawnCar('sedan', p.pos.x - fz * 6.0, p.pos.z + fx * 6.0, p.yaw); // on the quiet side, clear of palms
   car.persistent = true;
