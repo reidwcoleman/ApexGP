@@ -1,6 +1,48 @@
 import * as THREE from 'three';
 import { box, cyl, merge } from '../core/geo';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { SIDEWALK, groundAt, type CityMap } from './map';
+
+/**
+ * The street props modelled in Blender (tools/palmera/props.py -> public/palmera/props.glb): bevelled,
+ * detailed, ambient occlusion baked into their vertex colours. Each prop_<kind> object becomes a plain
+ * non-indexed geometry (position, normal, colour) in the same space as the hand-built ones below.
+ */
+const propKit = new Map<string, THREE.BufferGeometry>();
+
+export async function loadPropKit(): Promise<void> {
+  try {
+    const base = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'palmera/';
+    const gl = await new GLTFLoader().loadAsync(base + 'props.glb');
+    gl.scene.updateMatrixWorld(true);
+    gl.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      const r = /^prop_(\w+)$/.exec(o.name);
+      if (!m.isMesh || !r) return;
+      let g = m.geometry.clone();
+      g.applyMatrix4(m.matrixWorld);
+      if (g.index) g = g.toNonIndexed();
+      const n = g.getAttribute('position').count;
+      const src = g.getAttribute('color');
+      const col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) col.set(src ? [src.getX(i), src.getY(i), src.getZ(i)] : [0.5, 0.5, 0.5], i * 3);
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color'].includes(k)) g.deleteAttribute(k);
+      if (!g.getAttribute('normal')) g.computeVertexNormals();
+      g.computeBoundingSphere();
+      g.computeBoundingBox();
+      propKit.set(r[1], g);
+    });
+  } catch (e) {
+    console.warn('palmera: props.glb failed, using the hand-built props', e);
+  }
+}
+
+/** a Blender-modelled prop, if the kit has it */
+export function propGeometry(name: string): THREE.BufferGeometry | null {
+  const g = propKit.get(name);
+  return g ? g.clone() : null;
+}
 
 /**
  * What a sidewalk is furnished with: benches, litter bins, hydrants, newspaper boxes, parking
@@ -11,6 +53,8 @@ import { SIDEWALK, groundAt, type CityMap } from './map';
 export type FurnitureKind = 'bench' | 'bin' | 'hydrant' | 'news' | 'meter' | 'planter' | 'sign' | 'shelter';
 
 export function furnitureGeometry(kind: FurnitureKind): THREE.BufferGeometry {
+  const modelled = propGeometry(kind);
+  if (modelled) return modelled;
   const P: THREE.BufferGeometry[] = [];
   switch (kind) {
     case 'bench':

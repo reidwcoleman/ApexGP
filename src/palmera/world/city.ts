@@ -12,7 +12,7 @@ import * as T from './textures';
 import { addDetail as D } from '../render/detail';
 import { palmKit } from './palms';
 import { Grass, moundGeometry, crownGeometry, leafTexture, trunkGeometry, blossomGeometry, hedgeGeometry, placePlants, shrubGeometry } from './vegetation';
-import { furnitureGeometry, placeFurniture, type FurnitureKind } from './furniture';
+import { furnitureGeometry, placeFurniture, type FurnitureKind, propGeometry } from './furniture';
 
 // ------------------------------------------------------------ simple mesh builder
 class MB {
@@ -665,6 +665,8 @@ function bushGeometry(): THREE.BufferGeometry {
 }
 
 function lampGeometry(): THREE.BufferGeometry {
+  const modelled = propGeometry('lamp');
+  if (modelled) return modelled;
   return merge([
     cyl(0.09, 0.14, 7.2, 6, 0, 3.6, 0, 0x4a5056),
     box(0.08, 0.08, 1.7, 0, 7.15, 0.8, 0x4a5056),
