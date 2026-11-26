@@ -141,6 +141,7 @@ function buildingMaterial(): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0.0 });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uNight = cityUniforms.uNight;
+    sh.uniforms.uTime = cityUniforms.uTime;
     sh.vertexShader = sh.vertexShader
       .replace(
         '#include <common>',
@@ -169,9 +170,26 @@ vStyle = aStyle;`,
       .replace(
         '#include <common>',
         `#include <common>
-uniform float uNight;
+uniform float uNight; uniform float uTime;
 varying vec3 vBN; varying vec3 vLP; varying vec3 vBS; varying vec2 vStyle; varying vec3 vBW;
 float bhash(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719)))*43758.5453); }
+// a person in a room: a cut-out figure standing at depth zp, centred on x = px, scale sc, legs
+// scissoring by amp*sin(w). 0 = missed, 1 = top/arms, 2 = legs, 3 = head
+float bPerson(vec3 ro, vec3 rd, float zp, float px, float sc, float w, float amp, float tLim) {
+  if (abs(rd.z) < 1e-3) return 0.0;
+  float tp = (zp - ro.z) / rd.z;
+  if (tp <= 0.0 || tp >= tLim) return 0.0;
+  vec3 hp = ro + rd * tp;
+  float x = (hp.x - px) / sc, y = hp.y / sc;
+  float dx = abs(x);
+  if (length(vec2(x, (y - 1.6) * 0.9)) < 0.105) return 3.0;
+  if (y > 1.45 && y < 1.52 && dx < 0.05) return 3.0;
+  if (y > 0.86 && y < 1.47 && dx < 0.17 - max(0.0, y - 1.36) * 1.1) return 1.0;
+  if (y > 0.9 && y < 1.4 && abs(dx - 0.2) < 0.04) return 1.0;
+  float sw = sin(w) * amp * (1.0 - y / 0.88);
+  if (y > 0.0 && y <= 0.88 && (abs(x - sw) < 0.065 || abs(x + sw) < 0.065)) return 2.0;
+  return 0.0;
+}
 // a room behind the glass: the ray from the eye carried into a box the size of the window's cell
 vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office, out float tHit, out float lampK) {
   vec3 ro = vec3(pin * cellSz, 0.0);
@@ -268,6 +286,20 @@ vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office
         }
       }
     }
+    // shoppers (and the cafe's barista): pacing slowly between the shelves, stopping to look
+    float tCut = t;
+    {
+      float sh = bhash(vec3(seed * 17.0, 0.0, 3.0));
+      float ph = uTime * (0.16 + 0.12 * sh) + sh * 40.0;
+      float u = clamp(sin(ph) * 1.5, -1.0, 1.0);
+      float mv = 1.0 - abs(u);
+      float px = cellSz.x * (0.5 + 0.36 * u);
+      float hit = sh < 0.3 ? 0.0 : bPerson(ro, rd, depth * (0.62 + 0.1 * sh), px, 0.92 + 0.14 * sh, ph * 9.0, 0.16 * smoothstep(0.0, 0.4, mv), t);
+      if (hit > 0.5) {
+        vec3 topC = 0.4 + 0.45 * cos(6.2832 * (fract(sh * 7.3) + vec3(0.0, 0.33, 0.67)));
+        col = hit > 2.5 ? mix(vec3(0.85, 0.62, 0.48), vec3(0.36, 0.24, 0.17), fract(sh * 5.1)) : hit > 1.5 ? mix(vec3(0.12, 0.15, 0.24), vec3(0.32, 0.28, 0.22), step(0.5, fract(sh * 3.7))) : topC;
+      }
+    }
     // cut-outs standing in the room, in front of whatever the ray reached: a mannequin in the boutique
     // window, the counter in the cafe
     if (kind > 0.5 && kind < 2.5 && abs(rd.z) > 1e-3) {
@@ -282,12 +314,29 @@ vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office
           bool torso = hp.y > 0.95 && hp.y < 1.5 && dx < 0.19 - (1.5 - hp.y) * 0.08;
           bool skirt = hp.y > 0.45 && hp.y <= 0.95 && dx < 0.12 + (0.95 - hp.y) * 0.22;
           bool pole = hp.y > 0.05 && hp.y <= 0.45 && dx < 0.02;
+          if (head || torso || skirt || pole) tCut = tp;
           if (head) col = vec3(0.86, 0.84, 0.8);
           else if (torso || skirt) col = 0.45 + 0.4 * cos(6.2832 * (fract(seed * 9.1) + vec3(0.0, 0.33, 0.67)));
           else if (pole) col = vec3(0.2);
         } else if (hp.y < 1.05 && hp.x > cellSz.x * 0.12 && hp.x < cellSz.x * 0.88) {
+          tCut = tp;
           col = vec3(0.36, 0.22, 0.13) * (0.8 + 0.25 * step(0.5, fract(hp.x * 3.0)));
           if (hp.y > 0.98) col = vec3(0.75, 0.73, 0.7);
+        }
+      }
+    }
+    // the near shopper, a pace or two inside the window (behind the mannequin, in front of the counter)
+    {
+      float sh = bhash(vec3(seed * 17.0, 1.0, 3.0));
+      if (sh > 0.25) {
+        float ph = uTime * (0.13 + 0.1 * sh) + sh * 23.0;
+        float u = clamp(sin(ph) * 1.4, -1.0, 1.0);
+        float mv = 1.0 - abs(u);
+        float px = cellSz.x * (0.5 + 0.32 * u);
+        float hit = bPerson(ro, rd, depth * (0.3 + 0.06 * sh), px, 0.9 + 0.16 * sh, ph * 9.0, 0.16 * smoothstep(0.0, 0.4, mv), tCut);
+        if (hit > 0.5) {
+          vec3 topC = 0.4 + 0.45 * cos(6.2832 * (fract(sh * 4.9) + vec3(0.0, 0.33, 0.67)));
+          col = hit > 2.5 ? mix(vec3(0.85, 0.62, 0.48), vec3(0.36, 0.24, 0.17), fract(sh * 6.3)) : hit > 1.5 ? mix(vec3(0.12, 0.15, 0.24), vec3(0.55, 0.5, 0.42), step(0.6, fract(sh * 2.9))) : topC;
         }
       }
     }
@@ -418,7 +467,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v6';
+  mat.customProgramCacheKey = () => 'palmera-building-v7';
   return mat;
 }
 
