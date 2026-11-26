@@ -394,17 +394,48 @@ function lampMaterial() {
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uLampGlow = lampGlow;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vBodyPos;\nvarying vec3 vBodyN;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vBodyPos = position;\n  vBodyN = normal;');
+      .replace('#include <common>', '#include <common>\nvarying vec3 vBodyPos;\nvarying vec3 vBodyN;\nattribute vec4 lampUv;\nvarying vec4 vLampUv;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vBodyPos = position;\n  vBodyN = normal;\n  vLampUv = lampUv;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uLampGlow;\nvarying vec3 vBodyPos;\nvarying vec3 vBodyN;\nfloat lampMask = 1.0;')
+      .replace('#include <common>', '#include <common>\nvarying vec4 vLampUv;\nuniform float uLampGlow;\nvarying vec3 vBodyPos;\nvarying vec3 vBodyN;\nfloat lampMask = 1.0;')
       .replace('#include <color_fragment>', `#include <color_fragment>
   {
     // what's behind the lens, in the lamp's own face plane
     vec2 lp = abs(vBodyN.x) > abs(vBodyN.z) ? vBodyPos.zy : vBodyPos.xy;
     bool tail = vColor.r > 0.5 && vColor.g < 0.3;
     bool head = vColor.g > 0.9 && vColor.b > 0.8;
-    if (tail) {
+    // with the lamp's own coordinates (Blender): metres from its inner edge and bottom, and its size
+    vec2 sz = vLampUv.zw;
+    vec2 m = vLampUv.xy * sz;
+    float edge = min(min(m.x, sz.x - m.x), min(m.y, sz.y - m.y));
+    if (sz.x > 0.01 && tail) {
+      // a lit outline round the lamp (the modern light-guide look), a dark red lens inside with a
+      // faint inner bar, a reversing light at the inner end
+      float ring = smoothstep(0.009, 0.003, abs(edge - 0.014));
+      float bar = smoothstep(0.012, 0.004, abs(m.y - sz.y * 0.5)) * step(0.06, m.x) * step(m.x, sz.x - 0.04) * step(0.12, sz.y);
+      float rev = step(m.x, min(0.09, sz.x * 0.25)) * step(0.03, edge);
+      diffuseColor.rgb = vec3(0.1, 0.005, 0.005);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.7, 0.03, 0.02), max(ring, bar * 0.7));
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.55, 0.55, 0.56), rev);
+      lampMask = max(ring, bar * 0.6) * (1.0 - rev) + 0.06;
+    } else if (sz.x > 0.01 && head) {
+      // a dark chrome housing; one projector (two in a long lamp) toward the outer end; a daytime
+      // LED strip along the top edge
+      float r = min(sz.y * 0.32, 0.07);
+      vec2 c1 = vec2(sz.x - max(r * 1.6, sz.x * 0.28), sz.y * 0.45);
+      float d1 = length(m - c1);
+      float d2 = sz.x > sz.y * 2.6 ? length(m - (c1 - vec2(r * 2.4, 0.0))) : 99.0;
+      float d = min(d1, d2);
+      float lens = smoothstep(r, r * 0.85, d);
+      float bezel = smoothstep(r * 1.25, r * 1.1, d) * (1.0 - lens);
+      float drl = smoothstep(0.012, 0.004, abs(m.y - (sz.y - 0.025))) * step(0.03, m.x) * step(m.x, sz.x - 0.02);
+      float fins = 0.5 + 0.5 * sin(m.x * 160.0);
+      diffuseColor.rgb = vec3(0.13, 0.135, 0.14) + fins * 0.04;
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.75, 0.76, 0.78), bezel);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92) - smoothstep(0.0, r, d) * 0.4, lens);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0), drl);
+      lampMask = max(drl, lens * 0.5) + 0.04;
+    } else if (tail) {
       // LED light bars behind a red lens, dark gaps between
       float f = fract(lp.y * 24.0);
       float bar = smoothstep(0.0, 0.3, f) * smoothstep(1.0, 0.7, f);
@@ -423,7 +454,7 @@ function lampMaterial() {
   }`)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += vColor.rgb * vColor.rgb * uLampGlow * lampMask;');
   };
-  m.customProgramCacheKey = () => 'palmera-lamp-v3';
+  m.customProgramCacheKey = () => 'palmera-lamp-v5';
   return m;
 }
 

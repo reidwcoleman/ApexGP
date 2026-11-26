@@ -230,9 +230,17 @@ function splitSmallParts(parts: Parts) {
   parts.trim = mergeColored(trim);
 }
 
-function withColor(g: THREE.BufferGeometry, rgb: [number, number, number] | null): THREE.BufferGeometry {
+function withColor(g: THREE.BufferGeometry, rgb: [number, number, number] | null, lampUv = false): THREE.BufferGeometry {
   const out = g.index ? g.toNonIndexed() : g.clone();
   const n = out.getAttribute('position').count;
+  // the lamps' own coordinates from Blender (tools/palmera/cars_lamps.py): across/up 0..1 and size in m
+  if (lampUv && out.getAttribute('uv') && out.getAttribute('uv1')) {
+    const a = out.getAttribute('uv'), b = out.getAttribute('uv1');
+    const l = new Float32Array(n * 4);
+    // the glTF exporter stores every v as 1 - v (both sets); undo it so 0 = bottom and the height is the height
+    for (let i = 0; i < n; i++) l.set([a.getX(i), 1 - a.getY(i), b.getX(i), 1 - b.getY(i)], i * 4);
+    out.setAttribute('lampUv', new THREE.BufferAttribute(l, 4));
+  }
   if (rgb || !out.getAttribute('color')) {
     const c = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) c.set(rgb ?? [1, 1, 1], i * 3);
@@ -244,7 +252,7 @@ function withColor(g: THREE.BufferGeometry, rgb: [number, number, number] | null
     for (let i = 0; i < n; i++) c.set([src.getX(i), src.getY(i), src.getZ(i)], i * 3);
     out.setAttribute('color', new THREE.BufferAttribute(c, 3));
   }
-  for (const k of Object.keys(out.attributes)) if (!['position', 'normal', 'color'].includes(k)) out.deleteAttribute(k);
+  for (const k of Object.keys(out.attributes)) if (!['position', 'normal', 'color', 'lampUv'].includes(k)) out.deleteAttribute(k);
   return out;
 }
 
@@ -290,21 +298,24 @@ function paint(g: THREE.BufferGeometry, rgb: [number, number, number]) {
 }
 
 function mergeColored(list: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  const pos: number[] = [], nor: number[] = [], col: number[] = [];
+  const pos: number[] = [], nor: number[] = [], col: number[] = [], luv: number[] = [];
+  const anyLamp = list.some((g) => !!g.getAttribute('lampUv'));
   for (let g of list) {
     if (g.index) g = g.toNonIndexed();
     if (!g.getAttribute('normal')) g.computeVertexNormals();
-    const p = g.getAttribute('position'), n = g.getAttribute('normal'), c = g.getAttribute('color');
+    const p = g.getAttribute('position'), n = g.getAttribute('normal'), c = g.getAttribute('color'), l = g.getAttribute('lampUv');
     for (let i = 0; i < p.count; i++) {
       pos.push(p.getX(i), p.getY(i), p.getZ(i));
       nor.push(n.getX(i), n.getY(i), n.getZ(i));
       col.push(c.getX(i), c.getY(i), c.getZ(i));
+      if (anyLamp) luv.push(l ? l.getX(i) : 0, l ? l.getY(i) : 0, l ? l.getZ(i) : 0, l ? l.getW(i) : 0);
     }
   }
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  if (anyLamp) out.setAttribute('lampUv', new THREE.Float32BufferAttribute(luv, 4));
   out.computeBoundingSphere();
   return out;
 }
@@ -335,8 +346,8 @@ export function kitModel(type: CarType, spec: CarSpec, variant: number): KitMode
   const m4 = new THREE.Matrix4().makeScale(sx, sy, sz);
   const body = withColor(p.body, null);
   const glass = withColor(p.glass, [0.02, 0.025, 0.03]);
-  const heads = withColor(p.heads, [1, 0.96, 0.88]);
-  const tails = withColor(p.tails, [0.85, 0.03, 0.02]);
+  const heads = withColor(p.heads, [1, 0.96, 0.88], true);
+  const tails = withColor(p.tails, [0.85, 0.03, 0.02], true);
   const extra: THREE.BufferGeometry[] = [];
   if (type === 'taxi') {
     const sign = new THREE.BoxGeometry(0.62, 0.2, 0.26);
@@ -365,15 +376,17 @@ export function kitModel(type: CarType, spec: CarSpec, variant: number): KitMode
   const detail = (id === 'bus' || id === 'bike') && p.trim ? p.trim : p.trim ? mergeColored([...cab, p.trim]) : mergeColored(cab);
   const groups = [body, detail, lamps, glass] as (THREE.BufferGeometry | null)[];
   const geo = new THREE.BufferGeometry();
-  const pos: number[] = [], nor: number[] = [], col: number[] = [];
+  const pos: number[] = [], nor: number[] = [], col: number[] = [], luv: number[] = [];
   let start = 0;
   groups.forEach((g, gi) => {
     if (!g) return;
-    const pp = g.getAttribute('position'), nn = g.getAttribute('normal'), cc = g.getAttribute('color');
+    const pp = g.getAttribute('position'), nn = g.getAttribute('normal'), cc = g.getAttribute('color'), ll = g.getAttribute('lampUv');
     for (let i = 0; i < pp.count; i++) {
       pos.push(pp.getX(i), pp.getY(i), pp.getZ(i));
       nor.push(nn.getX(i), nn.getY(i), nn.getZ(i));
       col.push(cc.getX(i), cc.getY(i), cc.getZ(i));
+      if (ll) luv.push(ll.getX(i), ll.getY(i), ll.getZ(i) * sx, ll.getW(i) * sy);
+      else luv.push(0, 0, 0, 0);
     }
     geo.addGroup(start, pp.count, gi);
     start += pp.count;
@@ -381,6 +394,7 @@ export function kitModel(type: CarType, spec: CarSpec, variant: number): KitMode
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setAttribute('lampUv', new THREE.Float32BufferAttribute(luv, 4));
   geo.applyMatrix4(m4);
   geo.computeBoundingSphere();
   const wx = (b.W / 2 - 0.12) * sx, wz = (b.wb / 2) * sz, r = b.r * sy;
