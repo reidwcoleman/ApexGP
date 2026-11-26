@@ -667,7 +667,8 @@
 /* the dash and the tyres read as one strip: the same height */
 .cluster,
 .carstatus {
-  height: 146px;
+  /* (162: the tyres' four lines — temperature, pressure, wear, brake — spilled 16 px out of 146) */
+  height: 162px;
   box-sizing: border-box;
 }
 .tyhead {
