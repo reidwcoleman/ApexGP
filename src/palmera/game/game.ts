@@ -41,6 +41,7 @@ import { SkyTours } from './skytours';
 import { Parts } from './parts';
 import { Garages } from './garage';
 import { StreetEvents } from './events';
+import { PhotoMode } from './photo';
 import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
@@ -117,6 +118,7 @@ export class Game {
   garages!: Garages;
   street!: StreetEvents;
   private speedBlurW = 0;
+  photo!: PhotoMode;
   interiors!: Interiors;
   saveGame!: SaveGame;
   phone!: Phone;
@@ -175,6 +177,7 @@ export class Game {
     this.parts = new Parts(this);
     this.garages = new Garages(this);
     Marker.camera = this.camera;
+    this.photo = new PhotoMode(this);
     this.street = new StreetEvents(this);
     this.interiors = new Interiors(this);
     this.saveGame = new SaveGame(this);
@@ -885,6 +888,13 @@ export class Game {
     this.projView.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.projView);
 
+    // photo mode: the world stands still, only the free camera moves
+    if (this.photo?.active) {
+      this.photo.update(dt);
+      this.input.endFrame();
+      this.render();
+      return;
+    }
     if (this.mode === 'paused') {
       if (this.input.hit('Escape') || this.input.hit('KeyM') || this.input.hit('KeyP')) this.setPaused(false);
       this.input.endFrame();
@@ -910,6 +920,11 @@ export class Game {
         this.camera.updateProjectionMatrix();
       }
     } else {
+      if (this.input.hit('KeyO') && this.mode === 'play') {
+        this.photo.toggle();
+        this.input.endFrame();
+        return;
+      }
       if (this.input.hit('Escape') || this.input.hit('KeyP')) {
         this.setPaused(true);
         this.input.endFrame();
@@ -1016,6 +1031,11 @@ export class Game {
     const r = regionAt(ref.x, ref.z);
     const city = r === 'downtown' || r === 'harbor' ? 1 : r === 'suburb' || r === 'island' ? 0.6 : 0.2;
     a.ambient(dt, this.sky.night, beach, city);
+  }
+
+  /** draw one frame now (photo mode saves it straight after) */
+  renderOnce() {
+    this.render();
   }
 
   private render() {
