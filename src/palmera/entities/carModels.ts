@@ -380,11 +380,103 @@ export function carModel(type: CarType): CarModel {
   return model;
 }
 
+/** how brightly the lamps glow (a little by day, like running lights; full at night) */
+const lampGlow = { value: 0.35 };
+
+/**
+ * Lamps as lenses, not stickers: a glossy clear-coated lens over a reflector that picks up the sky
+ * and the sun like the paint does, glowing in its own colour (white heads, red tails) on top - a
+ * little by day, fully at night. They used to be flat unlit colour, which by day read as painted-on
+ * blobs (the 'cartoon face' at the back of every car).
+ */
+function lampMaterial() {
+  const m = new THREE.MeshPhysicalMaterial({ vertexColors: true, color: 0xffffff, roughness: 0.08, metalness: 0.55, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 1.6 });
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uLampGlow = lampGlow;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vBodyPos;\nvarying vec3 vBodyN;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vBodyPos = position;\n  vBodyN = normal;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uLampGlow;\nvarying vec3 vBodyPos;\nvarying vec3 vBodyN;\nfloat lampMask = 1.0;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+  {
+    // what's behind the lens, in the lamp's own face plane
+    vec2 lp = abs(vBodyN.x) > abs(vBodyN.z) ? vBodyPos.zy : vBodyPos.xy;
+    bool tail = vColor.r > 0.5 && vColor.g < 0.3;
+    bool head = vColor.g > 0.9 && vColor.b > 0.8;
+    if (tail) {
+      // LED light bars behind a red lens, dark gaps between
+      float f = fract(lp.y * 24.0);
+      float bar = smoothstep(0.0, 0.3, f) * smoothstep(1.0, 0.7, f);
+      diffuseColor.rgb = mix(vec3(0.09, 0.004, 0.004), vec3(0.6, 0.03, 0.02), bar);
+      lampMask = 0.25 + 0.75 * bar;
+    } else if (head) {
+      // a dark chrome housing with round projector and LED cells
+      vec2 c = fract(lp * vec2(6.5, 5.5)) - 0.5;
+      float cell = smoothstep(0.34, 0.2, length(c));
+      float ring = smoothstep(0.05, 0.0, abs(length(c) - 0.38));
+      diffuseColor.rgb = mix(vec3(0.16, 0.165, 0.17), vec3(0.95), cell) + ring * 0.25;
+      lampMask = 0.08 + 0.92 * cell;
+    }
+    // at night the whole lamp floods with light
+    lampMask = mix(lampMask, 1.0, clamp((uLampGlow - 0.35) / 2.6, 0.0, 1.0) * 0.55);
+  }`)
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += vColor.rgb * vColor.rgb * uLampGlow * lampMask;');
+  };
+  m.customProgramCacheKey = () => 'palmera-lamp-v3';
+  return m;
+}
+
+/**
+ * Road grime: the sills, arches and lower doors carry a film of dust and spray - duller and a
+ * little browner, fading out by the waist line - so the paint isn't showroom-perfect all the way
+ * down. Works in the body's own space (ground at y = 0).
+ */
+function addGrime(m: THREE.MeshPhysicalMaterial) {
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vBodyPos;\nvarying vec3 vBodyN;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vBodyPos = position;\n  vBodyN = normal;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vBodyPos;
+varying vec3 vBodyN;
+float trim = 0.0;
+float gHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float gNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(gHash(i), gHash(i + vec2(1, 0)), f.x), mix(gHash(i + vec2(0, 1)), gHash(i + vec2(1, 1)), f.x), f.y); }
+float grime = 0.0;`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+  {
+    // streaky, uneven: noise stretched along the car, stronger at the very bottom
+    float n = gNoise(vec2(vBodyPos.z * 1.3, vBodyPos.y * 9.0)) * 0.6 + gNoise(vBodyPos.xz * 6.0 + vBodyPos.y * 3.0) * 0.4;
+    grime = smoothstep(0.62, 0.12, vBodyPos.y + (n - 0.5) * 0.22);
+    vec3 dust = vec3(0.34, 0.31, 0.27);
+    diffuseColor.rgb = mix(diffuseColor.rgb, dust * (0.7 + 0.3 * n), grime * 0.42);
+    // the body's black parts are plastic, not paint: matte, and the grilles and diffusers facing
+    // front or back get a diamond mesh with dark holes behind
+    if (vColor.r < 0.2 && vColor.g < 0.2) {
+      trim = 1.0;
+      diffuseColor.rgb = vec3(0.035);
+      if (abs(vBodyN.z) > 0.55 && vBodyPos.y < 0.95) {
+        vec2 q = vBodyPos.xy * 26.0;
+        vec2 d = abs(fract(vec2(q.x + q.y, q.x - q.y) * 0.5) - 0.5);
+        float rib = smoothstep(0.09, 0.04, min(d.x, d.y));
+        diffuseColor.rgb = mix(vec3(0.003), vec3(0.07), rib);
+      }
+    }
+  }`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(mix(roughnessFactor, 0.75, grime * 0.7), 0.62, trim);')
+      .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n  material.clearcoat *= (1.0 - grime * 0.75) * (1.0 - trim);');
+  };
+  m.customProgramCacheKey = () => 'palmera-paint-grime-v3';
+}
+
 // shared materials
 export const carMats = {
   detail: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.32, metalness: 0.35 }),
   glass: new THREE.MeshPhysicalMaterial({ vertexColors: true, color: 0xffffff, roughness: 0.04, metalness: 0.0, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.8, transparent: true, opacity: 0.55, depthWrite: false }),
-  lamps: new THREE.MeshBasicMaterial({ vertexColors: true }),
+  lamps: lampMaterial(),
   wheel: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.3, side: THREE.DoubleSide }),
   burnt: new THREE.MeshStandardMaterial({ color: 0x1e1b19, roughness: 1, metalness: 0 }),
   sirenRed: new THREE.MeshBasicMaterial({ color: 0xff2020 }),
@@ -397,13 +489,24 @@ const paintCache = new Map<number, THREE.MeshStandardMaterial>();
 export function paintMat(color: number): THREE.MeshStandardMaterial {
   let m = paintCache.get(color);
   if (!m) {
-    m = new THREE.MeshPhysicalMaterial({ color, vertexColors: true, roughness: 0.38, metalness: 0.55, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 1.25 });
+    // solid gloss (whites, blacks, reds, the bright colours) or metallic, decided by the colour so a
+    // model in one colour always looks the same
+    const c = new THREE.Color(color);
+    const hsl = { h: 0, s: 0, l: 0 };
+    c.getHSL(hsl);
+    const metallic = ((color * 2654435761) >>> 0) % 100 < 55 && hsl.l > 0.12 && hsl.l < 0.8 && hsl.s < 0.85;
+    const pm = new THREE.MeshPhysicalMaterial(
+      metallic
+        ? { color, vertexColors: true, roughness: 0.34, metalness: 0.72, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.3 }
+        : { color, vertexColors: true, roughness: 0.42, metalness: 0.0, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.2 },
+    );
+    addGrime(pm);
+    m = pm;
     paintCache.set(color, m);
   }
   return m;
 }
 
 export function setCarNight(night: number) {
-  const k = 1 + night * 4;
-  carMats.lamps.color.setRGB(k, k, k);
+  lampGlow.value = 0.35 + night * 2.6;
 }
