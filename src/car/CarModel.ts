@@ -553,14 +553,16 @@ function patchDriver(mat: THREE.MeshPhysicalMaterial, look: ReturnType<typeof he
         '#include <map_fragment>',
         `#include <map_fragment>
         #ifdef USE_MAP
-          // (the shell, its spoiler and chin bar map into the sheet's left half; nothing else does)
-          diffuseColor.rgb = mix( diffuseColor.rgb, helmLivery( diffuseColor.rgb, vHelmP ), step( vMapUv.x, 0.5 ) );
+          // (the shell, its spoiler and chin bar map into the helmet cell, the sheet's top-left 256²; the
+          // decals below it in the left half — the nose and halo sponsors — are not helmet)
+          diffuseColor.rgb = mix( diffuseColor.rgb, helmLivery( diffuseColor.rgb, vHelmP ), step( vMapUv.x, 0.5 ) * step( ${(1 - 256 / DRV_H).toFixed(5)}, vMapUv.y ) );
         #endif`,
       )
       .replace(
         '#include <metalnessmap_fragment>',
         `#include <metalnessmap_fragment>
-        vec2 dC = ( vMapUv - vec2( 0.5, 0.0625 ) ) / vec2( 0.03125, 0.0625 );   // flat cell row (16 px cells at y 224)
+        // flat cell row (16 px cells at y 224; from the sheet's size — the constants were the 256-high sheet's)
+        vec2 dC = ( vMapUv - vec2( 0.5, ${(1 - 240 / DRV_H).toFixed(5)} ) ) / vec2( ${(16 / DRV_W).toFixed(5)}, ${(16 / DRV_H).toFixed(5)} );
         float dRow = step( 0.0, dC.x ) * step( dC.x, 6.0 ) * step( 0.0, dC.y ) * step( dC.y, 1.0 );
         float dVisor = dRow * step( dC.x, 1.0 );
         float dCloth = dRow * step( 1.0, dC.x ) * ( 1.0 - step( 3.0, dC.x ) * step( dC.x, 4.0 ) );`,
@@ -580,7 +582,7 @@ function patchDriver(mat: THREE.MeshPhysicalMaterial, look: ReturnType<typeof he
         #endif`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-driver-v2';
+  mat.customProgramCacheKey = () => 'apex-driver-v3';
 }
 
 /**

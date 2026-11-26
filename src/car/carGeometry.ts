@@ -1409,7 +1409,9 @@ function decals(mb: MB) {
       for (let k = 0; k <= nv; k++) {
         // (the upper face turned toward the driver, where the cameras behind see it square on; v runs
         // from its lower, inner edge up to the crown: the letters' tops toward the crown)
-        const psi = lerp(-1.3, -0.04, k / nv) * so;
+        // (2026-11-26: from −2.1 — down the face the driver looks at, where AC's cockpit view reads the
+        // title sponsor big — to the crown, where the T-cam reads it)
+        const psi = lerp(-2.1, -0.04, k / nv) * so;
         // on the painted fairing's crown (the top sweep's section: d is up, 1.09·cos + 0.04 in sx units)
         const cd = Math.cos(psi) * 1.09 + 0.04 + 0.05;
         const off = add3(scl3(fr[i].d, cd * 0.022), scl3(fr[i].u, Math.sin(psi) * 1.08 * 0.03));
