@@ -793,7 +793,7 @@ function pitchedRoofMaterial(): THREE.MeshStandardMaterial {
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, u);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vRW;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRW;\nattribute vec3 aWall;\nvarying vec3 vWall;')
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
@@ -803,10 +803,11 @@ function pitchedRoofMaterial(): THREE.MeshStandardMaterial {
   rw = instanceMatrix * rw;
   #endif
   vRW = (modelMatrix * rw).xyz;
+  vWall = aWall;
 }`,
       );
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vRW; uniform sampler2D uRoofTex; uniform float uRoofOn;\nvec3 rN; vec3 rT; vec3 rB; vec2 rUv; float rOn; float rCol;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRW; varying vec3 vWall; uniform sampler2D uRoofTex; uniform float uRoofOn;\nvec3 rN; vec3 rT; vec3 rB; vec2 rUv; float rOn; float rCol;')
       .replace(
         '#include <map_fragment>',
         `#include <map_fragment>
@@ -829,6 +830,12 @@ if (rOn > 0.5) {
 }`,
       )
       .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+// the triangular gable ends are wall, in the building's colour (after the roof's instance colour is applied)
+if (rN.y < 0.2 && dot(vWall, vec3(1.0)) > 0.0) diffuseColor.rgb = vWall * 0.92;`,
+      )
+      .replace(
         '#include <normal_fragment_maps>',
         `#include <normal_fragment_maps>
 if (rOn > 0.5) {
@@ -840,7 +847,7 @@ if (rOn > 0.5) {
 }`,
       );
   };
-  m.customProgramCacheKey = () => 'palmera-roof-v3';
+  m.customProgramCacheKey = () => 'palmera-roof-v5';
   return m;
 }
 
@@ -1127,7 +1134,7 @@ export class City {
     chunked(this.scene, this.chunks, big, geo, mat, { far: 2200, shadow: true, attr });
     chunked(this.scene, this.chunks, small, geo, mat, { far: 750, shadow: true, attr });
     const roofMat = pitchedRoofMaterial();
-    chunked(this.scene, this.chunks, roofs, roofGeometry(), roofMat, { far: 700, shadow: true });
+    chunked(this.scene, this.chunks, roofs, roofGeometry(), roofMat, { far: 700, shadow: true, attr: { name: 'aWall', size: 3 } });
     const ng = new THREE.BoxGeometry(1, 1, 1);
     chunked(this.scene, this.chunks, neon, ng, this.neonMat, { far: 1500, shadow: false, receive: false });
   }
@@ -1291,7 +1298,9 @@ export class City {
     const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), alongX ? 0 : Math.PI / 2);
     const sx = (alongX ? b.w : b.d) + 0.6, sz = (alongX ? b.d : b.w) + 1.0;
     m.compose(new THREE.Vector3(b.x, b.y0 + b.h, b.z), q, new THREE.Vector3(sx, Math.min(2.6, sz * 0.3), sz));
-    out.push({ m, c: new THREE.Color(b.roofColor) });
+    // the gable ends are wall: the building's own colour rides along (linear, like instance colours)
+    const wall = new THREE.Color(b.color);
+    out.push({ m, c: new THREE.Color(b.roofColor), a: [wall.r, wall.g, wall.b] });
   }
 
   private buildProps() {
