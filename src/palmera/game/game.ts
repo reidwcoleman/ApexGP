@@ -19,9 +19,10 @@ import { Peds } from './peds';
 import { PlayerController, TUNING } from './player';
 import { PursuitAI, Wanted } from './police';
 import { Traffic, TrafficAI } from './traffic';
-import { Weapons, type Loadout } from './weapons';
+import { Weapons, emptyLoadout, type Loadout } from './weapons';
 import { Post } from '../render/post';
 import { SkinnedCrowd } from '../entities/skinned';
+import { Shop } from './shop';
 
 export type Mode = 'title' | 'play' | 'paused';
 
@@ -50,7 +51,7 @@ export class Game {
   vehicles: Vehicle[] = [];
   npcs: Human[] = [];
   humans: Human[] = [];
-  loadout: Loadout = { owned: new Set(), clip: { pistol: 0, smg: 0 }, reserve: { pistol: 0, smg: 0 }, reloadT: 0, cooldown: 0 };
+  loadout: Loadout = emptyLoadout();
   cash = 500;
   displayCash = 500;
   mode: Mode = 'title';
@@ -76,6 +77,7 @@ export class Game {
   events: VehicleEvents;
   post: Post;
   skinned: SkinnedCrowd;
+  shop!: Shop;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, stencil: false, depth: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
@@ -108,6 +110,7 @@ export class Game {
     this.peds = new Peds(this);
     this.wanted = new Wanted(this);
     this.weapons = new Weapons(this);
+    this.shop = new Shop(this);
     this.missions = new Missions(this);
     this.hud = new Hud(this);
 
@@ -728,32 +731,41 @@ export class Game {
     v.wreck();
     v.burnTimer = 0;
     const p = v.pos;
-    this.effects.explosion(p.x, p.y, p.z);
-    this.audio.explosion(this.camera.position.distanceTo(p));
-    this.cameraKick += 0.04;
     if (v.driver === 'player') {
       this.exitVehicle();
       this.player.hurt(200, p.x, p.z, 8);
     }
+    this.blast(p, 8, 140, null, v);
+    v.vy += 5;
+  }
+
+  /** an explosion: fireball, shake, sound; hurts people, wrecks and shoves cars (chain reactions) */
+  blast(p: THREE.Vector3, radius: number, dmg: number, by: Human | null, skip: Vehicle | null = null) {
+    this.effects.explosion(p.x, p.y, p.z);
+    this.effects.scorch(p.x, p.z);
+    this.audio.explosion(this.camera.position.distanceTo(p));
+    this.cameraKick += 0.05 * Math.max(0, 1 - this.camera.position.distanceTo(p) / 60);
     for (const h of this.humans) {
       if (h.vehicle) continue;
       const d = h.pos.distanceTo(p);
-      if (d < 8) {
-        const killed = h.hurt(140 * (1 - d / 8), p.x, p.z, 9 * (1 - d / 8));
-        if (h === this.player) this.onHumanHurt(h, h, killed, 'car');
+      if (d < radius) {
+        const killed = h.hurt(dmg * (1 - d / radius), p.x, p.z, 10 * (1 - d / radius));
+        if (by) this.onHumanHurt(h, by, killed, 'gun');
+        else if (h === this.player) this.onHumanHurt(h, h, killed, 'car');
       }
     }
     for (const u of this.vehicles) {
-      if (u === v) continue;
+      if (u === skip) continue;
       const d = u.pos.distanceTo(p);
-      if (d < 9) {
-        u.damage(500 * (1 - d / 9));
-        const k = (1 - d / 9) * 8;
+      if (d < radius + 1) {
+        u.damage(600 * (1 - d / (radius + 1)));
+        const k = (1 - d / (radius + 1)) * 9;
         u.vx += ((u.pos.x - p.x) / (d || 1)) * k;
         u.vz += ((u.pos.z - p.z) / (d || 1)) * k;
+        if (by === this.player) this.onVehicleAttacked(u);
       }
     }
-    this.alertDanger(p, 50, true);
+    this.alertDanger(p, 60, true);
   }
 
   // ---------------------------------------------------------------- frame
@@ -812,6 +824,7 @@ export class Game {
     for (const h of this.humans) this.humanR.animate(h, sdt);
     if (this.mode === 'play') {
       this.weapons.update(sdt, this.elapsed);
+      this.shop.update();
       this.missions.update(sdt);
       this.playerCtl.updateCamera(dt);
       if (p.health <= 0 && !this.overlayKind) this.die();

@@ -167,7 +167,9 @@ export class Wanted {
       const rx = -Math.cos(v.heading) * side * (v.spec.wid / 2 + 0.7), rz = Math.sin(v.heading) * side * (v.spec.wid / 2 + 0.7);
       h.pos.set(v.pos.x + rx, groundAt(v.pos.x + rx, v.pos.z + rz), v.pos.z + rz);
       h.yaw = v.heading;
-      h.weapon = 'pistol';
+      const lvl = g.wanted.level;
+      h.weapon = lvl >= 4 ? 'rifle' : lvl >= 3 ? (i % 2 ? 'shotgun' : 'smg') : 'pistol';
+      if (lvl >= 4) h.armor = 100;
       h.state = 'chase';
       h.car = v;
       g.addNpc(h);

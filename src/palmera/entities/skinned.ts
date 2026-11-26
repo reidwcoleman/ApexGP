@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Person, loadPeople, setPeopleCore, setPeopleRest, type Look, type PeopleKit } from '../../people/Humans.ts';
-import type { Human } from './humans';
+import { LONG_GUNS, type Human, type WeaponId } from './humans';
 
 /**
  * The people up close: Rocketbox scans (the same kit ApexGP's garages use), animated by their own
@@ -35,24 +35,13 @@ interface Slot {
 }
 
 const gunMat = new THREE.MeshStandardMaterial({ color: 0x1a1b1d, roughness: 0.35, metalness: 0.7 });
-function gunGeo(smg: boolean): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [];
-  const body = new THREE.BoxGeometry(0.035, 0.11, smg ? 0.34 : 0.19);
-  body.translate(0, 0.02, smg ? 0.1 : 0.05);
-  parts.push(body);
-  const grip = new THREE.BoxGeometry(0.03, 0.12, 0.045);
-  grip.rotateX(0.25);
-  grip.translate(0, -0.06, -0.01);
-  parts.push(grip);
-  if (smg) {
-    const mag = new THREE.BoxGeometry(0.03, 0.16, 0.04);
-    mag.translate(0, -0.1, 0.12);
-    parts.push(mag);
-  }
+const woodMat = new THREE.MeshStandardMaterial({ color: 0x9a6a3a, roughness: 0.55 });
+function boxes(list: [number, number, number, number, number, number][]): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   const pos: number[] = [], nor: number[] = [];
-  for (const p of parts) {
-    const q = p.toNonIndexed();
+  for (const [w, h, d, x, y, z] of list) {
+    const q = new THREE.BoxGeometry(w, h, d).toNonIndexed();
+    q.translate(x, y, z);
     pos.push(...(q.getAttribute('position').array as Float32Array));
     nor.push(...(q.getAttribute('normal').array as Float32Array));
   }
@@ -60,7 +49,16 @@ function gunGeo(smg: boolean): THREE.BufferGeometry {
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   return g;
 }
-const GUNS = { pistol: gunGeo(false), smg: gunGeo(true) };
+// +z is the muzzle, the grip at the origin
+const GUNS: Partial<Record<WeaponId, { geo: THREE.BufferGeometry; mat: THREE.Material }>> = {
+  pistol: { geo: boxes([[0.035, 0.05, 0.19, 0, 0.03, 0.05], [0.03, 0.12, 0.045, 0, -0.04, -0.01]]), mat: gunMat },
+  smg: { geo: boxes([[0.04, 0.07, 0.34, 0, 0.03, 0.1], [0.03, 0.12, 0.045, 0, -0.05, -0.01], [0.03, 0.16, 0.04, 0, -0.08, 0.12], [0.02, 0.02, 0.12, 0, 0.04, 0.32]]), mat: gunMat },
+  shotgun: { geo: boxes([[0.045, 0.06, 0.72, 0, 0.03, 0.22], [0.05, 0.05, 0.22, 0, -0.01, 0.3], [0.04, 0.1, 0.26, 0, -0.02, -0.18]]), mat: gunMat },
+  rifle: { geo: boxes([[0.045, 0.08, 0.62, 0, 0.03, 0.2], [0.03, 0.14, 0.05, 0, -0.06, 0.0], [0.03, 0.18, 0.05, 0, -0.09, 0.14], [0.04, 0.09, 0.24, 0, 0.0, -0.2], [0.02, 0.06, 0.04, 0, 0.1, 0.12], [0.015, 0.015, 0.2, 0, 0.04, 0.6]]), mat: gunMat },
+  sniper: { geo: boxes([[0.04, 0.07, 0.78, 0, 0.03, 0.24], [0.035, 0.035, 0.3, 0, 0.11, 0.12], [0.03, 0.12, 0.05, 0, -0.05, 0.0], [0.045, 0.1, 0.3, 0, -0.01, -0.22], [0.012, 0.012, 0.3, 0, 0.04, 0.75]]), mat: gunMat },
+  bat: { geo: (() => { const c = new THREE.CylinderGeometry(0.035, 0.018, 0.84, 10); c.rotateX(Math.PI / 2); c.translate(0, 0, 0.36); return c; })(), mat: woodMat },
+  grenade: { geo: new THREE.SphereGeometry(0.06, 10, 8), mat: new THREE.MeshStandardMaterial({ color: 0x3d4a2a, roughness: 0.6 }) },
+};
 
 export class SkinnedCrowd {
   /** humans drawn here this frame (the instanced renderer skips them) */
@@ -180,32 +178,45 @@ export class SkinnedCrowd {
     p.root.position.set(h.pos.x, h.pos.y + lie * 0.12 + (h.swimming ? -1.1 : 0), h.pos.z);
     p.root.rotation.set(-lie * 1.5, h.yaw, 0, 'YXZ');
     p.update(dt);
-    // the arm on the aim, or thrown in a punch
-    const armed = h.weapon !== 'fist' && !h.dead && lie < 0.3;
+    // the arm on the aim, or thrown in a punch (or a swing of the bat)
+    const gunHeld = h.weapon !== 'fist' && h.weapon !== 'bat' && h.weapon !== 'grenade';
+    const armed = gunHeld && !h.dead && lie < 0.3;
     const aimW = armed ? Math.max(h.aim, 0.25) : 0;
-    const punch = h.punchT > 0 ? Math.sin(Math.min(1, (0.35 - h.punchT) / 0.35) * Math.PI) : 0;
+    const punch = h.punchT > 0 ? Math.sin(Math.min(1, (0.38 - h.punchT) / 0.38) * Math.PI) : 0;
     const fx = Math.sin(h.yaw), fz = Math.cos(h.yaw);
     const cp = Math.cos(h.aimPitch);
     const want = this.v1.set(fx * cp, Math.sin(h.aimPitch), fz * cp).normalize();
     if (armed && aimW > 0.01) {
       this.aimArm(p, 'r', want, aimW);
-      if (h.weapon === 'smg') this.aimArm(p, 'l', this.v2.copy(want).addScaledVector(new THREE.Vector3(-fz, 0, fx), -0.35).normalize(), aimW * 0.9);
+      if (LONG_GUNS.has(h.weapon)) this.aimArm(p, 'l', this.v2.copy(want).addScaledVector(new THREE.Vector3(-fz, 0, fx), -0.35).normalize(), aimW * 0.9);
     } else if (punch > 0.01) {
-      this.aimArm(p, 'r', this.v2.set(fx, 0.15, fz).normalize(), punch);
+      const swing = h.weapon === 'bat' ? this.v2.set(fx + -fz * (1 - punch) * 0.8, 0.35 - punch * 0.4, fz + fx * (1 - punch) * 0.8).normalize() : this.v2.set(fx, 0.15, fz).normalize();
+      this.aimArm(p, 'r', swing, punch);
     }
     p.root.updateMatrixWorld(true);
-    // the gun in the hand, along the aim
-    if (armed) {
+    // what's in the hand
+    const held = !h.dead && lie < 0.3 && h.weapon !== 'fist' ? GUNS[h.weapon] : undefined;
+    if (held) {
       if (!s.gun) {
-        s.gun = new THREE.Mesh(GUNS.pistol, gunMat);
+        s.gun = new THREE.Mesh(held.geo, held.mat);
         s.gun.castShadow = true;
         this.scene.add(s.gun);
       }
-      s.gun.geometry = h.weapon === 'smg' ? GUNS.smg : GUNS.pistol;
+      s.gun.geometry = held.geo;
+      s.gun.material = held.mat;
       s.gun.visible = true;
       const hand = p.bones['hand_r'];
       if (hand) hand.getWorldPosition(s.gun.position);
-      s.gun.lookAt(this.v2.copy(s.gun.position).addScaledVector(want, 2));
+      if (gunHeld) s.gun.lookAt(this.v2.copy(s.gun.position).addScaledVector(want, 2));
+      else if (h.weapon === 'bat') {
+        // the bat follows the forearm
+        const lo = p.bones['lowerarm_r'];
+        if (lo) {
+          const e = lo.getWorldPosition(new THREE.Vector3());
+          const d = s.gun.position.clone().sub(e).normalize();
+          s.gun.lookAt(s.gun.position.clone().add(d.add(new THREE.Vector3(0, 0.9, 0)).normalize()));
+        }
+      }
     } else if (s.gun) s.gun.visible = false;
   }
 

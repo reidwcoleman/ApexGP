@@ -270,19 +270,33 @@ export class AudioSys {
     o.stop(t0 + 0.5);
   }
 
-  gunshot(kind: 'pistol' | 'smg', dist: number) {
+  gunshot(kind: string, dist: number) {
     if (!this.ctx) return;
     const c = this.ctx;
     const t0 = c.currentTime;
-    const vol = Math.max(0.02, 0.35 / (1 + dist * 0.05));
+    const loud = kind === 'shotgun' ? 1.5 : kind === 'sniper' ? 1.8 : kind === 'rifle' ? 1.2 : 1;
+    const vol = Math.max(0.02, (0.35 * loud) / (1 + dist * 0.05));
+    if (kind === 'shotgun' || kind === 'sniper') {
+      // a long tail off the buildings
+      const s2 = this.noiseSrc(false);
+      const f2 = c.createBiquadFilter();
+      f2.type = 'lowpass';
+      f2.frequency.setValueAtTime(1400, t0);
+      f2.frequency.exponentialRampToValueAtTime(120, t0 + 0.9);
+      const g2 = c.createGain();
+      s2.connect(f2).connect(g2).connect(this.sfx);
+      this.env(g2, t0 + 0.01, 0.01, vol * 0.5, 0.9);
+      s2.start(t0, Math.random());
+      s2.stop(t0 + 1.1);
+    }
     const s = this.noiseSrc(false);
     const f = c.createBiquadFilter();
     f.type = 'lowpass';
-    f.frequency.setValueAtTime(kind === 'pistol' ? 5000 : 3800, t0);
+    f.frequency.setValueAtTime(kind === 'pistol' ? 5000 : kind === 'shotgun' ? 2600 : kind === 'rifle' ? 6000 : 3800, t0);
     f.frequency.exponentialRampToValueAtTime(300, t0 + 0.18);
     const g = c.createGain();
     s.connect(f).connect(g).connect(this.sfx);
-    this.env(g, t0, 0.002, vol, kind === 'pistol' ? 0.28 : 0.16);
+    this.env(g, t0, 0.002, vol, kind === 'pistol' ? 0.28 : kind === 'shotgun' ? 0.4 : kind === 'sniper' ? 0.5 : 0.16);
     s.start(t0, Math.random());
     s.stop(t0 + 0.4);
     const o = c.createOscillator();

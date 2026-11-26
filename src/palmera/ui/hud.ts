@@ -2,7 +2,7 @@
 import { WORLD } from '../world/map';
 import { MAP_SCALE, buildMapCanvas, drawDistrictLabels } from './mapCanvas';
 import { MISSIONS, type Blip } from '../game/missions';
-import { WEAPONS } from '../game/weapons';
+import { weaponName } from '../game/weapons';
 import type { Game } from '../game/game';
 
 const STAR = '<svg viewBox="0 0 24 24"><path d="M12 2.2l2.9 6.3 6.9.7-5.2 4.6 1.5 6.8L12 17.1 5.9 20.6l1.5-6.8L2.2 9.2l6.9-.7z"/></svg>';
@@ -43,12 +43,13 @@ export class Hud {
     <div id="weapon" class="panel"><span class="name">Fists</span><span class="ammo"></span></div>
   </div>
   <div id="toasts"></div>
-  <div id="mini"><canvas width="440" height="440"></canvas><div id="hp" class="bar"><div style="width:100%"></div></div><div id="vhp" class="bar hidden"><div style="width:100%"></div></div></div>
+  <div id="mini"><canvas width="440" height="440"></canvas><div id="hp" class="bar"><div style="width:100%"></div></div><div id="ap" class="bar"><div style="width:0%"></div></div><div id="vhp" class="bar hidden"><div style="width:100%"></div></div></div>
   <div id="speedo" class="panel hidden"><div><span class="num">0</span><span class="unit">MPH</span></div><div class="rpm"><div style="width:0%"></div></div><div class="car"></div></div>
   <div id="objective" class="panel hidden"><div class="t"></div><div class="o"></div><div class="timer"></div></div>
   <div id="subtitle"></div>
   <div id="prompt" class="panel hidden"></div>
   <div id="crosshair" class="hidden"></div>
+  <div id="scope" class="hidden"></div>
   <div id="big"><div class="h"></div><div class="s"></div></div>
   <div id="fps"></div>
 </div>`);
@@ -214,13 +215,13 @@ export class Hud {
     this.drawn.stars = true;
     // weapon
     const w = p.weapon;
-    if (w === 'fist') {
-      this.setText('#weapon .name', 'Fists');
-      this.setHtml('#weapon .ammo', '');
-    } else {
-      this.setText('#weapon .name', WEAPONS[w].name);
-      this.setHtml('#weapon .ammo', g.loadout.reloadT > 0 ? '<small>RELOADING</small>' : `${g.loadout.clip[w]} <small>/ ${g.loadout.reserve[w]}</small>`);
-    }
+    this.setText('#weapon .name', weaponName(w));
+    if (w === 'fist' || w === 'bat') this.setHtml('#weapon .ammo', '');
+    else if (w === 'grenade') this.setHtml('#weapon .ammo', `${g.loadout.reserve.grenade}`);
+    else this.setHtml('#weapon .ammo', g.loadout.reloadT > 0 ? '<small>RELOADING</small>' : `${g.loadout.clip[w]} <small>/ ${g.loadout.reserve[w]}</small>`);
+    this.setWidth('#ap > div', p.armor);
+    const scoped = p.weapon === 'sniper' && g.playerCtl.aiming && !p.vehicle && !p.dead;
+    this.q('#scope').classList.toggle('hidden', !scoped);
     // health
     this.setWidth('#hp > div', (p.health / p.maxHealth) * 100);
     this.drawn.health = true;
@@ -259,7 +260,7 @@ export class Hud {
     }
     // crosshair
     const ch = this.q('#crosshair');
-    ch.classList.toggle('hidden', !(g.playerCtl.aiming || (p.weapon !== 'fist' && !p.vehicle)) || p.dead);
+    ch.classList.toggle('hidden', !(g.playerCtl.aiming || (p.weapon !== 'fist' && p.weapon !== 'bat' && !p.vehicle)) || p.dead || scoped);
     if (this.hitT > 0) this.hitT -= dt;
     ch.classList.toggle('hit', this.hitT > 0);
     // fps

@@ -4,6 +4,7 @@ import { clamp, damp, lerp, wrapAngle } from '../core/math';
 import type { Vehicle } from '../entities/vehicle';
 import { WATER_Y, groundAt } from '../world/map';
 import type { Game } from './game';
+import { WEAPONS, WEAPON_ORDER } from './weapons';
 
 export const TUNING = {
   runSpeed: 5.0,
@@ -62,6 +63,7 @@ export class PlayerController {
       return;
     }
     if (p.vehicle) this.drive(dt, p.vehicle);
+    else if (g.shop.open) g.setDesired(p, 0, 0);
     else this.onFoot(dt);
     // health regeneration
     if (g.elapsed - this.lastDamage > TUNING.healthRegenDelay && p.health < p.maxHealth && !p.dead) p.health = Math.min(p.maxHealth, p.health + TUNING.healthRegenRate * dt);
@@ -120,17 +122,15 @@ export class PlayerController {
     // weapons
     if (inp.hit('KeyQ') || inp.wheel < 0) g.weapons.cycle(-1);
     if (inp.hit('KeyE') || inp.wheel > 0) g.weapons.cycle(1);
-    if (inp.hit('Digit1')) g.weapons.select('fist');
-    if (inp.hit('Digit2')) g.weapons.select('pistol');
-    if (inp.hit('Digit3')) g.weapons.select('smg');
+    for (let k = 0; k < WEAPON_ORDER.length; k++) if (inp.hit('Digit' + (k + 1))) g.weapons.select(WEAPON_ORDER[k]);
     if (inp.hit('KeyR')) g.weapons.reload();
     this.punchCd -= dt;
     if (!p.swimming) {
-      if (p.weapon === 'fist') {
+      if (p.weapon === 'fist' || p.weapon === 'bat') {
         if ((inp.lmbPressed || inp.hit('Mouse0')) && this.punchCd <= 0) this.punch();
       } else {
-        const def = p.weapon === 'smg';
-        const want = def ? inp.fire : inp.lmbPressed || inp.hit('Mouse0');
+        const auto = WEAPONS[p.weapon].auto;
+        const want = auto ? inp.fire : inp.lmbPressed || inp.hit('Mouse0');
         if (want) {
           this.computeAimPoint();
           if (g.weapons.playerFire(this.aimPoint, this.aiming)) p.yaw = this.camYaw;
@@ -173,8 +173,9 @@ export class PlayerController {
       bd = d;
     }
     if (best) {
-      const knock = p.sprint ? 7 : 3;
-      const killed = best.hurt(TUNING.punchDamage, p.pos.x, p.pos.z, knock);
+      const bat = p.weapon === 'bat';
+      const knock = (p.sprint ? 7 : 3) + (bat ? 3 : 0);
+      const killed = best.hurt(TUNING.punchDamage * (bat ? 2.4 : 1), p.pos.x, p.pos.z, knock);
       g.audio.punch();
       g.onHumanHurt(best, p, killed, 'punch');
       g.hud.hitT = 0.15;
@@ -182,7 +183,7 @@ export class PlayerController {
     }
     const v = g.nearestVehicle(p.pos.clone().add(new THREE.Vector3(fx * 1.2, 0, fz * 1.2)), 1.6);
     if (v) {
-      v.damage(4);
+      v.damage(p.weapon === 'bat' ? 30 : 4);
       g.audio.punch();
       if (v.police) g.onVehicleAttacked(v);
     }
@@ -244,7 +245,9 @@ export class PlayerController {
       dist = lerp(TUNING.camDistFoot, TUNING.camDistAim, aim);
       side = lerp(0.35, 0.75, aim);
       height = lerp(1.55, 1.62, aim);
-      fov = lerp(TUNING.fovFoot, TUNING.fovAim, aim) + (p.sprint && Math.hypot(p.vx, p.vz) > 6 ? 4 : 0);
+      const scoped = p.weapon === 'sniper' && aim > 0.5;
+      fov = scoped ? 14 : lerp(TUNING.fovFoot, TUNING.fovAim, aim) + (p.sprint && Math.hypot(p.vx, p.vz) > 6 ? 4 : 0);
+      if (scoped) dist = 0.4;
       const ty = p.swimming ? WATER_Y + 0.6 : p.pos.y + height;
       this.camTarget.set(p.pos.x, ty, p.pos.z);
     }

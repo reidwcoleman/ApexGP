@@ -1,5 +1,6 @@
 // Particles (smoke, sparks, fire), bullet tracers, muzzle flashes and impact decals.
 import * as THREE from 'three';
+import { groundAt } from '../world/map';
 import { decalTexture, glowTexture } from '../world/textures';
 
 const pVert = /* glsl */ `
@@ -108,6 +109,13 @@ export class Effects {
   private dm = new THREE.Matrix4();
   private q = new THREE.Quaternion();
   private v = new THREE.Vector3();
+  // brass, and what's left on the ground (blood pools, scorch marks)
+  private shells: { p: THREE.Vector3; v: THREE.Vector3; r: THREE.Euler; life: number; big: boolean }[] = [];
+  private shellMesh: THREE.InstancedMesh;
+  private pools: THREE.InstancedMesh;
+  private scorches: THREE.InstancedMesh;
+  private poolData: { x: number; y: number; z: number; s: number; target: number; rot: number }[] = [];
+  private scorchIdx = 0;
 
   constructor(scene: THREE.Scene) {
     const g = glowTexture();
@@ -129,6 +137,52 @@ export class Effects {
     this.muzzle = new THREE.Sprite(new THREE.SpriteMaterial({ map: g, color: 0xffd080, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
     this.muzzle.visible = false;
     scene.add(this.muzzle);
+    const sg = new THREE.CylinderGeometry(0.006, 0.006, 0.03, 6);
+    sg.rotateZ(Math.PI / 2);
+    this.shellMesh = new THREE.InstancedMesh(sg, new THREE.MeshStandardMaterial({ color: 0xc8a050, metalness: 0.9, roughness: 0.3 }), 96);
+    this.shellMesh.count = 0;
+    this.shellMesh.frustumCulled = false;
+    scene.add(this.shellMesh);
+    const pg = new THREE.PlaneGeometry(1, 1);
+    pg.rotateX(-Math.PI / 2);
+    const poolMat = new THREE.MeshStandardMaterial({ map: radialTex([60, 4, 6], 0.95), transparent: true, depthWrite: false, roughness: 0.15, polygonOffset: true, polygonOffsetFactor: -3 });
+    this.pools = new THREE.InstancedMesh(pg, poolMat, 48);
+    this.pools.count = 0;
+    this.pools.frustumCulled = false;
+    scene.add(this.pools);
+    const scMat = new THREE.MeshBasicMaterial({ map: radialTex([8, 7, 6], 0.9), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    this.scorches = new THREE.InstancedMesh(pg, scMat, 24);
+    this.scorches.count = 0;
+    this.scorches.frustumCulled = false;
+    scene.add(this.scorches);
+  }
+
+  /** a spent case thrown out of the ejection port, to the right */
+  shell(muzzle: THREE.Vector3, yaw: number, big: boolean) {
+    if (this.shells.length >= 96) this.shells.shift();
+    const rx = -Math.cos(yaw), rz = Math.sin(yaw);
+    const r = Math.random;
+    this.shells.push({
+      p: muzzle.clone().addScaledVector(new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)), -0.25),
+      v: new THREE.Vector3(rx * (2 + r()) - Math.sin(yaw) * 0.5, 2 + r() * 1.5, rz * (2 + r()) - Math.cos(yaw) * 0.5),
+      r: new THREE.Euler(r() * 6, r() * 6, 0), life: 6, big,
+    });
+  }
+
+  /** blood spreading under someone who's down */
+  bloodPool(h: { pos: THREE.Vector3; dead: boolean }, killed: boolean) {
+    if (!killed) return;
+    const i = this.poolData.length >= 48 ? (this.poolData.shift(), this.poolData.length) : this.poolData.length;
+    void i;
+    this.poolData.push({ x: h.pos.x, y: groundAt(h.pos.x, h.pos.z) + 0.035, z: h.pos.z, s: 0.2, target: 1.4 + Math.random() * 0.8, rot: Math.random() * 6 });
+  }
+
+  scorch(x: number, z: number) {
+    const i = this.scorchIdx++ % 24;
+    this.dm.compose(new THREE.Vector3(x, groundAt(x, z) + 0.03, z), this.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * 6), new THREE.Vector3(7, 1, 7));
+    this.scorches.setMatrixAt(i, this.dm);
+    this.scorches.count = Math.min(24, Math.max(this.scorches.count, i + 1));
+    this.scorches.instanceMatrix.needsUpdate = true;
   }
 
   puff(x: number, y: number, z: number, kind: 'smoke' | 'dark' | 'tire' | 'dust' | 'splash' | 'blood' | 'steam') {
@@ -171,6 +225,16 @@ export class Effects {
   }
 
   explosion(x: number, y: number, z: number) {
+    // the core flash, then the fireball rolling up, then debris and smoke
+    for (let i = 0; i < 12; i++)
+      this.glow.add({ x, y: y + 0.8, z, vx: 0, vy: 0, vz: 0, life: 0.18, max: 0.18, s0: 9, s1: 14, r: 1, g: 0.9, b: 0.6, a: 1, grav: 0, drag: 0 });
+    for (let i = 0; i < 30; i++) {
+      const r = Math.random;
+      this.glow.add({
+        x: x + (r() - 0.5) * 2, y: y + 1, z: z + (r() - 0.5) * 2, vx: (r() - 0.5) * 5, vy: 3 + r() * 6, vz: (r() - 0.5) * 5, life: 0.9 + r() * 0.8, max: 1.7,
+        s0: 5, s1: 2.5, r: 1, g: 0.35 + r() * 0.25, b: 0.06, a: 0.9, grav: -2, drag: 1.5,
+      });
+    }
     for (let i = 0; i < 40; i++) {
       const r = Math.random;
       this.glow.add({
@@ -178,9 +242,9 @@ export class Effects {
         s0: 4, s1: 1, r: 1, g: 0.5 + r() * 0.3, b: 0.15, a: 1, grav: 2, drag: 3,
       });
     }
-    for (let i = 0; i < 25; i++) this.puff(x + (Math.random() - 0.5) * 3, y + 1 + Math.random() * 2, z + (Math.random() - 0.5) * 3, 'dark');
+    for (let i = 0; i < 45; i++) this.puff(x + (Math.random() - 0.5) * 4, y + 1 + Math.random() * 3, z + (Math.random() - 0.5) * 4, 'dark');
     this.sparks(x, y + 1, z, 30);
-    this.lightFlash(x, y + 2, z, 60, 0.4, 0xffa040);
+    this.lightFlash(x, y + 2, z, 220, 0.5, 0xffa040);
   }
 
   lightFlash(x: number, y: number, z: number, intensity: number, dur: number, color = 0xffc070) {
@@ -252,5 +316,64 @@ export class Effects {
       this.muzzleT -= dt;
       if (this.muzzleT <= 0) this.muzzle.visible = false;
     }
+    // shells: fall, bounce, lie a while
+    let k = 0;
+    for (let i = this.shells.length - 1; i >= 0; i--) {
+      const s = this.shells[i];
+      s.life -= dt;
+      if (s.life <= 0) {
+        this.shells.splice(i, 1);
+        continue;
+      }
+      if (s.v.lengthSq() > 0.001) {
+        s.v.y -= 9.81 * dt;
+        s.p.addScaledVector(s.v, dt);
+        s.r.x += dt * 20;
+        s.r.y += dt * 9;
+        const gy = groundAt(s.p.x, s.p.z, s.p.y + 0.3) + 0.006;
+        if (s.p.y < gy) {
+          s.p.y = gy;
+          s.v.y = -s.v.y * 0.3;
+          s.v.x *= 0.5;
+          s.v.z *= 0.5;
+          if (Math.abs(s.v.y) < 0.4) s.v.set(0, 0, 0);
+        }
+      }
+    }
+    for (const s of this.shells) {
+      const sc = s.big ? 1.8 : 1;
+      this.dm.compose(s.p, this.q.setFromEuler(s.r), this.v.set(sc, sc, sc));
+      this.shellMesh.setMatrixAt(k++, this.dm);
+    }
+    this.shellMesh.count = k;
+    this.shellMesh.instanceMatrix.needsUpdate = true;
+    // pools spread
+    k = 0;
+    for (const p of this.poolData) {
+      p.s += (p.target - p.s) * Math.min(1, dt * 0.5);
+      this.dm.compose(this.v.set(p.x, p.y, p.z), this.q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.rot), new THREE.Vector3(p.s, 1, p.s * 0.8));
+      this.pools.setMatrixAt(k++, this.dm);
+    }
+    this.pools.count = k;
+    this.pools.instanceMatrix.needsUpdate = true;
   }
+}
+
+/** a soft round blot (blood, scorch) */
+function radialTex(rgb: [number, number, number], a: number): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const x = c.getContext('2d')!;
+  for (let i = 0; i < 7; i++) {
+    const cx = 64 + (Math.random() - 0.5) * 30, cy = 64 + (Math.random() - 0.5) * 30, r = 22 + Math.random() * 30;
+    const g = x.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, `rgba(${rgb.join(',')},${a})`);
+    g.addColorStop(0.7, `rgba(${rgb.join(',')},${a * 0.8})`);
+    g.addColorStop(1, `rgba(${rgb.join(',')},0)`);
+    x.fillStyle = g;
+    x.fillRect(0, 0, 128, 128);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }

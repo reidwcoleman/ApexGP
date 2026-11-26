@@ -66,6 +66,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1622; fon
 
 #crosshair { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; transform: translate(-50%, -50%); }
 #crosshair.hidden { display: none; }
+#scope { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 50%, transparent 0 34vh, rgba(0,0,0,0.92) 34.3vh); }
+#scope::before, #scope::after { content: ''; position: absolute; background: rgba(0,0,0,0.85); }
+#scope::before { left: 50%; top: 16vh; bottom: 16vh; width: 2px; transform: translateX(-1px); }
+#scope::after { top: 50%; left: calc(50% - 34vh); right: calc(50% - 34vh); height: 2px; transform: translateY(-1px); }
+#scope.hidden { display: none; }
+#ap { margin-top: 4px; }
+#ap > div { background: linear-gradient(90deg, #3b7bff, #7fb2ff) !important; }
 #crosshair::before, #crosshair::after { content: ''; position: absolute; background: rgba(255,255,255,0.9); box-shadow: 0 0 2px #000; }
 #crosshair::before { left: 12px; top: 2px; width: 2px; height: 22px; }
 #crosshair::after { top: 12px; left: 2px; height: 2px; width: 22px; }

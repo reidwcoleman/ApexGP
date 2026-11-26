@@ -5,7 +5,8 @@ import { clamp, damp, pick } from '../core/math';
 import type { Vehicle } from './vehicle';
 
 export type HumanKind = 'player' | 'ped' | 'cop';
-export type WeaponId = 'fist' | 'pistol' | 'smg';
+export type WeaponId = 'fist' | 'bat' | 'pistol' | 'smg' | 'shotgun' | 'rifle' | 'sniper' | 'grenade';
+export const LONG_GUNS = new Set<WeaponId>(['smg', 'shotgun', 'rifle', 'sniper']);
 
 let hid = 1;
 export class Human {
@@ -22,6 +23,7 @@ export class Human {
   swimming = false;
   health = 100;
   maxHealth = 100;
+  armor = 0;
   dead = false;
   down = 0; // seconds left lying down
   fall = 0; // 0 standing .. 1 lying
@@ -84,6 +86,11 @@ export class Human {
 
   hurt(amount: number, fromX: number, fromZ: number, knock = 0): boolean {
     if (this.dead) return false;
+    if (this.armor > 0) {
+      const a = Math.min(this.armor, amount * 0.7);
+      this.armor -= a;
+      amount -= a;
+    }
     this.health -= amount;
     this.flinch = 0.3;
     const dx = this.pos.x - fromX, dz = this.pos.z - fromZ;
@@ -283,7 +290,7 @@ export class HumanRenderer {
       this.set(side < 0 ? 'legL' : 'legR', i, this.m, h.pants);
     }
     // arms
-    const armed = h.weapon !== 'fist';
+    const armed = h.weapon !== 'fist' && h.weapon !== 'bat' && h.weapon !== 'grenade';
     const aimW = h.aim;
     for (const side of [-1, 1]) {
       let a = armA * side;
@@ -298,7 +305,7 @@ export class HumanRenderer {
           el = -0.2 * ext - 1.4 * (1 - ext);
           spread = 0;
         }
-        if (aimW > 0.01 && (right || h.weapon === 'smg')) {
+        if (aimW > 0.01 && (right || LONG_GUNS.has(h.weapon))) {
           const ta = -Math.PI / 2 - h.aimPitch;
           a = a * (1 - aimW) + ta * aimW;
           el = el * (1 - aimW);
@@ -308,14 +315,14 @@ export class HumanRenderer {
       // shoulders at (±0.28, 0.58) in torso space
       this.m.copy(T).multiply(this.tmp.makeTranslation(side * 0.28, 0.58, 0)).multiply(this.tmp2.makeRotationX(a));
       this.m.multiply(this.tmp.makeRotationZ(side * spread));
-      if (!right && aimW > 0.01 && h.weapon === 'smg') this.m.multiply(this.tmp.makeRotationY(-0.5 * aimW));
+      if (!right && aimW > 0.01 && LONG_GUNS.has(h.weapon)) this.m.multiply(this.tmp.makeRotationY(-0.5 * aimW));
       this.set(right ? 'armUR' : 'armUL', i, this.m, h.shirt);
       this.m.multiply(this.tmp.makeTranslation(0, -0.32, 0)).multiply(this.tmp2.makeRotationX(el));
       this.set(right ? 'armFR' : 'armFL', i, this.m, h.skin);
       if (right) {
         if (armed && !h.dead) {
           this.m.multiply(this.tmp.makeTranslation(0, -0.34, 0.02)).multiply(this.tmp2.makeRotationX(Math.PI / 2));
-          if (h.weapon === 'smg') this.m.multiply(this.tmp.makeScale(1.2, 1.3, 1.6));
+          if (LONG_GUNS.has(h.weapon)) this.m.multiply(this.tmp.makeScale(1.2, 1.3, h.weapon === 'smg' ? 1.6 : 2.6));
           this.set('gun', i, this.m, this.gunCol);
         } else this.set('gun', i, this.zero, this.gunCol);
       }

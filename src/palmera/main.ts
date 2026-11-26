@@ -70,12 +70,8 @@ function boot() {
     spawnCar: (type: CarType, x: number, z: number, heading = 0) => game.spawnCar(type, x, z, heading),
     startMission: (i: number) => game.missions.start(i),
     giveWeapons: () => {
-      game.loadout.owned.add('pistol');
-      game.loadout.owned.add('smg');
-      game.loadout.clip.pistol = 12;
-      game.loadout.clip.smg = 30;
-      game.loadout.reserve.pistol = 120;
-      game.loadout.reserve.smg = 300;
+      for (const w of ['bat', 'pistol', 'smg', 'shotgun', 'rifle', 'sniper', 'grenade'] as const) game.weapons.give(w, w === 'grenade' ? 10 : 300);
+      game.weapons.select('pistol');
     },
     selfTest: () => runSelfTest(game),
   };
