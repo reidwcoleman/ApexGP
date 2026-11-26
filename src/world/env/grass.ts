@@ -30,7 +30,12 @@ const TILES_FAR = 116;
 const FAR_DENS = 0.4;
 /** metres of the window behind the camera */
 const BACK = 12;
-const PER_M2 = 34;
+// (34 → 56, 2026-11-26: from a low trackside lens AC's verges are a carpet; ours were sparse sticks)
+const PER_M2 = 56;
+/** metres each blade starts below the ground it grows from (see the vertex shader) */
+const SINK = 0.2;
+/** metres the blades' tops are lifted over tGround's height: the ground mesh they grow from sits that much higher */
+const LIFT = 0.1;
 /** blades per tuft: each instance is a little clump (the blades a lawn is made of, not one in a square foot) */
 const TUFT = 3;
 const FADE: [number, number] = [18, 30];
@@ -205,7 +210,11 @@ ${CAR_WAKE_GLSL}`,
   vec3 r = mix( gFetch( i0, 1.0 ), gFetch( i0 + 1.0, 1.0 ), f );
   vec4 g = texture2D( tGround, vec2( ( lat + ${LAT.toFixed(1)} ) / ${(2 * LAT + BIN).toFixed(2)} + ${(BIN / 2 / (2 * LAT + BIN)).toFixed(5)}, ( mod( s, uN ) + 0.5 ) / uN ) );
   vec3 base = c + r * lat;
-  base.y += g.g - 0.03;
+  // (2026-11-26: the verge surface — the trackside ground mesh — sits up to ~10 cm above the height in
+  // tGround, so the short lawn blades were buried whole and the verges read as flat paint. Every blade
+  // now starts SINK below its base and grows that much longer: buried where the ground is higher, never
+  // floating where it isn't)
+  base.y += g.g + ${LIFT.toFixed(2)} - ${SINK.toFixed(2)};
   // which blade of the tuft and which corner of it
   float bi = floor( aCorner / 3.0 + 0.01 );
   float cc = aCorner - bi * 3.0;
@@ -222,10 +231,11 @@ ${CAR_WAKE_GLSL}`,
   // clumps: tufts of taller grass and bare patches
   float clump = texture2D( tNoise, base.xz * 0.37 ).a;
   float mown = g.b;
-  float h = mix( mix( 0.11, 0.21, rnd ), mix( 0.26, 0.58, rnd * rnd ), 1.0 - mown ) * ( 0.6 + 0.8 * clump );
+  float h = mix( mix( 0.13, 0.26, rnd ), mix( 0.28, 0.6, rnd * rnd ), 1.0 - mown ) * ( 0.6 + 0.8 * clump );
   h *= fade * keep * ( 1.0 - 0.35 * ( 1.0 - lod ) );
+  h += step( 0.001, h ) * ${SINK.toFixed(2)};
   if ( uDebug < 0.0 ) h *= -uDebug;
-  float w = mix( 0.013, 0.024, fract( rnd * 13.1 ) ) * ( 1.0 + 0.8 * ( 1.0 - lod ) + dist * 0.004 );
+  float w = mix( 0.017, 0.03, fract( rnd * 13.1 ) ) * ( 1.0 + 0.8 * ( 1.0 - lod ) + dist * 0.004 );
   float yaw = fract( rnd * 91.7 ) * 6.2832;
   vec3 side = vec3( cos( yaw ), 0.0, sin( yaw ) );
   vec3 face = vec3( -side.z, 0.0, side.x );
@@ -255,7 +265,7 @@ ${CAR_WAKE_GLSL}`,
   // every blade its own shade, a few dead straw ones in the lawn
   // (lifted with the verge shader's lush lawn — trackside/materials.ts GRASS_FRAG — or the blades stand
   // darker than the ground they grow from)
-  vGC = col * vec3( 0.95, 1.04, 0.84 ) * ( 0.8 + 0.5 * fract( rnd * 5.3 ) );
+  vGC = col * vec3( 1.08, 1.18, 0.95 ) * ( 0.85 + 0.45 * fract( rnd * 5.3 ) );
   vGC = mix( vGC, uStrawC * 0.9, step( 0.93, fract( rnd * 11.7 ) ) * 0.7 );
   // ...and the sward varies field by field: blue-green rye in the hollows, yellower on the crowns
   {
@@ -291,7 +301,7 @@ reflectedLight.indirectDiffuse *= mix( mix( 0.85, 0.45, gNear ), 1.0, vGH );
 reflectedLight.directDiffuse *= mix( mix( 0.92, 0.7, gNear ), 1.0, vGH );`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-grass-v10';
+  mat.customProgramCacheKey = () => 'apex-grass-v11';
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'grass_blades';
   mesh.frustumCulled = false;
