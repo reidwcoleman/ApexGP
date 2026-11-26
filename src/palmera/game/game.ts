@@ -98,7 +98,8 @@ export class Game {
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, stencil: false, depth: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
-    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+    // start at native CSS resolution; adaptResolution climbs toward the screen's own ratio when there's headroom
+    this.pixelRatio = 1;
     this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.renderer.toneMapping = THREE.NoToneMapping; // AgX in the post chain
@@ -961,23 +962,37 @@ export class Game {
     this.post.render(this.elapsed, this.sky.night, this.sky.exposure);
   }
 
-  /** Keep the frame rate up by lowering the render resolution if needed. */
+  private prLockUntil = 0;
+  private prRaisedAt = -1;
+  /**
+   * Keep the frame rate up by moving the render resolution: measured every second, down fast when the
+   * frame rate sags (further when it collapses), up in small steps only while it holds 60, and if a
+   * step up costs frames, back down and no more climbing for half a minute.
+   */
   private adaptResolution(dt: number) {
     this.prTimer += dt;
     this.prFrames++;
-    if (this.prTimer < 2) return;
+    if (this.prTimer < 1) return;
     const fps = this.prFrames / this.prTimer;
     this.prTimer = 0;
     this.prFrames = 0;
     if (document.hidden) return;
     let pr = this.pixelRatio;
     const maxPr = Math.min(window.devicePixelRatio || 1, 1.5);
-    if (fps < 45 && pr > 0.7) pr = Math.max(0.7, pr - 0.15);
-    else if (fps > 58 && pr < maxPr) pr = Math.min(maxPr, pr + 0.1);
-    if (pr !== this.pixelRatio) {
+    const now = this.elapsed;
+    if (fps < 55 && pr > 0.65) {
+      pr = Math.max(0.65, pr - (fps < 38 ? 0.2 : 0.1));
+      if (this.prRaisedAt >= 0 && now - this.prRaisedAt < 3) this.prLockUntil = now + 30;
+      this.prRaisedAt = -1;
+    } else if (fps > 58.5 && pr < maxPr && now > this.prLockUntil) {
+      pr = Math.min(maxPr, pr + 0.05);
+      this.prRaisedAt = now;
+    }
+    if (Math.abs(pr - this.pixelRatio) > 1e-3) {
       this.pixelRatio = pr;
       this.renderer.setPixelRatio(pr);
       this.resize();
     }
   }
+
 }
