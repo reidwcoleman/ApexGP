@@ -286,6 +286,12 @@ if (bn.y > 0.5) {
     bInterior = room;
   }
   vec3 glassCol = bStyle < 0.5 ? vec3(0.06, 0.1, 0.12) : vec3(0.02, 0.025, 0.03);
+  // every tower its own glass: blue-green, deep blue, bronze, emerald, graphite, silver
+  float gk = fract(vStyle.y * 7.31);
+  if (bStyle < 0.5) {
+    glassCol = gk < 0.25 ? vec3(0.06, 0.1, 0.12) : gk < 0.42 ? vec3(0.03, 0.06, 0.13) : gk < 0.56 ? vec3(0.11, 0.08, 0.05)
+      : gk < 0.68 ? vec3(0.04, 0.1, 0.08) : gk < 0.84 ? vec3(0.04, 0.045, 0.05) : vec3(0.12, 0.14, 0.16);
+  }
   vec3 frameCol = bStyle < 0.5 ? vec3(0.55, 0.58, 0.6) : (bStyle < 1.5 ? vec3(0.95, 0.94, 0.9) : vec3(0.92, 0.9, 0.86));
   if (shop) frameCol = vec3(0.12, 0.12, 0.13);
   // towers: mullions and spandrel bands
@@ -295,6 +301,8 @@ if (bn.y > 0.5) {
     float band = step(abs(f.y - 0.5), 0.5) * (1.0 - step(abs(f.y - 0.5), hw.y));
     // spandrels: dark tinted glass too, so a tower reads as one sheet of glass from afar
     diffuseColor.rgb = mix(diffuseColor.rgb, glassCol * 1.8 + diffuseColor.rgb * 0.06, band * inCols);
+    // a third of the glass towers are all curtain wall: the piers go dark glass as well
+    if (fract(vStyle.y * 3.77) < 0.34) diffuseColor.rgb = mix(diffuseColor.rgb, glassCol * 2.1 + vec3(0.02), step(1.0, v) * 0.85);
     wmask = max(wmask, band * inCols * 0.85);
   }
   diffuseColor.rgb = mix(diffuseColor.rgb, glassCol, wmask);
@@ -341,7 +349,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v3';
+  mat.customProgramCacheKey = () => 'palmera-building-v5';
   return mat;
 }
 

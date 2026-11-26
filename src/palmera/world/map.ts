@@ -500,7 +500,10 @@ export class CityMap {
 
   // ---------------------------------------------------------- contents
   private addBuilding(x: number, z: number, w: number, d: number, h: number, color: number, style: number, rng: Rng, roof: 0 | 1 = 0, roofColor = 0x8a7a70, y0 = 0, collide = true) {
-    this.buildings.push({ x, z, w, d, h, y0, color, style, seed: rng.next(), roof, roofColor, collide });
+    rng.next(); // (still drawn, so everything generated after keeps its place)
+    // the seed comes from the footprint's centre, so a tower and its set-back tiers share their glass
+    const seed = (((Math.sin(Math.round(x) * 12.9898 + Math.round(z) * 78.233) * 43758.5453) % 1) + 1) % 1;
+    this.buildings.push({ x, z, w, d, h, y0, color, style, seed, roof, roofColor, collide });
   }
 
   private fillBlock(b: Block, rng: Rng) {
