@@ -45,6 +45,7 @@ import { PhotoMode } from './photo';
 import { Club } from './club';
 import { Wakes } from './wakes';
 import { Patrol } from './patrol';
+import { Parachute } from './parachute';
 import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
@@ -125,6 +126,7 @@ export class Game {
   club!: Club;
   wakes!: Wakes;
   patrol!: Patrol;
+  chute!: Parachute;
   interiors!: Interiors;
   saveGame!: SaveGame;
   phone!: Phone;
@@ -187,6 +189,7 @@ export class Game {
     this.club = new Club(this);
     this.wakes = new Wakes(this);
     this.patrol = new Patrol(this);
+    this.chute = new Parachute(this);
     this.street = new StreetEvents(this);
     this.interiors = new Interiors(this);
     this.saveGame = new SaveGame(this);
@@ -978,6 +981,7 @@ export class Game {
     this.life.update(sdt);
     if (this.mode === 'play') this.wanted.update(sdt);
     this.stepVehicles(sdt);
+    this.chute?.update(sdt);
     this.stepHumans(sdt);
     this.carsVsPeople();
     for (const h of this.humans) this.humanR.animate(h, sdt);

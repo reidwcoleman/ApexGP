@@ -35,7 +35,7 @@ export class PlayerController {
   aiming = false;
   aimW = 0;
   private camDist = TUNING.camDistFoot;
-  private mouseIdle = 10;
+  mouseIdle = 10;
   private punchCd = 0;
   private camPos = new THREE.Vector3();
   private camTarget = new THREE.Vector3();
@@ -448,6 +448,9 @@ export class PlayerController {
       const scoped = p.weapon === 'sniper' && aim > 0.5;
       fov = scoped ? 14 : lerp(TUNING.fovFoot, TUNING.fovAim, aim) + (p.sprint && Math.hypot(p.vx, p.vz) > 6 ? 4 : 0);
       if (scoped) dist = 0.4;
+      // in the air: further back and up, so the whole canopy is in frame
+      if (p.sky === 2) { dist = 9.5; height = 3.6; side = 0; fov += 6; }
+      else if (p.sky === 1) { dist = 6; side = 0; fov += 8; }
       const ty = p.swimming ? WATER_Y + 0.6 : p.pos.y + height;
       this.camTarget.set(p.pos.x, ty, p.pos.z);
     }

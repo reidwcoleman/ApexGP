@@ -251,7 +251,7 @@ export class SkinnedCrowd {
     let a = sp < 0.25 ? h.clip || 'idle' : sp < 2.1 ? 'walk' : sp < 4.6 ? 'jog' : 'run';
     // in cover: down behind it, standing only to aim
     if (h.inCover && h.aim < 0.5 && sp < 2.4) a = 'crouch';
-    if (!h.onGround && !h.swimming) a = 'jog';
+    if (!h.onGround && !h.swimming) a = h.sky ? 'idle' : 'jog';
     if (a !== s.anim) {
       p.play(a, { fade: 0.25, offset: (h.id * 0.31) % 1 });
       s.anim = a;
@@ -268,6 +268,7 @@ export class SkinnedCrowd {
     p.root.position.set(h.pos.x - Math.sin(h.yaw) * lounge * 0.25, h.pos.y + lie * 0.12 + (h.swimming ? -1.15 : 0) + lounge * 0.38, h.pos.z - Math.cos(h.yaw) * lounge * 0.25);
     p.root.rotation.set(towel ? -Math.PI / 2 : -lie * 1.5 - lounge * 0.75, h.yaw, 0, 'YXZ');
     // vaulting: lean into it, and roll onto a hip across a car bonnet
+    if (h.sky === 1) p.root.rotation.x += 1.25;
     if (h.vaultU >= 0) {
       const k = Math.sin(h.vaultU * Math.PI);
       p.root.rotation.x += 0.35 * k;

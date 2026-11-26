@@ -128,6 +128,16 @@ export class Chopper {
     const inp = g.input;
     for (const c of this.crafts) if (c !== this.active) {
       c.spin = Math.max(0, c.spin - dt * 0.25);
+      // abandoned in the air: it autorotates down, drifting on, and settles
+      const fl = this.floor(c.pos.x, c.pos.z, c.pos.y - SKID);
+      if (c.pos.y - SKID > fl + 0.02) {
+        c.vel.x *= Math.exp(-0.4 * dt);
+        c.vel.z *= Math.exp(-0.4 * dt);
+        c.pos.x += c.vel.x * dt;
+        c.pos.z += c.vel.z * dt;
+        c.pos.y = Math.max(fl + SKID, c.pos.y - 7 * dt);
+        c.spin = Math.max(c.spin, 0.5);
+      } else c.vel.set(0, 0, 0);
       this.sync(c, dt);
     }
     const c = this.active;
@@ -215,6 +225,10 @@ export class Chopper {
     g.audio.setRotor(0.75);
     const wet = isWater(c.pos.x, c.pos.z);
     if (grounded) g.hud.prompt(wet ? 'Find land to set down' : '<kbd>F</kbd> Climb out');
+    else if (alt > 25) {
+      g.hud.prompt('<kbd>F</kbd> Bail out (parachute)');
+      if (inp.hit('KeyF')) return this.bail();
+    }
     if (inp.hit('KeyF') && grounded && !wet && Math.hypot(c.vel.x, c.vel.z) < 3) this.leave();
   }
 
@@ -225,6 +239,21 @@ export class Chopper {
   }
 
   /** out of the cabin onto the skid side */
+  /** jump out in flight: you keep its speed; the Skylark autorotates down on its own */
+  private bail() {
+    const c = this.active!;
+    const vel = c.vel.clone();
+    this.leave();
+    const p = this.game.player;
+    p.pos.set(c.pos.x, c.pos.y - 2.4, c.pos.z);
+    p.vx = vel.x;
+    p.vz = vel.z;
+    p.vy = Math.min(0, vel.y) - 2;
+    p.onGround = false;
+    c.vel.copy(vel);
+    this.game.hud.toast('Space to open your parachute');
+  }
+
   leave() {
     const c = this.active;
     if (!c) return;

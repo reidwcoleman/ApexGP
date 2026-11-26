@@ -39,6 +39,8 @@ export class Human {
   vaultU = -1;
   /** sideways roll of a bonnet slide */
   vaultRoll = 0;
+  /** in the air: 1 freefall (face down), 2 hanging under a parachute */
+  sky = 0;
   /** an open umbrella (its canopy colour) held up in the rain, or null */
   umbrella: number | null = null;
   armor = 0;
