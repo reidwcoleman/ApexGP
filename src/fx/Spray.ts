@@ -148,8 +148,10 @@ export class SprayEmitters {
       p.puff(
         wx, g + ly, wz,
         vx * k + cy * out, up, vz * k - sy * out,
-        (1.0 + 1.6 * r) * (0.55 + 0.45 * I) * (1 + 0.45 * deep), (0.45 + 0.25 * rnd()) * sizeK, (1.2 + 1.0 * r) * (0.6 + 0.4 * I) * sizeK * (1 + 0.4 * deep),
-        Math.min(0.45, (0.25 + 0.16 * rnd()) * Math.pow(I, 0.75) * (lod === 2 ? 1.2 : 1) * (1 + 0.2 * deep)) * selfK, bright,
+        (1.0 + 1.6 * r) * (0.55 + 0.45 * I) * (1 + 0.45 * deep), (0.45 + 0.25 * rnd()) * sizeK, (1.2 + 1.0 * r) * (0.6 + 0.4 * I) * sizeK * 1.2 * (1 + 0.4 * deep),
+        // (2026-11-26: ×1.3, cap 0.58 — AC's Monza rain (yt KPf7CXQ33j8) hides a car 30 m ahead in a wall of
+        // spray; ours was a light veil)
+        Math.min(0.58, (0.25 + 0.16 * rnd()) * 1.3 * Math.pow(I, 0.75) * (lod === 2 ? 1.2 : 1) * (1 + 0.2 * deep)) * selfK, bright,
         // (born compact at the tyre and faded in over its first ~0.2 s: the footage's plume is
         // thin right at the diffuser and thickest a few metres back, so the car stays readable
         // inside it instead of drawing as a white ghost; eroded into wisps as it spreads)
@@ -169,7 +171,7 @@ export class SprayEmitters {
           px + sy * back + (rnd() - 0.5) * 1.5, g + 0.6 + rnd() * 0.8, pz + cy * back + (rnd() - 0.5) * 1.5,
           vx * 0.22, 0.25 + rnd() * 0.4, vz * 0.22,
           (2.2 + rnd() * 1.4) * (0.6 + 0.4 * I) * (1 + 0.6 * deep), 1.4 * sizeK, (3.6 + rnd() * 1.8) * sizeK * (1 + 0.3 * deep),
-          (0.16 + 0.08 * deep) * Math.pow(I, 0.8) * selfK, bright, 0.9, 0, -1, g, 0.4, 0.12, 0.8, pre,
+          (0.24 + 0.1 * deep) * Math.pow(I, 0.8) * selfK, bright, 0.9, 0, -1, g, 0.4, 0.12, 0.8, pre,
         );
       });
     }
