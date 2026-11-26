@@ -34,6 +34,7 @@ import { SaveGame } from './save';
 import { BodyShop } from './bodyshop';
 import { Wardrobe } from './wardrobe';
 import { Pigeons } from './pigeons';
+import { Exports } from './exports';
 import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
@@ -102,6 +103,7 @@ export class Game {
   bodyShop!: BodyShop;
   wardrobe!: Wardrobe;
   pigeons!: Pigeons;
+  exports!: Exports;
   interiors!: Interiors;
   saveGame!: SaveGame;
   phone!: Phone;
@@ -153,6 +155,7 @@ export class Game {
     this.bodyShop = new BodyShop(this);
     this.wardrobe = new Wardrobe(this);
     this.pigeons = new Pigeons(this);
+    this.exports = new Exports(this);
     this.interiors = new Interiors(this);
     this.saveGame = new SaveGame(this);
     this.phone = new Phone(this);
@@ -917,6 +920,7 @@ export class Game {
       this.bodyShop.update(sdt);
       this.wardrobe.update(sdt);
       this.pigeons.update(sdt);
+      this.exports.update(sdt);
       this.saveGame.update(sdt);
       this.interiors.update(sdt);
       this.phone.update();

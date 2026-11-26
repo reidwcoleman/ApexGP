@@ -141,6 +141,8 @@ export class Phone {
         if (gun) rows.push({ label: 'Gun shop', sub: 'Sunbelt Arms · nearest', act: () => this.waypoint(gun.x, gun.z, 'Sunbelt Arms') });
         const body = this.nearest(g.bodyShop.bays);
         if (body) rows.push({ label: 'Body & paint', sub: 'Sundown · repair, respray, lose the heat · $150', act: () => this.waypoint(body.x, body.z, 'Sundown Body & Paint') });
+        const ex = g.exports;
+        rows.push({ label: 'Export list', sub: `Harbor Exports wants: ${ex.summary}`, act: () => this.waypoint(ex.drop.x, ex.drop.z, 'Harbor Exports') });
         rows.push({ label: 'Taxi work', sub: 'Get in any cab and press T', act: () => this.toggle() });
         rows.push({ label: 'Paramedic work', sub: 'Get in an ambulance and press T', act: () => this.toggle() });
         rows.push({ label: 'Clear waypoint', act: () => ((g.hud.waypoint = null), this.toggle()) });

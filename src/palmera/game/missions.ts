@@ -552,6 +552,7 @@ export class Missions {
     if (this.game.robbery) out.push(...this.game.robbery.blips);
     if (this.game.bodyShop) out.push(...this.game.bodyShop.blips);
     if (this.game.wardrobe) out.push(...this.game.wardrobe.blips);
+    if (this.game.exports) out.push(...this.game.exports.blips);
     for (const d of MISSIONS) if (!this.done.has(d.id)) out.push({ x: d.start.x, z: d.start.z, color: d.color, label: String(d.id + 1), kind: 'mission' });
     return out;
   }

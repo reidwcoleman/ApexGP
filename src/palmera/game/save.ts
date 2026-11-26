@@ -22,6 +22,8 @@ interface SaveData {
   radio: number;
   pos: { x: number; z: number } | null;
   clothes?: string[];
+  exportList?: string[];
+  exported?: string[];
   wearing?: string;
 }
 
@@ -71,6 +73,8 @@ export class SaveGame {
       pos: this.spot() ?? old?.pos ?? null,
       clothes: [...g.wardrobe.owned],
       wearing: g.wardrobe.wearing,
+      exportList: [...g.exports.list],
+      exported: [...g.exports.delivered],
     };
     try {
       localStorage.setItem(KEY, JSON.stringify(d));
@@ -110,6 +114,10 @@ export class SaveGame {
     while (r.station !== d.radio && guard++ < 8) r.tune(1);
     if (d.pos) g.teleport(d.pos.x, d.pos.z);
     if (d.clothes) g.wardrobe.owned = new Set(d.clothes);
+    if (d.exportList?.length) {
+      g.exports.list = d.exportList as typeof g.exports.list;
+      g.exports.delivered = new Set((d.exported ?? []) as typeof g.exports.list);
+    }
     if (d.wearing) {
       g.wardrobe.wearing = d.wearing;
       g.wardrobe.apply(d.wearing);
