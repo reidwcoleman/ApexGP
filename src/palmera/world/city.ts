@@ -669,9 +669,49 @@ export class City {
     const neonCols = [0xff5fa2, 0x29e0d0, 0xb57bff, 0xffb347, 0x5fd3ff];
     const rng = new Rng(77);
     const q = new THREE.Quaternion();
+    // the skyline's landmarks: the two tallest towers twist, the next ones step back and carry spires
+    const towers = this.map.buildings.filter((b) => b.style === 0 && b.y0 === 0 && b.h > 30).sort((a, b) => b.h - a.h);
+    const twisted = new Set(towers.slice(0, 2));
+    const spires: Inst[] = [], beacons: Inst[] = [], pads: Inst[] = [];
+    const up = new THREE.Vector3(0, 1, 0);
     for (const b of this.map.buildings) {
+      const col = new THREE.Color(b.color);
+      if (twisted.has(b)) {
+        this.landmarks.add(b);
+        const fl = 3.6, n = Math.floor(b.h / fl);
+        const turn = (Math.PI / 2) * (b.seed > 0.5 ? 1 : -1);
+        for (let k = 0; k < n; k++) {
+          const qa = new THREE.Quaternion().setFromAxisAngle(up, (k / n) * turn);
+          big.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, k * fl, b.z), qa, new THREE.Vector3(b.w * 0.86, fl - 0.02, b.d * 0.86)), c: col, a: [0, b.seed + k * 0.013] });
+        }
+        spires.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, n * fl, b.z), q, new THREE.Vector3(1, 26, 1)), c: new THREE.Color(0xc8ccd0) });
+        beacons.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, n * fl + 26.4, b.z), q, new THREE.Vector3(0.7, 0.7, 0.7)) });
+        continue;
+      }
+      if (towers.includes(b) && b.h > 38 && (towers.indexOf(b) < 7 || rng.next() < 0.45)) {
+        // setbacks: a base, a narrower middle, a crown
+        this.landmarks.add(b);
+        const h1 = b.h * 0.66, h2 = b.h * 0.22, h3 = b.h * 0.12;
+        big.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, 0, b.z), q, new THREE.Vector3(b.w, h1, b.d)), c: col, a: [0, b.seed] });
+        big.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, h1, b.z), q, new THREE.Vector3(b.w * 0.76, h2, b.d * 0.76)), c: col, a: [0, b.seed + 0.31] });
+        big.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, h1 + h2, b.z), q, new THREE.Vector3(b.w * 0.5, h3, b.d * 0.5)), c: col.clone().offsetHSL(0, 0, -0.08), a: [0, b.seed + 0.57] });
+        // ledges where it steps in
+        const lc = col.clone().lerp(new THREE.Color(0xffffff), 0.6);
+        this.ledges.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, h1 - 0.2, b.z), q, new THREE.Vector3(b.w + 0.4, 0.5, b.d + 0.4)), c: lc });
+        this.ledges.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, h1 + h2 - 0.2, b.z), q, new THREE.Vector3(b.w * 0.76 + 0.4, 0.5, b.d * 0.76 + 0.4)), c: lc });
+        if (towers.indexOf(b) < 7) {
+          const sh = 10 + rng.next() * 14;
+          spires.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, b.h, b.z), q, new THREE.Vector3(0.8, sh, 0.8)), c: new THREE.Color(0xc8ccd0) });
+          beacons.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, b.h + sh + 0.3, b.z), q, new THREE.Vector3(0.6, 0.6, 0.6)) });
+        }
+        continue;
+      }
+      if (b.style === 0 && b.h > 30 && rng.next() < 0.35) {
+        this.helipads.add(b);
+        pads.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, b.h + 0.06, b.z), q, new THREE.Vector3(Math.min(b.w, b.d) * 0.7, 1, Math.min(b.w, b.d) * 0.7)) });
+      }
       const m = new THREE.Matrix4().compose(new THREE.Vector3(b.x, b.y0, b.z), q, new THREE.Vector3(b.w, b.h, b.d));
-      const it: Inst = { m, c: new THREE.Color(b.color), a: [b.style, b.seed] };
+      const it: Inst = { m, c: col, a: [b.style, b.seed] };
       (b.h + b.y0 > 18 || b.style === 0 ? big : small).push(it);
       if (b.roof) this.pushRoof(b, roofs);
       if (b.style === 1 && b.y0 === 0 && b.h > 10) {
@@ -683,6 +723,14 @@ export class City {
       }
     }
     this.buildBuildingDetail();
+    // spires (a slim tapered mast), aircraft-warning lights, helipads
+    const spG = new THREE.CylinderGeometry(0.08, 0.6, 1, 8);
+    spG.translate(0, 0.5, 0);
+    chunked(this.scene, this.chunks, spires, spG, new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.9 }), { far: 2400, shadow: true });
+    chunked(this.scene, this.chunks, beacons, new THREE.SphereGeometry(0.5, 8, 6), this.beaconMat, { far: 2600, shadow: false, receive: false });
+    const padG = new THREE.CircleGeometry(0.5, 32);
+    padG.rotateX(-Math.PI / 2);
+    chunked(this.scene, this.chunks, pads, padG, new THREE.MeshStandardMaterial({ map: helipadTexture(), roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -2 }), { far: 1600, shadow: false });
     const attr = { name: 'aStyle', size: 2 };
     chunked(this.scene, this.chunks, big, geo, mat, { far: 2200, shadow: true, attr });
     chunked(this.scene, this.chunks, small, geo, mat, { far: 750, shadow: true, attr });
@@ -693,6 +741,11 @@ export class City {
   }
 
   /** what gives a box a building's silhouette: cornices and parapets, balconies, rooftop plant, awnings */
+  /** towers reshaped (twisted, set back): no box cornice or parapet on them */
+  private landmarks = new Set<BuildingSpec>();
+  private helipads = new Set<BuildingSpec>();
+  private ledges: Inst[] = [];
+
   private buildBuildingDetail() {
     const trim: Inst[] = [], balc: Inst[] = [], rail: Inst[] = [], plant: Inst[] = [], awn: Inst[] = [], signs: Inst[] = [];
     const rng = new Rng(4242);
@@ -701,7 +754,9 @@ export class City {
       list.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(sx, sy, sz)), c });
     const awnCols = [0x1f8a8a, 0xd8574a, 0x2b5fa8, 0xf2c14e, 0x3f8f5a, 0xe8e2d0, 0xc0477a];
     const white = new THREE.Color(0xf3f0ea), grey = new THREE.Color(0x9a9a96), dark = new THREE.Color(0x5a5c5e);
+    for (const l of this.ledges) trim.push(l);
     for (const b of this.map.buildings) {
+      if (this.landmarks.has(b)) continue;
       const top = b.y0 + b.h;
       const base = new THREE.Color(b.color);
       const light = base.clone().lerp(white, 0.75);
@@ -714,7 +769,9 @@ export class City {
         put(trim, b.x - b.w / 2 + t / 2, top + ph / 2, b.z, t, ph, b.d - 2 * t, light);
         put(trim, b.x + b.w / 2 - t / 2, top + ph / 2, b.z, t, ph, b.d - 2 * t, light);
         // rooftop plant
-        if (b.style === 0 && b.h > 25) {
+        if (this.helipads.has(b)) {
+          // the pad keeps the roof clear
+        } else if (b.style === 0 && b.h > 25) {
           put(plant, b.x + (rng.next() - 0.5) * b.w * 0.2, top + 1.8, b.z + (rng.next() - 0.5) * b.d * 0.2, b.w * 0.42, 3.6, b.d * 0.42, grey);
           if (rng.chance(0.5)) put(plant, b.x, top + 3.6 + 3, b.z, 0.25, 6, 0.25, dark);
         } else if (b.w > 6 && b.d > 6) {
@@ -1054,4 +1111,26 @@ function neonSignMaterial(): THREE.MeshBasicMaterial {
   };
   m.customProgramCacheKey = () => 'palmera-neon-sign';
   return m;
+}
+
+function helipadTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const x = c.getContext('2d')!;
+  x.fillStyle = '#3a3d40';
+  x.beginPath();
+  x.arc(128, 128, 126, 0, Math.PI * 2);
+  x.fill();
+  x.strokeStyle = '#f2c14e';
+  x.lineWidth = 10;
+  x.beginPath();
+  x.arc(128, 128, 104, 0, Math.PI * 2);
+  x.stroke();
+  x.fillStyle = '#f4f4f0';
+  x.fillRect(84, 66, 22, 124);
+  x.fillRect(150, 66, 22, 124);
+  x.fillRect(100, 117, 56, 22);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
