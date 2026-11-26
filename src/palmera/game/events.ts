@@ -13,7 +13,7 @@ import type { Game } from './game';
 type Stage = 'approach' | 'run' | 'dropped' | 'carry';
 
 /** the getaway car: picks its own turns (not just away from you) and leaves a trail of them */
-class GetawayAI extends FleeAI {
+export class GetawayAI extends FleeAI {
   trail: Map<number, number> | undefined;
   choose(at: number, came: number): number {
     const p = this.panic;

@@ -138,7 +138,7 @@ export class TrafficAI implements CarAI {
       }
       if (this.busT <= -10) this.busT = 18 + Math.random() * 14;
     }
-    const cruise = this.panic > 0 ? 21 : this.cruise;
+    const cruise = this.panic > 0 ? Math.max(21, this.cruise) : this.cruise;
     let target = cruise;
     // indicate before a turn
     const An = map.nodes[this.from], Bt = map.nodes[this.to], Cn = map.nodes[this.next];

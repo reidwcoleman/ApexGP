@@ -44,6 +44,7 @@ import { StreetEvents } from './events';
 import { PhotoMode } from './photo';
 import { Club } from './club';
 import { Wakes } from './wakes';
+import { Patrol } from './patrol';
 import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
@@ -123,6 +124,7 @@ export class Game {
   photo!: PhotoMode;
   club!: Club;
   wakes!: Wakes;
+  patrol!: Patrol;
   interiors!: Interiors;
   saveGame!: SaveGame;
   phone!: Phone;
@@ -184,6 +186,7 @@ export class Game {
     this.photo = new PhotoMode(this);
     this.club = new Club(this);
     this.wakes = new Wakes(this);
+    this.patrol = new Patrol(this);
     this.street = new StreetEvents(this);
     this.interiors = new Interiors(this);
     this.saveGame = new SaveGame(this);
@@ -511,7 +514,10 @@ export class Game {
       const o = v === pv ? other : v;
       if (o) {
         if (o.police && speed > 4) this.wanted.crime('copCar', o.pos.x, o.pos.z, true);
-        else if (o.ai instanceof TrafficAI) {
+        // a getaway car (a chase, a patrol suspect) is fair game: no heat, and it keeps fleeing
+        else if (o.urgent) {
+          /* nothing */
+        } else if (o.ai instanceof TrafficAI) {
           o.ai.panic = 8;
           if (speed > 8) this.wanted.crime('vehicle', o.pos.x, o.pos.z, false);
           // some drivers get out to have a word
@@ -977,6 +983,7 @@ export class Game {
       this.street.update(sdt);
       this.club.update(sdt);
       this.wakes.update(sdt);
+      this.patrol.update(sdt);
       this.reactions.update(sdt);
       this.activities.update(sdt);
       this.robbery.update(sdt);
