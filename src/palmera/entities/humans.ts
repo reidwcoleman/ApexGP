@@ -27,6 +27,8 @@ export class Human {
   rage = false;
   /** walks along looking at a phone */
   texting = false;
+  /** holding a fishing rod (game/fishing.ts): both hands forward at the hip */
+  fishing = false;
   /** down on the pavement waiting for an ambulance */
   injured = false;
   /** a spot to hold (officers at a roadblock) */
