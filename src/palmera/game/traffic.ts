@@ -103,16 +103,16 @@ export class TrafficAI implements CarAI {
     if (v.type === 'bus') {
       this.cruise = 8.5;
       this.busT -= dt;
-      if (this.busT < 0 && this.busT > -7 && this.panic <= 0) {
+      if (this.busT < 0 && this.busT > -10 && this.panic <= 0) {
         L = { ...L, tx: L.tx - L.dz * 2.4, tz: L.tz + L.dx * 2.4 };
         v.signal = 1;
         v.input.steer = steerTo(v, L.tx, L.tz);
-        v.input.thr = clamp((Math.max(0, this.busT + 5.5) * 1.5 - v.forwardSpeed) * 0.4, -1, 1);
-        v.input.hand = v.forwardSpeed < 0.3 && this.busT < -1.5;
-        if (v.input.hand) v.input.thr = 0;
+        const want = Math.max(0, this.busT + 5.5) * 1.5;
+        v.input.thr = want < 0.5 ? (v.forwardSpeed > 0.3 ? -0.7 : 0) : clamp((want - v.forwardSpeed) * 0.4, -1, 1);
+        v.input.hand = want < 0.5 && v.forwardSpeed <= 0.3;
         return;
       }
-      if (this.busT <= -7) this.busT = 18 + Math.random() * 14;
+      if (this.busT <= -10) this.busT = 18 + Math.random() * 14;
     }
     const cruise = this.panic > 0 ? 21 : this.cruise;
     let target = cruise;

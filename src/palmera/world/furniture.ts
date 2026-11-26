@@ -62,7 +62,7 @@ export function furnitureGeometry(kind: FurnitureKind): THREE.BufferGeometry {
         s.computeVertexNormals();
         s.translate(0, 0.95, 0);
         P.push(box(0.001, 0.001, 0.001, 0, 0, 0, 0x000000));
-        const g = s.toNonIndexed();
+        const g = s.index ? s.toNonIndexed() : s;
         const n = g.getAttribute('position').count;
         const col = new Float32Array(n * 3);
         for (let i = 0; i < n; i++) {
