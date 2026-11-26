@@ -1,7 +1,7 @@
 // Three short original story jobs with map markers and cash rewards.
 import * as THREE from 'three';
 import { Vehicle } from '../entities/vehicle';
-import { groundAt } from '../world/map';
+import { BEACH, groundAt } from '../world/map';
 import type { Game } from './game';
 import { FleeAI, TrafficAI } from './traffic';
 
@@ -520,6 +520,77 @@ export const MISSIONS: MissionDef[] = [
           mk.dispose(game.scene);
           prize.persistent = false;
           prize.missionTag = '';
+        },
+      };
+      return a;
+    },
+  },
+  {
+    id: 6,
+    title: 'High Water',
+    contact: 'Marisol Vane',
+    start: { x: BEACH.x0 + 12, z: -196 },
+    reward: 8000,
+    color: '#7fd8ff',
+    intro: [
+      'MARISOL: There is a case on the roof of the tallest tower in town. The owner thinks the helipad is the safest place in Port Palmera.',
+      'MARISOL: Take the Skylark on the sand here, set down on that pad, and the case is yours. The roof has an alarm. Bring it to the marina crane lot by air.',
+    ],
+    create(game) {
+      const pads = [...game.city.helipads].sort((a, b) => b.y0 + b.h - (a.y0 + a.h));
+      const pad = pads[0];
+      const pc = pad ? game.city.padAt.get(pad) ?? pad : null;
+      const roof = pad && pc ? { x: pc.x, y: pad.y0 + pad.h, z: pc.z } : { x: 200, y: 120, z: -220 };
+      const lot = { x: 400, z: 300 };
+      const mkRoof = new Marker(game.scene, 0x7fd8ff, 5, 4);
+      mkRoof.group.position.set(roof.x, roof.y + 0.2, roof.z);
+      const mkLot = new Marker(game.scene, 0x7fd8ff, 7, 6).at(lot.x, lot.z);
+      mkLot.group.visible = false;
+      let stage: 'board' | 'pickup' | 'deliver' = 'board';
+      const a: ActiveMission = {
+        objective: 'Get in the Skylark on the sand',
+        timer: null,
+        blips: [],
+        update() {
+          mkRoof.spin(game.elapsed);
+          mkLot.spin(game.elapsed);
+          const ch = game.chopper;
+          const c = ch.camera();
+          if (stage === 'board') {
+            const k = ch.crafts[0];
+            a.blips = [{ x: k.pos.x, z: k.pos.z, color: '#7fd8ff', label: 'Skylark', kind: 'car' }];
+            if (c) {
+              stage = 'pickup';
+              game.hud.subtitle('MARISOL: The tallest one. You cannot miss it. Set her down gently.');
+            }
+            return 'running';
+          }
+          if (!c) {
+            a.objective = 'Get back in a Skylark';
+            a.blips = ch.crafts.map((k) => ({ x: k.pos.x, z: k.pos.z, color: '#7fd8ff', label: 'Skylark', kind: 'car' as const }));
+            return 'running';
+          }
+          if (stage === 'pickup') {
+            a.objective = `Land on the helipad atop the tallest tower · ${Math.round(Math.hypot(c.x - roof.x, c.z - roof.z))} m`;
+            a.blips = [{ x: roof.x, z: roof.z, color: '#7fd8ff', label: 'Pad', kind: 'dest' }];
+            if (ch.grounded && Math.hypot(c.x - roof.x, c.z - roof.z) < 9 && c.y > roof.y) {
+              stage = 'deliver';
+              mkRoof.group.visible = false;
+              mkLot.group.visible = true;
+              game.wanted.setLevel(Math.max(3, game.wanted.level));
+              game.audio.cue('pickup');
+              game.hud.subtitle('MARISOL: You have it. And that is the alarm. Go, go!');
+            }
+            return 'running';
+          }
+          a.objective = `Fly the case to the marina crane lot · ${Math.round(Math.hypot(c.x - lot.x, c.z - lot.z))} m`;
+          a.blips = [{ x: lot.x, z: lot.z, color: '#7fd8ff', label: 'Lot', kind: 'dest' }];
+          if (ch.grounded && Math.hypot(c.x - lot.x, c.z - lot.z) < 14) return 'passed';
+          return 'running';
+        },
+        cleanup() {
+          mkRoof.dispose(game.scene);
+          mkLot.dispose(game.scene);
         },
       };
       return a;

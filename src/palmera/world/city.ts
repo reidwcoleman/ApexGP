@@ -744,9 +744,24 @@ export class City {
         }
         continue;
       }
+      // a pad on the clear part of the roof: none where a setback tier covers it, beside the plant room where there is one
       if (b.style === 0 && b.h > 30 && rng.next() < 0.35) {
-        this.helipads.add(b);
-        pads.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, b.h + 0.06, b.z), q, new THREE.Vector3(Math.min(b.w, b.d) * 0.7, 1, Math.min(b.w, b.d) * 0.7)) });
+        const on = this.map.buildings.find((o) => o !== b && Math.abs(o.y0 - (b.y0 + b.h)) < 0.5 && Math.abs(o.x - b.x) < (b.w + o.w) / 2 && Math.abs(o.z - b.z) < (b.d + o.d) / 2);
+        let cx = b.x, cz = b.z, size = Math.min(b.w, b.d) * 0.7;
+        if (on && on.w * on.d < 0.15 * b.w * b.d) {
+          if (Math.abs(on.x - b.x) >= Math.abs(on.z - b.z)) {
+            cx = b.x + Math.sign(b.x - on.x || 1) * b.w * 0.25;
+            size = Math.min(b.w * 0.42, b.d * 0.8);
+          } else {
+            cz = b.z + Math.sign(b.z - on.z || 1) * b.d * 0.25;
+            size = Math.min(b.d * 0.42, b.w * 0.8);
+          }
+        }
+        if (!on || on.w * on.d < 0.15 * b.w * b.d) {
+          this.helipads.add(b);
+          this.padAt.set(b, { x: cx, z: cz });
+          pads.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(cx, b.h + 0.06, cz), q, new THREE.Vector3(size, 1, size)) });
+        }
       }
       const m = new THREE.Matrix4().compose(new THREE.Vector3(b.x, b.y0, b.z), q, new THREE.Vector3(b.w, b.h, b.d));
       const it: Inst = { m, c: col, a: [b.style, b.seed] };
@@ -783,6 +798,8 @@ export class City {
   grass: Grass | null = null;
   private landmarks = new Set<BuildingSpec>();
   readonly helipads = new Set<BuildingSpec>();
+  /** where on each helipad roof the pad is painted */
+  readonly padAt = new Map<BuildingSpec, { x: number; z: number }>();
   private ledges: Inst[] = [];
 
   private buildBuildingDetail() {

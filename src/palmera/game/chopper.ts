@@ -80,11 +80,16 @@ export class Chopper {
   /** the one you're flying */
   active: Craft | null = null;
   private yawRate = 0;
+  /** the one you're flying is sitting on the ground or a roof */
+  grounded = false;
   private bump = 0;
 
   constructor(private game: Game) {
     const spots: { x: number; y: number; z: number; yaw: number }[] = [{ x: BEACH.x0 + 20, y: groundAt(BEACH.x0 + 20, -210), z: -210, yaw: Math.PI / 2 }];
-    for (const b of game.city.helipads) spots.push({ x: b.x, y: b.y0 + b.h, z: b.z, yaw: 0 });
+    for (const b of game.city.helipads) {
+      const c = game.city.padAt.get(b) ?? b;
+      spots.push({ x: c.x, y: b.y0 + b.h, z: c.z, yaw: 0 });
+    }
     for (const s of spots.slice(0, 4)) {
       const m = skylark();
       const c: Craft = { ...m, pos: new THREE.Vector3(s.x, s.y + SKID, s.z), vel: new THREE.Vector3(), yaw: s.yaw, pitch: 0, roll: 0, spin: 0 };
@@ -149,6 +154,7 @@ export class Chopper {
     const floor = this.floor(c.pos.x, c.pos.z, c.pos.y - SKID);
     const alt = c.pos.y - SKID - floor;
     const grounded = alt < 0.15;
+    this.grounded = grounded;
     this.yawRate += ((lift ? turn * 1.3 : 0) - this.yawRate) * Math.min(1, dt * 3);
     c.yaw += this.yawRate * dt;
     const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
@@ -225,6 +231,7 @@ export class Chopper {
     const g = this.game;
     const p = g.player;
     this.active = null;
+    this.grounded = false;
     p.hidden = false;
     const rx = Math.cos(c.yaw) * 2.2, rz = -Math.sin(c.yaw) * 2.2;
     p.pos.set(c.pos.x + rx, c.pos.y - SKID, c.pos.z + rz);
