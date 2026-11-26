@@ -31,6 +31,7 @@ import { Activities } from './activities';
 import { Robbery } from './robbery';
 import { Interiors } from './interiors';
 import { SaveGame } from './save';
+import { BodyShop } from './bodyshop';
 import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
@@ -96,6 +97,7 @@ export class Game {
   reactions!: Reactions;
   activities!: Activities;
   robbery!: Robbery;
+  bodyShop!: BodyShop;
   interiors!: Interiors;
   saveGame!: SaveGame;
   phone!: Phone;
@@ -144,6 +146,7 @@ export class Game {
     this.reactions = new Reactions(this);
     this.activities = new Activities(this);
     this.robbery = new Robbery(this);
+    this.bodyShop = new BodyShop(this);
     this.interiors = new Interiors(this);
     this.saveGame = new SaveGame(this);
     this.phone = new Phone(this);
@@ -905,6 +908,7 @@ export class Game {
       this.reactions.update(sdt);
       this.activities.update(sdt);
       this.robbery.update(sdt);
+      this.bodyShop.update(sdt);
       this.saveGame.update(sdt);
       this.interiors.update(sdt);
       this.phone.update();

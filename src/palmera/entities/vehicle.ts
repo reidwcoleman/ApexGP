@@ -143,6 +143,29 @@ export class Vehicle {
   }
 
   private dented = false;
+  /** the body as built, kept while it's dented so a repair can put it back */
+  private baseGeo: THREE.BufferGeometry | null = null;
+
+  /** a new colour (the paint materials are shared per colour, so swap rather than recolour) */
+  repaint(color: number) {
+    this.color = color;
+    this.paint = paintMat(color);
+    const m = this.body.material as THREE.Material[];
+    if (Array.isArray(m)) m[0] = this.paint;
+  }
+
+  /** dents out, full health */
+  repair() {
+    if (this.dented && this.baseGeo) {
+      this.body.geometry.dispose();
+      this.body.geometry = this.baseGeo;
+      this.baseGeo = null;
+      this.dented = false;
+    }
+    this.crumple = 0;
+    this.health = this.spec.health;
+    this.smokeT = 0;
+  }
   /** total crumple so far (glass breaks, the bonnet gives) */
   crumple = 0;
   private readonly tv = new THREE.Vector3();
@@ -155,6 +178,7 @@ export class Vehicle {
   dent(x: number, y: number, z: number, strength: number) {
     if (this.isBoat || this.wrecked || strength < 3) return;
     if (!this.dented) {
+      this.baseGeo = this.body.geometry;
       this.body.geometry = this.body.geometry.clone();
       this.dented = true;
     }
