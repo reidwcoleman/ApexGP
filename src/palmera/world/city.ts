@@ -173,7 +173,7 @@ uniform float uNight;
 varying vec3 vBN; varying vec3 vLP; varying vec3 vBS; varying vec2 vStyle; varying vec3 vBW;
 float bhash(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719)))*43758.5453); }
 // a room behind the glass: the ray from the eye carried into a box the size of the window's cell
-vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office, out float tHit) {
+vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office, out float tHit, out float lampK) {
   vec3 ro = vec3(pin * cellSz, 0.0);
   vec3 bmax = vec3(cellSz, depth);
   vec3 t1 = (vec3(0.0) - ro) / rd, t2 = (bmax - ro) / rd;
@@ -181,6 +181,10 @@ vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office
   float t = min(min(tf.x, tf.y), tf.z);
   vec3 h = ro + rd * t;
   tHit = t;
+  // the room's light: a lamp under the ceiling, part way back
+  vec3 lp = vec3(cellSz.x * (0.35 + 0.3 * fract(seed * 5.3)), cellSz.y * 0.9, depth * 0.55);
+  vec3 dl = h - lp;
+  lampK = 1.0 / (1.0 + dot(dl, dl) * 0.32);
   vec3 wall = office > 0.5 ? vec3(0.62, 0.64, 0.66) : mix(vec3(0.78, 0.7, 0.6), vec3(0.62, 0.72, 0.76), step(0.5, fract(seed * 7.1)));
   vec3 col;
   if (t == tf.z) {
@@ -198,7 +202,27 @@ vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office
     col = wall * 0.7;
   }
   // furniture silhouettes low in the room
-  if (h.y < cellSz.y * 0.32 && t != tf.y && h.z > depth * 0.35) col *= 0.45;
+  if (office < 1.5 && h.y < cellSz.y * 0.32 && t != tf.y && h.z > depth * 0.35) col *= 0.45;
+  // a shop: stocked shelving round the walls, a tiled floor, a strip light
+  if (office > 1.5) {
+    if (t == tf.y && rd.y < 0.0) {
+      vec2 tl = floor(h.xz * 1.6);
+      col = mix(vec3(0.72, 0.72, 0.7), vec3(0.58, 0.6, 0.6), mod(tl.x + tl.y, 2.0));
+    } else if (t != tf.y && h.y < 1.9 && h.y > 0.12) {
+      float along = t == tf.z ? h.x : h.z;
+      float row = floor(h.y / 0.4);
+      float band = fract(h.y / 0.4);
+      float slot = fract(along * 6.0);
+      if (band < 0.08) col = vec3(0.78, 0.79, 0.8);
+      else if (band > 0.72 || slot < 0.1 || slot > 0.92) col = vec3(0.16, 0.17, 0.18);
+      else {
+        // runs of one product: the colour changes every few facings
+        float k = bhash(vec3(floor(along * 1.5), row, seed * 31.0));
+        vec3 prod = 0.5 + 0.5 * cos(6.2832 * (k + vec3(0.0, 0.33, 0.67)));
+        col = mix(vec3(0.55), prod, 0.5) * 0.85;
+      }
+    }
+  }
   return col * mix(1.0, 0.55, clamp(t / (depth * 1.4), 0.0, 1.0));
 }`,
       )
@@ -207,7 +231,7 @@ vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office
         `#include <color_fragment>
 vec3 bn = normalize(vBN);
 float bStyle = vStyle.x;
-float wmask = 0.0; float wlit = 0.0; vec3 bInterior = vec3(0.0); float bFrame = 0.0;
+float wmask = 0.0; float wlit = 0.0; vec3 bInterior = vec3(0.0); float bFrame = 0.0; float bLamp = 0.0;
 vec3 litCol = vec3(1.0, 0.78, 0.5);
 if (bn.y > 0.5) {
   diffuseColor.rgb *= 0.72;
@@ -252,8 +276,10 @@ if (bn.y > 0.5) {
     rd.z = max(rd.z, 0.05);
     vec2 pin = (f - (0.5 - hw)) / (2.0 * hw);
     float tHit;
-    float office = (bStyle < 0.5 || shop) ? 1.0 : 0.0;
-    vec3 room = bRoom(pin, cell * fr * 1.6, bStyle < 0.5 ? 6.0 : 4.0, normalize(rd), r, office, tHit);
+    float office = shop ? 2.0 : bStyle < 0.5 ? 1.0 : 0.0;
+    float lampK;
+    vec3 room = bRoom(pin, cell * fr * 1.6, shop ? 8.0 : bStyle < 0.5 ? 6.0 : 4.0, normalize(rd), r, office, tHit, lampK);
+    bLamp = lampK;
     // blinds: some windows half shut
     float blind = step(0.55, fract(r * 13.3)) * (0.25 + 0.6 * fract(r * 5.1));
     if (!shop && pin.y > 1.0 - blind) room = mix(vec3(0.85, 0.8, 0.68), vec3(0.6, 0.66, 0.7), step(0.7, fract(r * 3.3))) * (0.7 + 0.12 * step(0.5, fract(pin.y * 18.0)));
@@ -310,11 +336,12 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
   float dayLight = 1.0 - uNight;
   // the room as the daylight shows it, and lamps on in some rooms at night
   totalEmissiveRadiance += bInterior * wmask * (dayLight * (bStyle < 0.5 ? 0.22 : 0.32) + uNight * 0.04);
-  totalEmissiveRadiance += (bInterior * 0.8 + 0.2) * litCol * wlit * uNight * 1.3;
+  // lit rooms at night: the lamp falls off across walls, floor and furniture, so it reads as a room
+  totalEmissiveRadiance += bInterior * litCol * wlit * uNight * (0.28 + bLamp * 1.35);
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v2';
+  mat.customProgramCacheKey = () => 'palmera-building-v3';
   return mat;
 }
 
