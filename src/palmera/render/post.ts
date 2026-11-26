@@ -66,6 +66,9 @@ class ShaftsEffect extends Effect {
       void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
         if (uStrength <= 0.001) { outputColor = inputColor; return; }
         vec2 d = uSun - uv;
+        // far from the sun the shafts fade to nothing: skip the 28-tap march there (most of the screen)
+        float fall = exp(-length(d * vec2(1.0, 0.6)) * 1.6);
+        if (fall * uStrength < 0.012) { outputColor = inputColor; return; }
         const int N = 28;
         vec2 st = d / float(N) * 0.9;
         float j = fract(sin(dot(uv * 931.7, vec2(12.9898, 78.233))) * 43758.5453);
@@ -84,8 +87,6 @@ class ShaftsEffect extends Effect {
           w *= 0.955;
         }
         acc /= wsum;
-        float r = length(d * vec2(1.0, 0.6));
-        float fall = exp(-r * 1.6);
         vec3 add = acc * mix(vec3(1.0), uSunCol, 0.6) * fall * uStrength;
         // the shafts show in the air in front of things, not as a glow on open sky
         add *= mix(1.0, 0.35, step(1500.0, -getViewZ(depth)));

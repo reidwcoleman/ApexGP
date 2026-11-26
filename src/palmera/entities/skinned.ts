@@ -36,6 +36,8 @@ interface Slot {
   gun: THREE.Mesh | null;
   umb?: THREE.Mesh;
   lastUsed: number;
+  /** casting a shadow (only near the camera) */
+  shad?: boolean;
 }
 
 const gunMat = new THREE.MeshStandardMaterial({ color: 0x1a1b1d, roughness: 0.35, metalness: 0.7 });
@@ -280,7 +282,17 @@ export class SkinnedCrowd {
       p.root.rotation.z = h.vaultRoll * k;
     }
     // past 45 m the skeleton is updated every other frame (twice the step), which nobody can see
-    const far = h.kind !== 'player' && s.p.root.position.distanceToSquared(this.lastCam) > 45 * 45;
+    const d2 = s.p.root.position.distanceToSquared(this.lastCam);
+    const far = h.kind !== 'player' && d2 > 45 * 45;
+    // only people near you cast shadows: each skinned mesh is re-skinned in the shadow pass, and AO grounds the rest
+    const shad = h.kind === 'player' || d2 < 40 * 40;
+    if (s.shad !== shad) {
+      s.shad = shad;
+      s.p.root.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh) m.castShadow = shad;
+      });
+    }
     // people lying or sitting still (towels, loungers, benches) barely move: a quarter of the frames
     const still = h.state === 'towel' || h.state === 'lounge' || h.state === 'bench';
     if (still) {

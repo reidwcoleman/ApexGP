@@ -881,6 +881,15 @@ export class Game {
       for (const w of v.wheels) w.visible = showWheels;
       v.root.visible = d < 700;
       // headlight beams at night
+      // cars far off don't need their own shadow (AO grounds them); it saves a lot of shadow-pass draws
+      const cast = d < 80 || v.driver === 'player';
+      if (v.body.castShadow !== cast) {
+        v.body.castShadow = cast;
+        for (const wm of v.wheels) wm.castShadow = cast;
+      }
+      // beyond 60 m the wheels (four draw calls a car, mostly hidden under the body) aren't drawn at all
+      const wheelsOn = d < 60 || v.driver === 'player' || v.airborne || v.wrecked;
+      if (v.wheels.length && v.wheels[0].visible !== wheelsOn) for (const wm of v.wheels) wm.visible = wheelsOn;
       const beamOn = night > 0.15 && !v.wrecked && v.driver !== null && d < 160 && !v.isBoat;
       if (beamOn && !v.beam) {
         v.beam = new THREE.Mesh(this.beamGeo, this.beamMat);
