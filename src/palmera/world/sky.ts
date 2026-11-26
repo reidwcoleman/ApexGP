@@ -1,5 +1,28 @@
 import * as THREE from 'three';
+import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { clamp, lerp, smoothstep } from '../core/math';
+
+/**
+ * The sky: real sky photos (Poly Haven HDRIs, CC0) for afternoon, golden hour and dusk, blended by
+ * the sun's height as the clock runs, with the photo's own sun clamped out and the game's sun drawn
+ * where the shadows say it is. The same photo lights the world (image-based light, reflections in
+ * glass, paint and water); its measured horizon colour feeds the fog and the sea. At night the dusk
+ * photo is dimmed to near black and stars and a moon come out.
+ */
+
+const BASE = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'palmera/sky/';
+const PHOTOS = ['kloofendal_48d_partly_cloudy_puresky', 'qwantani_late_afternoon_puresky', 'qwantani_sunset_puresky', 'qwantani_dusk_2_puresky'] as const;
+
+interface Photo {
+  tex: THREE.DataTexture;
+  env: THREE.Texture;
+  /** the photo's own sun azimuth (rad, in the equirect's frame) */
+  sunAz: number;
+  /** mean luminance of the upper hemisphere (sun clamped) — photos are levelled by it */
+  lum: number;
+  horizon: THREE.Color;
+  zenith: THREE.Color;
+}
 
 const skyVert = /* glsl */ `
 varying vec3 vDir;
@@ -10,58 +33,129 @@ void main() {
 }`;
 
 const skyFrag = /* glsl */ `
+uniform sampler2D tA;
+uniform sampler2D tB;
+uniform float uRotA;
+uniform float uRotB;
+uniform float uMix;
+uniform float uLevel;
+uniform float uHasPhoto;
 uniform vec3 uZenith;
 uniform vec3 uHorizon;
 uniform vec3 uSunDir;
 uniform vec3 uMoonDir;
 uniform vec3 uSunColor;
+uniform float uSunI;
 uniform float uNight;
-uniform float uSunset;
 uniform float uTime;
 varying vec3 vDir;
 float h3(vec3 p){ p = fract(p*0.3183099+0.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
-float vnoise(vec2 p){ vec2 i=floor(p); vec2 f=fract(p); f=f*f*(3.0-2.0*f);
-  float a=h3(vec3(i,0.)), b=h3(vec3(i+vec2(1,0),0.)), c=h3(vec3(i+vec2(0,1),0.)), d=h3(vec3(i+vec2(1,1),0.));
-  return mix(mix(a,b,f.x),mix(c,d,f.x),f.y); }
-float fbm(vec2 p){ float s=0.0, a=0.5; for(int i=0;i<4;i++){ s+=a*vnoise(p); p*=2.03; a*=0.5; } return s; }
+vec3 photo(sampler2D t, vec3 d, float rot) {
+  float az = atan(d.z, d.x) + rot;
+  float el = asin(clamp(d.y, -1.0, 1.0));
+  vec2 uv = vec2(fract(az / 6.2831853 + 0.5), 0.5 + el / 3.14159265);
+  return min(texture2D(t, uv).rgb, vec3(8.0));
+}
 void main() {
   vec3 d = normalize(vDir);
-  float h = d.y;
-  float t = pow(clamp(h, 0.0, 1.0), 0.42);
-  vec3 col = mix(uHorizon, uZenith, t);
-  if (h < 0.0) col = mix(uHorizon, uHorizon * 0.75, clamp(-h * 4.0, 0.0, 1.0));
+  vec3 dd = vec3(d.x, max(d.y, 0.004), d.z);
+  vec3 col;
+  if (uHasPhoto > 0.5) {
+    col = mix(photo(tA, dd, uRotA), photo(tB, dd, uRotB), uMix) * uLevel;
+  } else {
+    col = mix(uHorizon, uZenith, pow(clamp(d.y, 0.0, 1.0), 0.42));
+  }
+  // below the horizon: the sea's haze
+  if (d.y < 0.0) col = mix(col, uHorizon * 0.8, clamp(-d.y * 6.0, 0.0, 1.0));
+  // the game's sun: a disc and its glow, where the shadows are cast from
   float sd = max(dot(d, uSunDir), 0.0);
-  float dayVis = 1.0 - uNight * 0.95;
-  col += uSunColor * (pow(sd, 6.0) * 0.18 + pow(sd, 48.0) * 0.5) * dayVis;
-  col += vec3(1.0, 0.42, 0.18) * pow(sd, 3.0) * uSunset * 0.45 * (1.0 - t);
-  col += uSunColor * smoothstep(0.99955, 0.99975, sd) * 18.0 * dayVis;
+  col += uSunColor * (pow(sd, 900.0) * 0.6 + pow(sd, 60.0) * 0.12) * uSunI;
+  col += uSunColor * smoothstep(0.99962, 0.9998, sd) * 60.0 * uSunI;
   // moon
   float md = dot(d, uMoonDir);
-  col += vec3(0.85, 0.9, 1.0) * smoothstep(0.99935, 0.9996, md) * 3.0 * uNight;
-  col += vec3(0.4, 0.5, 0.8) * pow(max(md, 0.0), 300.0) * 0.4 * uNight;
+  col += vec3(0.85, 0.9, 1.0) * smoothstep(0.99935, 0.9996, md) * 1.2 * uNight;
+  col += vec3(0.3, 0.4, 0.7) * pow(max(md, 0.0), 200.0) * 0.06 * uNight;
   // stars
-  vec3 sp = d * 260.0;
+  vec3 sp = d * 300.0;
   vec3 cell = floor(sp);
   float r = h3(cell);
-  float star = step(0.9965, r) * smoothstep(0.45, 0.0, length(fract(sp) - 0.5));
+  float star = step(0.9968, r) * smoothstep(0.45, 0.0, length(fract(sp) - 0.5));
   star *= 0.6 + 0.4 * sin(uTime * 3.0 + r * 100.0);
-  col += vec3(star) * uNight * smoothstep(0.02, 0.25, h) * 1.4;
-  // clouds
-  if (h > 0.01) {
-    vec2 cp = d.xz / (h + 0.08) * 1.6 + vec2(uTime * 0.004, uTime * 0.0015);
-    float c = fbm(cp);
-    c = smoothstep(0.58, 0.88, c) * smoothstep(0.0, 0.18, h);
-    vec3 cloudCol = mix(vec3(1.0, 0.98, 0.95), uSunColor * 1.1 + uHorizon * 0.3, uSunset * 0.6);
-    cloudCol = mix(cloudCol, vec3(0.08, 0.09, 0.14), uNight);
-    col = mix(col, cloudCol, c * 0.75);
-  }
+  col += vec3(star) * uNight * smoothstep(0.02, 0.25, d.y) * 0.5;
   gl_FragColor = vec4(col, 1.0);
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
 }`;
 
+function lum(c: THREE.Color) {
+  return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+}
+
+async function loadPhoto(renderer: THREE.WebGLRenderer, name: string): Promise<Photo> {
+  const loader = new HDRLoader();
+  loader.setDataType(THREE.HalfFloatType);
+  const tex = await loader.loadAsync(BASE + name + '.hdr');
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  const img = tex.image as { data: Uint16Array; width: number; height: number };
+  const { data, width: w, height: h } = img;
+  const half = THREE.DataUtils.fromHalfFloat;
+  // the photo's sun: the brightest pixel of the upper half
+  let best = -1, bx = 0;
+  for (let y = 0; y < h / 2; y += 2)
+    for (let x = 0; x < w; x += 2) {
+      const o = (y * w + x) * 4;
+      const v = half(data[o + 1]);
+      if (v > best) { best = v; bx = x; }
+    }
+  // texture u = az/2π + 0.5 (see photo() in the shader), so the sun sits at az = (u - 0.5)·2π
+  const sunAz = ((bx + 0.5) / w - 0.5) * Math.PI * 2;
+  // levels and colours (sun clamped)
+  const hor = new THREE.Color(0, 0, 0), zen = new THREE.Color(0, 0, 0), all = new THREE.Color(0, 0, 0);
+  let nh = 0, nz = 0, na = 0;
+  for (let y = 0; y < h / 2; y += 2) {
+    const el = (0.5 - (y + 0.5) / h) * Math.PI;
+    for (let x = 0; x < w; x += 4) {
+      const o = (y * w + x) * 4;
+      const r = Math.min(8, half(data[o])), g = Math.min(8, half(data[o + 1])), b = Math.min(8, half(data[o + 2]));
+      all.r += r; all.g += g; all.b += b; na++;
+      if (el > 0.02 && el < 0.09) { hor.r += r; hor.g += g; hor.b += b; nh++; }
+      if (el > 1.1) { zen.r += r; zen.g += g; zen.b += b; nz++; }
+    }
+  }
+  hor.multiplyScalar(1 / Math.max(1, nh));
+  zen.multiplyScalar(1 / Math.max(1, nz));
+  all.multiplyScalar(1 / Math.max(1, na));
+  // the IBL: the same photo with its sun clamped (the sun is the directional light's job) and the
+  // lower half turned into warm ground bounce
+  const out = new Uint16Array(data.length);
+  const toH = THREE.DataUtils.toHalfFloat;
+  for (let y = 0; y < h; y++) {
+    const lower = y >= h / 2;
+    for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        let v = Math.min(6, half(data[o + c]));
+        if (lower) v = [hor.r, hor.g, hor.b][c] * 0.35 * (c === 0 ? 1.1 : c === 2 ? 0.8 : 1);
+        out[o + c] = toH(v);
+      }
+      out[o + 3] = toH(1);
+    }
+  }
+  const ibl = new THREE.DataTexture(out, w, h, THREE.RGBAFormat, THREE.HalfFloatType);
+  ibl.mapping = THREE.EquirectangularReflectionMapping;
+  ibl.colorSpace = tex.colorSpace;
+  ibl.flipY = tex.flipY;
+  ibl.needsUpdate = true;
+  const pm = new THREE.PMREMGenerator(renderer);
+  const env = pm.fromEquirectangular(ibl).texture;
+  pm.dispose();
+  ibl.dispose();
+  return { tex, env, sunAz, lum: lum(all), horizon: hor, zenith: zen };
+}
+
 export class SkySystem {
-  time = 16.5;
+  time = 10.5;
   /** game hours advanced per real second */
   rate = 1 / 45;
   readonly sunDir = new THREE.Vector3();
@@ -72,62 +166,78 @@ export class SkySystem {
   night = 0;
   day = 1;
   sunset = 0;
+  /** what the post chain multiplies the frame by */
+  exposure = 1;
   light: THREE.DirectionalLight;
   hemi: THREE.HemisphereLight;
   mesh: THREE.Mesh;
   uniforms: Record<string, THREE.IUniform>;
-  private envScene = new THREE.Scene();
-  private pmrem: THREE.PMREMGenerator;
-  private envRT: THREE.WebGLRenderTarget | null = null;
-  private lastEnv = -100;
+  ready: Promise<void>;
+  private photos: Photo[] = [];
   private shadowSize = 70;
+  private curEnv: THREE.Texture | null = null;
 
   constructor(private scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
     this.uniforms = {
+      tA: { value: null },
+      tB: { value: null },
+      uRotA: { value: 0 },
+      uRotB: { value: 0 },
+      uMix: { value: 0 },
+      uLevel: { value: 1 },
+      uHasPhoto: { value: 0 },
       uZenith: { value: this.zenith },
       uHorizon: { value: this.horizon },
       uSunDir: { value: this.sunDir },
       uMoonDir: { value: this.moonDir },
       uSunColor: { value: this.sunColor },
+      uSunI: { value: 1 },
       uNight: { value: 0 },
-      uSunset: { value: 0 },
       uTime: { value: 0 },
     };
     const mat = new THREE.ShaderMaterial({ vertexShader: skyVert, fragmentShader: skyFrag, uniforms: this.uniforms, side: THREE.BackSide, depthWrite: false, fog: false });
-    this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), mat);
+    this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24), mat);
     this.mesh.scale.setScalar(2000);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = -10;
     scene.add(this.mesh);
-    const envSky = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), mat);
-    envSky.scale.setScalar(50);
-    this.envScene.add(envSky);
 
     this.light = new THREE.DirectionalLight(0xffffff, 3);
     this.light.castShadow = true;
     const s = this.light.shadow;
-    s.mapSize.set(2048, 2048);
+    s.mapSize.set(4096, 4096);
     s.camera.left = -this.shadowSize;
     s.camera.right = this.shadowSize;
     s.camera.top = this.shadowSize;
     s.camera.bottom = -this.shadowSize;
     s.camera.near = 1;
     s.camera.far = 500;
-    s.bias = -0.0004;
-    s.normalBias = 0.04;
+    s.bias = -0.0003;
+    s.normalBias = 0.03;
+    s.radius = 2.5;
     scene.add(this.light);
     scene.add(this.light.target);
-    this.hemi = new THREE.HemisphereLight(0xbfd8ff, 0x8a7a60, 0.8);
+    this.hemi = new THREE.HemisphereLight(0xbfd8ff, 0x8a7a60, 0.0);
     scene.add(this.hemi);
     scene.fog = new THREE.FogExp2(0xcfe0ea, 0.0011);
-    this.pmrem = new THREE.PMREMGenerator(renderer);
     this.compute();
+    this.ready = Promise.all(PHOTOS.map((n) => loadPhoto(renderer, n)))
+      .then((p) => {
+        this.photos = p;
+        this.uniforms.uHasPhoto.value = 1;
+        this.compute();
+      })
+      .catch((e) => console.warn('palmera: sky photos failed, using the drawn sky', e));
   }
 
   setTime(h: number) {
     this.time = ((h % 24) + 24) % 24;
-    this.lastEnv = -100;
     this.compute();
+  }
+
+  /** the sun's azimuth in the photo frame (matches photo() in the shader) */
+  private sunAz() {
+    return Math.atan2(this.sunDir.z, this.sunDir.x);
   }
 
   private compute() {
@@ -138,22 +248,54 @@ export class SkySystem {
     this.day = smoothstep(-0.06, 0.2, e);
     this.night = 1 - smoothstep(-0.14, 0.04, e);
     this.sunset = 1 - smoothstep(0.02, 0.38, Math.abs(e - 0.04));
+    this.sunColor.setRGB(1.0, lerp(0.88, 0.55, this.sunset), lerp(0.74, 0.3, this.sunset));
 
-    const dayZ = new THREE.Color(0.1, 0.32, 0.78), dayH = new THREE.Color(0.6, 0.76, 0.9);
-    const setZ = new THREE.Color(0.2, 0.22, 0.5), setH = new THREE.Color(1.0, 0.5, 0.26);
-    const nZ = new THREE.Color(0.006, 0.01, 0.03), nH = new THREE.Color(0.035, 0.045, 0.09);
-    this.zenith.copy(nZ).lerp(dayZ, this.day).lerp(setZ, this.sunset * 0.55);
-    this.horizon.copy(nH).lerp(dayH, this.day).lerp(setH, this.sunset * 0.75);
-    this.sunColor.setRGB(1.0, lerp(0.9, 0.58, this.sunset), lerp(0.76, 0.34, this.sunset));
+    // which photos, how much of each, and how bright
+    const u = this.uniforms;
+    let ia = 0, ib = 0, m = 0;
+    if (e > 0.45) { ia = ib = 0; }
+    else if (e > 0.25) { ia = 0; ib = 1; m = smoothstep(0.45, 0.25, e); }
+    else if (e > 0.08) { ia = 1; ib = 2; m = smoothstep(0.25, 0.08, e); }
+    else if (e > -0.06) { ia = 2; ib = 3; m = smoothstep(0.08, -0.06, e); }
+    else { ia = ib = 3; }
+    // level: the afternoon photo as it is; the others brought to a target brightness that falls
+    // through dusk to night
+    const target = lerp(0.006, 1, smoothstep(-0.2, 0.25, e)) * lerp(1, 0.75, this.sunset);
+    if (this.photos.length === PHOTOS.length) {
+      const pa = this.photos[ia], pb = this.photos[ib];
+      const base = this.photos[0].lum;
+      const pl = lerp(pa.lum, pb.lum, m) / base;
+      u.tA.value = pa.tex;
+      u.tB.value = pb.tex;
+      const az = this.sunAz();
+      u.uRotA.value = pa.sunAz - az;
+      u.uRotB.value = pb.sunAz - az;
+      u.uMix.value = m;
+      u.uLevel.value = target / Math.max(1e-4, pl);
+      const k = u.uLevel.value as number;
+      this.horizon.copy(pa.horizon).lerp(pb.horizon, m).multiplyScalar(k);
+      this.zenith.copy(pa.zenith).lerp(pb.zenith, m).multiplyScalar(k);
+      const env = m < 0.5 ? pa.env : pb.env;
+      if (env !== this.curEnv) {
+        this.curEnv = env;
+        this.scene.environment = env;
+      }
+      // never fully dark: the city's glow and the moon keep a little light in the reflections
+      this.scene.environmentIntensity = Math.max(target / Math.max(1e-4, (m < 0.5 ? pa.lum : pb.lum) / base), 0.18 * this.night);
+    } else {
+      const dayZ = new THREE.Color(0.1, 0.32, 0.78), dayH = new THREE.Color(0.6, 0.76, 0.9);
+      this.zenith.copy(dayZ).multiplyScalar(target);
+      this.horizon.copy(dayH).multiplyScalar(target);
+    }
   }
 
-  update(dt: number, focus: THREE.Vector3, camPos: THREE.Vector3, renderer: THREE.WebGLRenderer, elapsed: number) {
+  update(dt: number, focus: THREE.Vector3, camPos: THREE.Vector3, _renderer: THREE.WebGLRenderer, elapsed: number) {
     this.time = (this.time + dt * this.rate) % 24;
     this.compute();
     const u = this.uniforms;
     u.uNight.value = this.night;
-    u.uSunset.value = this.sunset;
     u.uTime.value = elapsed;
+    u.uSunI.value = this.day;
     this.mesh.position.copy(camPos);
 
     const useSun = this.sunDir.y > -0.03;
@@ -161,13 +303,13 @@ export class SkySystem {
     const L = this.light;
     if (useSun) {
       L.color.copy(this.sunColor);
-      L.intensity = 3.8 * this.day + 0.05;
+      L.intensity = 8.5 * smoothstep(-0.03, 0.12, this.sunDir.y) * lerp(1, 0.7, this.sunset) + 0.02;
     } else {
       L.color.setRGB(0.55, 0.65, 1.0);
-      L.intensity = 0.28 * this.night;
+      L.intensity = 0.05 * this.night;
     }
     // snap the shadow frustum to texels to stop shimmering
-    const texel = (this.shadowSize * 2) / 2048;
+    const texel = (this.shadowSize * 2) / this.light.shadow.mapSize.x;
     const fwd = dir.clone().negate();
     const up = Math.abs(fwd.y) > 0.99 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
     const right = new THREE.Vector3().crossVectors(fwd, up).normalize();
@@ -180,24 +322,18 @@ export class SkySystem {
     L.position.copy(snapped).addScaledVector(dir, 220);
     L.target.updateMatrixWorld();
 
-    this.hemi.color.copy(this.zenith).lerp(new THREE.Color(1, 1, 1), 0.35);
-    this.hemi.groundColor.setRGB(0.42, 0.36, 0.28).multiplyScalar(0.3 + 0.7 * this.day);
-    this.hemi.intensity = 0.3 + 0.55 * this.day + 0.12 * this.night;
-    if (this.night > 0.5) this.hemi.color.setRGB(0.3, 0.36, 0.6);
+    // a little fill under the IBL at night (the dusk photo dimmed to black leaves nothing)
+    this.hemi.color.setRGB(0.3, 0.38, 0.65);
+    this.hemi.groundColor.setRGB(0.12, 0.1, 0.08);
+    this.hemi.intensity = 0.42 * this.night;
 
     const fog = this.scene.fog as THREE.FogExp2;
-    fog.color.copy(this.horizon);
-    fog.density = lerp(0.0006, 0.0011, this.night) + this.sunset * 0.00015;
-    renderer.toneMappingExposure = lerp(0.92, 1.25, this.night);
-
-    if (Math.abs(this.time - this.lastEnv) > 0.6) {
-      this.lastEnv = this.time;
-      const rt = this.pmrem.fromScene(this.envScene, 0.04, 0.1, 100);
-      this.scene.environment = rt.texture;
-      this.envRT?.dispose();
-      this.envRT = rt;
-    }
-    this.scene.environmentIntensity = clamp(0.25 + 0.75 * this.day, 0.15, 1);
+    // haze: the horizon's colour pulled toward the sky's blue (a white fog bleaches the skyline)
+    fog.color.copy(this.horizon).lerp(this.zenith, 0.45).multiplyScalar(0.85);
+    fog.density = lerp(0.00032, 0.0008, this.night) + this.sunset * 0.00012;
+    // exposure: keep the frame bright as the light falls (eyes adapt), but let night be night
+    const e = this.sunDir.y;
+    this.exposure = lerp(1, 1.75, 1 - smoothstep(-0.18, 0.2, e)) * lerp(1, 1.12, this.sunset);
   }
 
   clockString(): string {

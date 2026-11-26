@@ -3,6 +3,15 @@ import { clamp, damp, pick } from '../core/math';
 import { WATER_Y, groundAt, groundBase, isWater, type Box, type ColliderGrid } from '../world/map';
 import { waveHeight } from '../world/water';
 import { SPECS, carMats, carModel, paintMat, type CarSpec, type CarType } from './carModels';
+import { alloyWheel, kitModel } from './carKit';
+
+const wheelCache = new Map<string, THREE.BufferGeometry>();
+function wheelFor(r: number, wid: number) {
+  const k = r.toFixed(3) + ':' + wid;
+  let g = wheelCache.get(k);
+  if (!g) wheelCache.set(k, (g = alloyWheel(r, wid > 1.95 ? 0.3 : 0.25)));
+  return g;
+}
 
 export interface VehicleInput {
   thr: number; // -1..1
@@ -68,20 +77,27 @@ export class Vehicle {
   stuckT = 0;
   age = 0;
 
+  private sirenPos: THREE.Vector3[] | null = null;
+
   constructor(type: CarType, color?: number) {
     this.type = type;
     this.spec = SPECS[type];
     this.health = this.spec.health;
     this.color = color ?? pick(this.spec.colors);
     this.paint = paintMat(this.color);
+    const kitM = kitModel(type, this.spec, Math.floor(Math.random() * 16));
     const model = carModel(type);
-    this.body = new THREE.Mesh(model.geo, [this.paint, carMats.detail, carMats.lamps]);
+    this.body = new THREE.Mesh(kitM ? kitM.geo : model.geo, [this.paint, carMats.detail, carMats.lamps, carMats.glass]);
     this.body.castShadow = true;
     this.body.receiveShadow = true;
     this.root.add(this.body);
-    if (model.wheelGeo) {
-      for (const w of model.wheels) {
-        const m = new THREE.Mesh(model.wheelGeo, carMats.wheel);
+    if (kitM) {
+      model.sirenRed && (this.sirenPos = [new THREE.Vector3(-0.3, kitM.roofY + 0.07, -0.25), new THREE.Vector3(0.3, kitM.roofY + 0.07, -0.25)]);
+    }
+    const wheelGeo = kitM ? wheelFor(kitM.wheelR, this.spec.wid) : model.wheelGeo;
+    if (wheelGeo) {
+      for (const w of kitM ? kitM.wheels : model.wheels) {
+        const m = new THREE.Mesh(wheelGeo, carMats.wheel);
         m.position.copy(w);
         m.castShadow = true;
         this.body.add(m);
@@ -91,9 +107,9 @@ export class Vehicle {
     if (model.sirenRed && model.sirenBlue) {
       const g = new THREE.BoxGeometry(0.5, 0.14, 0.26);
       this.sirenRed = new THREE.Mesh(g, carMats.sirenOff);
-      this.sirenRed.position.copy(model.sirenRed);
+      this.sirenRed.position.copy(this.sirenPos ? this.sirenPos[0] : model.sirenRed);
       this.sirenBlue = new THREE.Mesh(g, carMats.sirenOffB);
-      this.sirenBlue.position.copy(model.sirenBlue);
+      this.sirenBlue.position.copy(this.sirenPos ? this.sirenPos[1] : model.sirenBlue);
       this.body.add(this.sirenRed, this.sirenBlue);
       this.police = type === 'police';
     }

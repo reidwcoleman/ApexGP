@@ -208,11 +208,11 @@ export class HumanRenderer {
     h.fall = damp(h.fall, target, target ? 9 : 5, dt);
   }
 
-  render(list: Human[], cam: THREE.Vector3, maxDist: number) {
+  render(list: Human[], cam: THREE.Vector3, maxDist: number, skip?: Set<number>) {
     let n = 0;
     const md2 = maxDist * maxDist;
     for (const h of list) {
-      if (h.hidden || h.vehicle) continue;
+      if (h.hidden || h.vehicle || skip?.has(h.id)) continue;
       const dx = h.pos.x - cam.x, dz = h.pos.z - cam.z;
       if (dx * dx + dz * dz > md2) continue;
       if (n >= this.cap) break;

@@ -2,6 +2,8 @@ import './style.css';
 import { Game, START } from './game/game';
 import { runSelfTest } from './game/selftest';
 import type { CarType } from './entities/carModels';
+import { loadCarKit } from './entities/carKit';
+import { loadSkinnedKit } from './entities/skinned';
 
 const params = new URLSearchParams(location.search);
 const testMode = params.get('test'); // 'drive' | 'foot'
@@ -106,4 +108,4 @@ function boot() {
   }
 }
 
-boot();
+void Promise.all([loadCarKit(), loadSkinnedKit()]).then(boot);

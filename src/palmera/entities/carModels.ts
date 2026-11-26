@@ -222,8 +222,9 @@ export function carModel(type: CarType): CarModel {
 // shared materials
 export const carMats = {
   detail: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.32, metalness: 0.35 }),
+  glass: new THREE.MeshPhysicalMaterial({ vertexColors: true, color: 0xffffff, roughness: 0.04, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.6 }),
   lamps: new THREE.MeshBasicMaterial({ vertexColors: true }),
-  wheel: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.2 }),
+  wheel: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.3, side: THREE.DoubleSide }),
   burnt: new THREE.MeshStandardMaterial({ color: 0x1e1b19, roughness: 1, metalness: 0 }),
   sirenRed: new THREE.MeshBasicMaterial({ color: 0xff2020 }),
   sirenBlue: new THREE.MeshBasicMaterial({ color: 0x2050ff }),
@@ -235,7 +236,7 @@ const paintCache = new Map<number, THREE.MeshStandardMaterial>();
 export function paintMat(color: number): THREE.MeshStandardMaterial {
   let m = paintCache.get(color);
   if (!m) {
-    m = new THREE.MeshStandardMaterial({ color, roughness: 0.28, metalness: 0.45 });
+    m = new THREE.MeshPhysicalMaterial({ color, vertexColors: true, roughness: 0.38, metalness: 0.55, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 1.25 });
     paintCache.set(color, m);
   }
   return m;

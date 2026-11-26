@@ -7,6 +7,8 @@ import {
   type BuildingSpec, type PropSpec,
 } from './map';
 import * as T from './textures';
+import { addDetail as D } from '../render/detail';
+import { palmKit } from './palms';
 
 // ------------------------------------------------------------ simple mesh builder
 class MB {
@@ -140,17 +142,20 @@ function buildingMaterial(): THREE.MeshStandardMaterial {
         '#include <common>',
         `#include <common>
 attribute vec2 aStyle;
-varying vec3 vBN; varying vec3 vLP; varying vec3 vBS; varying vec2 vStyle;`,
+varying vec3 vBN; varying vec3 vLP; varying vec3 vBS; varying vec2 vStyle; varying vec3 vBW;`,
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
 vec3 bScale = vec3(1.0);
 vec3 bNorm = objectNormal;
+vec4 bW = vec4(transformed, 1.0);
 #ifdef USE_INSTANCING
 bScale = vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz));
 bNorm = mat3(instanceMatrix) * objectNormal;
+bW = instanceMatrix * bW;
 #endif
+vBW = (modelMatrix * bW).xyz;
 vBN = normalize(bNorm);
 vLP = position * bScale;
 vBS = bScale;
@@ -161,17 +166,47 @@ vStyle = aStyle;`,
         '#include <common>',
         `#include <common>
 uniform float uNight;
-varying vec3 vBN; varying vec3 vLP; varying vec3 vBS; varying vec2 vStyle;
-float bhash(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719)))*43758.5453); }`,
+varying vec3 vBN; varying vec3 vLP; varying vec3 vBS; varying vec2 vStyle; varying vec3 vBW;
+float bhash(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719)))*43758.5453); }
+// a room behind the glass: the ray from the eye carried into a box the size of the window's cell
+vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office, out float tHit) {
+  vec3 ro = vec3(pin * cellSz, 0.0);
+  vec3 bmax = vec3(cellSz, depth);
+  vec3 t1 = (vec3(0.0) - ro) / rd, t2 = (bmax - ro) / rd;
+  vec3 tf = max(t1, t2);
+  float t = min(min(tf.x, tf.y), tf.z);
+  vec3 h = ro + rd * t;
+  tHit = t;
+  vec3 wall = office > 0.5 ? vec3(0.62, 0.64, 0.66) : mix(vec3(0.78, 0.7, 0.6), vec3(0.62, 0.72, 0.76), step(0.5, fract(seed * 7.1)));
+  vec3 col;
+  if (t == tf.z) {
+    col = wall * 0.85;
+    // a picture or a doorway on the back wall
+    vec2 q = h.xy / cellSz;
+    if (office < 0.5 && abs(q.x - (0.3 + fract(seed * 3.7) * 0.4)) < 0.12 && abs(q.y - 0.55) < 0.12) col = mix(vec3(0.2, 0.3, 0.4), vec3(0.6, 0.35, 0.25), fract(seed * 11.0));
+  } else if (t == tf.y) {
+    if (rd.y < 0.0) col = office > 0.5 ? vec3(0.32, 0.33, 0.35) : vec3(0.36, 0.24, 0.15) * (0.85 + 0.3 * step(0.5, fract(h.x * 1.5)));
+    else {
+      col = vec3(0.86, 0.85, 0.82);
+      if (office > 0.5) col += vec3(1.2, 1.2, 1.1) * step(abs(fract(h.z * 0.4) - 0.5), 0.12) * step(abs(h.x / cellSz.x - 0.5), 0.3);
+    }
+  } else {
+    col = wall * 0.7;
+  }
+  // furniture silhouettes low in the room
+  if (h.y < cellSz.y * 0.32 && t != tf.y && h.z > depth * 0.35) col *= 0.45;
+  return col * mix(1.0, 0.55, clamp(t / (depth * 1.4), 0.0, 1.0));
+}`,
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
 vec3 bn = normalize(vBN);
 float bStyle = vStyle.x;
-float wmask = 0.0; float wlit = 0.0; vec3 litCol = vec3(1.0, 0.78, 0.5);
+float wmask = 0.0; float wlit = 0.0; vec3 bInterior = vec3(0.0); float bFrame = 0.0;
+vec3 litCol = vec3(1.0, 0.78, 0.5);
 if (bn.y > 0.5) {
-  diffuseColor.rgb *= 0.7;
+  diffuseColor.rgb *= 0.72;
 } else if (bn.y > -0.5 && bStyle < 3.5) {
   bool sideX = abs(bn.x) > 0.5;
   float u = sideX ? vLP.z : vLP.x;
@@ -179,58 +214,103 @@ if (bn.y > 0.5) {
   float face = sideX ? sign(bn.x) : 2.0 * sign(bn.z);
   float v = vLP.y;
   vec2 cell = vec2(3.6, 3.2); vec2 fr = vec2(0.55, 0.5); float y0 = 0.8;
-  if (bStyle < 0.5) { cell = vec2(3.0, 3.6); fr = vec2(0.9, 0.78); y0 = 0.3; }
-  else if (bStyle < 1.5) { cell = vec2(3.4, 3.3); fr = vec2(0.48, 0.5); y0 = 1.2; }
-  else if (bStyle < 2.5) { cell = vec2(3.6, 3.0); fr = vec2(0.34, 0.4); y0 = 0.3; }
+  if (bStyle < 0.5) { cell = vec2(3.0, 3.6); fr = vec2(0.9, 0.8); y0 = 0.3; }
+  else if (bStyle < 1.5) { cell = vec2(3.4, 3.3); fr = vec2(0.5, 0.56); y0 = 1.2; }
+  else if (bStyle < 2.5) { cell = vec2(3.6, 3.0); fr = vec2(0.36, 0.44); y0 = 0.3; }
+  // the street floor of shops and hotels: tall shopfronts
+  bool shop = (bStyle > 0.5 && bStyle < 1.5 || bStyle > 2.5) && v < 4.2;
+  if (shop) { cell = vec2(4.6, 4.4); fr = vec2(0.82, 0.66); y0 = -0.75; }
   float nCols = max(floor((2.0 * halfW - 1.2) / cell.x), 0.0);
   float off = (2.0 * halfW - nCols * cell.x) * 0.5;
   float uu = (u + halfW - off) / cell.x;
   float vv = (v - y0) / cell.y;
   vec2 f = fract(vec2(uu, vv));
   vec2 id = floor(vec2(uu, vv));
-  float inside = step(abs(f.x - 0.5), fr.x * 0.5) * step(abs(f.y - 0.5), fr.y * 0.5);
-  inside *= step(0.0, uu) * step(uu, nCols) * step(0.0, vv) * step(v, vBS.y - 0.9);
-  wmask = inside;
+  vec2 hw = fr * 0.5;
+  vec2 d = abs(f - 0.5);
+  float inCols = step(0.0, uu) * step(uu, nCols) * step(0.0, vv) * step(v, vBS.y - 0.9);
+  float inside = step(d.x, hw.x) * step(d.y, hw.y) * inCols;
+  // frame: a band just inside the opening; sill: a ledge under it
+  float fw = bStyle < 0.5 ? 0.012 : 0.03;
+  bFrame = inside * (1.0 - step(d.x, hw.x - fw) * step(d.y, hw.y - fw * 1.3));
+  float sill = (1.0 - inside) * inCols * step(d.x, hw.x + 0.03) * step(f.y, 0.5 - hw.y) * step(0.5 - hw.y - 0.035, f.y) * step(0.5, bStyle) * (shop ? 0.0 : 1.0);
+  wmask = inside * (1.0 - bFrame);
   float r = bhash(vec3(id, face * 7.0 + vStyle.y * 91.0));
-  float litP = bStyle < 0.5 ? 0.3 : 0.4;
-  if (v < 4.0 && bStyle > 0.5) litP = 0.85;
-  wlit = step(r, litP) * inside;
-  litCol = r < 0.06 ? vec3(0.55, 0.75, 1.0) : (r < 0.16 ? vec3(1.0, 0.85, 0.6) : vec3(1.0, 0.62, 0.3));
-  vec3 glassCol = bStyle < 0.5 ? vec3(0.2, 0.32, 0.4) : vec3(0.13, 0.18, 0.22);
-  // vertical mullion stripes on towers
+  float litP = bStyle < 0.5 ? 0.35 : 0.42;
+  if (shop) litP = 0.9;
+  wlit = step(r, litP) * wmask;
+  litCol = r < 0.06 ? vec3(0.55, 0.75, 1.0) : (r < 0.16 ? vec3(1.0, 0.85, 0.6) : vec3(1.0, 0.66, 0.34));
+  // the room behind the window
+  if (wmask > 0.5) {
+    vec3 T = sideX ? vec3(0.0, 0.0, sign(bn.x)) : vec3(-sign(bn.z), 0.0, 0.0);
+    vec3 V = normalize(vBW - cameraPosition);
+    vec3 rd = vec3(dot(V, T), dot(V, vec3(0.0, 1.0, 0.0)), -dot(V, bn));
+    rd.z = max(rd.z, 0.05);
+    vec2 pin = (f - (0.5 - hw)) / (2.0 * hw);
+    float tHit;
+    float office = (bStyle < 0.5 || shop) ? 1.0 : 0.0;
+    vec3 room = bRoom(pin, cell * fr * 1.6, bStyle < 0.5 ? 6.0 : 4.0, normalize(rd), r, office, tHit);
+    // blinds: some windows half shut
+    float blind = step(0.55, fract(r * 13.3)) * (0.25 + 0.6 * fract(r * 5.1));
+    if (!shop && pin.y > 1.0 - blind) room = mix(vec3(0.85, 0.8, 0.68), vec3(0.6, 0.66, 0.7), step(0.7, fract(r * 3.3))) * (0.7 + 0.12 * step(0.5, fract(pin.y * 18.0)));
+    bInterior = room;
+  }
+  vec3 glassCol = bStyle < 0.5 ? vec3(0.06, 0.1, 0.12) : vec3(0.02, 0.025, 0.03);
+  vec3 frameCol = bStyle < 0.5 ? vec3(0.55, 0.58, 0.6) : (bStyle < 1.5 ? vec3(0.95, 0.94, 0.9) : vec3(0.92, 0.9, 0.86));
+  if (shop) frameCol = vec3(0.12, 0.12, 0.13);
+  // towers: mullions and spandrel bands
   if (bStyle < 0.5) {
-    float mull = step(0.92, fract(uu * 2.0));
-    glassCol = mix(glassCol, diffuseColor.rgb * 0.8, mull);
+    float mull = step(0.95, fract(uu * 2.0));
+    glassCol = mix(glassCol, vec3(0.3, 0.32, 0.35), mull);
+    float band = step(abs(f.y - 0.5), 0.5) * (1.0 - step(abs(f.y - 0.5), hw.y));
+    // spandrels: dark tinted glass too, so a tower reads as one sheet of glass from afar
+    diffuseColor.rgb = mix(diffuseColor.rgb, glassCol * 1.8 + diffuseColor.rgb * 0.06, band * inCols);
+    wmask = max(wmask, band * inCols * 0.85);
   }
   diffuseColor.rgb = mix(diffuseColor.rgb, glassCol, wmask);
+  diffuseColor.rgb = mix(diffuseColor.rgb, frameCol, bFrame);
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93, 0.92, 0.88), sill);
+  // the opening's reveal: a shadow along the top and one side of each window
+  float reveal = inside * (smoothstep(hw.y - 0.07, hw.y, f.y - 0.5) * 0.5 + smoothstep(hw.x - 0.05, hw.x, f.x - 0.5) * 0.3);
+  diffuseColor.rgb *= 1.0 - reveal * (1.0 - wmask * 0.6);
   if (bStyle > 0.5 && bStyle < 1.5) {
-    float band = step(fract(vv), 0.09) * step(0.0, vv);
+    float band = step(fract(vv), 0.09) * step(0.0, vv) * (shop ? 0.0 : 1.0);
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.97, 0.95, 0.9), band * (1.0 - wmask));
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.98, 0.97, 0.94), step(vBS.y - 0.9, v));
-    // racing stripes near the corners
     float edge = halfW - abs(u);
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.98), step(edge, 0.6) * step(0.35, edge) * (1.0 - wmask));
   }
+  // awnings' shade line and a darker plinth on shops
+  if (shop && v > 3.5 && v < 4.2) diffuseColor.rgb *= 0.8;
   if (bStyle > 2.5 && v < 0.7) diffuseColor.rgb *= 0.55;
+  // grime toward the ground, a little lighter up high
+  diffuseColor.rgb *= mix(0.78, 1.0, smoothstep(0.0, 2.5, v)) * mix(1.0, 1.04, smoothstep(10.0, 40.0, v));
 }`,
       )
       .replace(
         '#include <roughnessmap_fragment>',
         `#include <roughnessmap_fragment>
-roughnessFactor = mix(roughnessFactor, 0.06, wmask);`,
+roughnessFactor = mix(roughnessFactor, 0.04, wmask);
+roughnessFactor = mix(roughnessFactor, 0.45, bFrame);`,
       )
       .replace(
         '#include <metalnessmap_fragment>',
         `#include <metalnessmap_fragment>
-metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.9 : 0.55, wmask);`,
+metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.62 : 0.0, wmask);
+metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
       )
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-totalEmissiveRadiance += litCol * wlit * uNight * 1.05;`,
+{
+  float dayLight = 1.0 - uNight;
+  // the room as the daylight shows it, and lamps on in some rooms at night
+  totalEmissiveRadiance += bInterior * wmask * (dayLight * (bStyle < 0.5 ? 0.22 : 0.32) + uNight * 0.04);
+  totalEmissiveRadiance += (bInterior * 0.8 + 0.2) * litCol * wlit * uNight * 1.3;
+}`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building';
+  mat.customProgramCacheKey = () => 'palmera-building-v2';
   return mat;
 }
 
@@ -451,14 +531,14 @@ export class City {
     const grass = T.grassTexture(), sand = T.sandTexture(), mud = T.mudTexture(), conc = T.concreteTexture();
     const g1 = new MB();
     g1.flat(-480, MAIN.z0, 80, MAIN.z1, 0, 24);
-    this.add(g1.geo(), new THREE.MeshStandardMaterial({ map: grass, roughness: 0.95 }));
+    this.add(g1.geo(), D(new THREE.MeshStandardMaterial({ map: grass, roughness: 0.95 }), 'leafy_grass', { scale: 2.5, albedo: 0.9, normal: 0.9, rough: [0.75, 1] }));
     const g2 = new MB();
     g2.flat(80, MAIN.z0, MAIN.x1, MAIN.z1, 0, 8);
     g2.flat(ISLAND.x0, ISLAND.z0, BEACH.x0, ISLAND.z1, 0, 8);
-    this.add(g2.geo(), new THREE.MeshStandardMaterial({ map: conc, roughness: 0.9, color: 0xf2ece2 }));
+    this.add(g2.geo(), D(new THREE.MeshStandardMaterial({ map: conc, roughness: 0.9, color: 0xf2ece2 }), 'concrete_pavement', { scale: 4, albedo: 0.8, normal: 0.8, rough: [0.6, 0.95] }));
     const g3 = new MB();
     g3.flat(MAIN.x0, MAIN.z0, -480, MAIN.z1, 0, 20);
-    this.add(g3.geo(), new THREE.MeshStandardMaterial({ map: mud, roughness: 1 }));
+    this.add(g3.geo(), D(new THREE.MeshStandardMaterial({ map: mud, roughness: 1 }), 'leafy_grass', { scale: 3, albedo: 0.6, normal: 0.8 }));
     // beach: flat sand then a slope into the sea
     const b = new MB();
     const xs = [BEACH.x0, ISLAND.x1, 735, 770, 860];
@@ -469,7 +549,7 @@ export class City {
     }
     // sand around the island tips
     b.flat(ISLAND.x0, ISLAND.z1 - 1, BEACH.x0, ISLAND.z1, 0.005, 16);
-    this.add(b.geo(), new THREE.MeshStandardMaterial({ map: sand, roughness: 1 }));
+    this.add(b.geo(), D(new THREE.MeshStandardMaterial({ map: sand, roughness: 1 }), 'coast_sand_01', { scale: 3, albedo: 0.9, normal: 1.0, rough: [0.8, 1] }));
     // seawalls
     const sw: THREE.BufferGeometry[] = [];
     const wall = (x0: number, z0: number, x1: number, z1: number) => sw.push(box(Math.max(0.6, x1 - x0), 5, Math.max(0.6, z1 - z0), (x0 + x1) / 2, -2.5, (z0 + z1) / 2, 0xbdb5a6));
@@ -495,7 +575,7 @@ export class City {
       sw.push(box(0.12, 0.08, b - a, MAIN.x1 - 0.3, 1.0, (a + b) / 2, 0xffffff));
       this.map.colliders.add(MAIN.x1 - 0.5, a, MAIN.x1 - 0.1, b, -0.5, 1.1);
     }
-    this.add(merge(sw), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
+    this.add(merge(sw), D(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }), 'coral_stone_wall', { scale: 2.5, albedo: 0.8, normal: 1 }));
   }
 
   private buildRoads() {
@@ -528,9 +608,10 @@ export class City {
         cross.quad([cx - rx - fx, y, cz - rz - fz], [cx + rx - fx, y, cz + rz - fz], [cx + rx + fx, y, cz + rz + fz], [cx - rx + fx, y, cz - rz + fz], [0, 0], [1, 0], [1, 1], [0, 1]);
       }
     }
-    this.add(roads.geo(), new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.92 }));
-    this.add(swamp.geo(), new THREE.MeshStandardMaterial({ map: roadTex, roughness: 1, color: 0xb8a888 }));
-    this.add(inter.geo(), new THREE.MeshStandardMaterial({ map: T.intersectionTexture(), roughness: 0.92 }));
+    const asph = { scale: 6, albedo: 0.7, normal: 0.9, rough: [0.55, 0.95] as [number, number] };
+    this.add(roads.geo(), D(new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.92 }), 'asphalt_02', asph));
+    this.add(swamp.geo(), D(new THREE.MeshStandardMaterial({ map: roadTex, roughness: 1, color: 0xb8a888 }), 'asphalt_02', asph));
+    this.add(inter.geo(), D(new THREE.MeshStandardMaterial({ map: T.intersectionTexture(), roughness: 0.92 }), 'asphalt_02', asph));
     const cw = this.add(cross.geo(), new THREE.MeshStandardMaterial({ map: T.crosswalkTexture(), transparent: true, roughness: 0.9, depthWrite: false }));
     cw.renderOrder = 1;
   }
@@ -553,7 +634,7 @@ export class City {
       side(b.x0, b.z0 + s, b.x0 + s, b.z1 - s);
       side(b.x1 - s, b.z0 + s, b.x1, b.z1 - s);
     }
-    this.add(mb.geo(), new THREE.MeshStandardMaterial({ map: T.concreteTexture(), roughness: 0.88, color: 0xe9e3d8 }));
+    this.add(mb.geo(), D(new THREE.MeshStandardMaterial({ map: T.concreteTexture(), roughness: 0.88, color: 0xe9e3d8 }), 'concrete_floor_01', { scale: 2.2, albedo: 0.8, normal: 1, rough: [0.55, 0.95] }));
   }
 
   private buildFlats() {
@@ -562,9 +643,9 @@ export class City {
       rim: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.8 }), y: 0.05, rep: 4 },
       pond: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ color: 0x2f3a22, roughness: 0.08, metalness: 0.3 }), y: 0.04, rep: 8 },
       court: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ map: T.courtTexture(), roughness: 0.9 }), y: 0.04, rep: 1 },
-      lot: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ map: T.lotTexture(), roughness: 0.92 }), y: 0.03, rep: 10 },
-      plaza: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ map: T.concreteTexture(), color: 0xf7e2c8, roughness: 0.85 }), y: 0.04, rep: 3 },
-      grass: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ map: T.grassTexture(), roughness: 0.95 }), y: 0.035, rep: 20 },
+      lot: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.lotTexture(), roughness: 0.92 }), 'asphalt_02', { scale: 6, albedo: 0.7, normal: 0.9, rough: [0.55, 0.95] }), y: 0.03, rep: 10 },
+      plaza: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.concreteTexture(), color: 0xf7e2c8, roughness: 0.85 }), 'terrazzo_tiles', { scale: 3, albedo: 0.8, normal: 0.6, rough: [0.3, 0.7] }), y: 0.04, rep: 3 },
+      grass: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.grassTexture(), roughness: 0.95 }), 'leafy_grass', { scale: 2.5, albedo: 0.9, normal: 0.9, rough: [0.75, 1] }), y: 0.035, rep: 20 },
     };
     for (const f of this.map.flats) {
       const k = kinds[f.kind];
@@ -578,7 +659,7 @@ export class City {
   }
 
   private buildBuildings() {
-    const mat = buildingMaterial();
+    const mat = D(buildingMaterial(), 'white_stucco_02', { scale: 3.5, albedo: 0.55, normal: 0.8, faces: 'side' });
     const geo = new THREE.BoxGeometry(1, 1, 1);
     geo.translate(0, 0.5, 0);
     const big: Inst[] = [], small: Inst[] = [], roofs: Inst[] = [], neon: Inst[] = [];
@@ -598,13 +679,88 @@ export class City {
         neon.push({ m: nm2, c: new THREE.Color(rng.pick(neonCols)) });
       }
     }
+    this.buildBuildingDetail();
     const attr = { name: 'aStyle', size: 2 };
     chunked(this.scene, this.chunks, big, geo, mat, { far: 2200, shadow: true, attr });
     chunked(this.scene, this.chunks, small, geo, mat, { far: 750, shadow: true, attr });
-    const roofMat = new THREE.MeshStandardMaterial({ roughness: 0.9 });
+    const roofMat = D(new THREE.MeshStandardMaterial({ roughness: 0.9 }), 'concrete_floor_01', { scale: 3, albedo: 0.8, normal: 1 });
     chunked(this.scene, this.chunks, roofs, roofGeometry(), roofMat, { far: 700, shadow: true });
     const ng = new THREE.BoxGeometry(1, 1, 1);
     chunked(this.scene, this.chunks, neon, ng, this.neonMat, { far: 1500, shadow: false, receive: false });
+  }
+
+  /** what gives a box a building's silhouette: cornices and parapets, balconies, rooftop plant, awnings */
+  private buildBuildingDetail() {
+    const trim: Inst[] = [], balc: Inst[] = [], rail: Inst[] = [], plant: Inst[] = [], awn: Inst[] = [];
+    const rng = new Rng(4242);
+    const q0 = new THREE.Quaternion();
+    const put = (list: Inst[], x: number, y: number, z: number, sx: number, sy: number, sz: number, c: THREE.Color, q = q0) =>
+      list.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(sx, sy, sz)), c });
+    const awnCols = [0x1f8a8a, 0xd8574a, 0x2b5fa8, 0xf2c14e, 0x3f8f5a, 0xe8e2d0, 0xc0477a];
+    const white = new THREE.Color(0xf3f0ea), grey = new THREE.Color(0x9a9a96), dark = new THREE.Color(0x5a5c5e);
+    for (const b of this.map.buildings) {
+      const top = b.y0 + b.h;
+      const base = new THREE.Color(b.color);
+      const light = base.clone().lerp(white, 0.75);
+      if (!b.roof && b.style !== 2) {
+        // cornice slab and a parapet round the roof
+        put(trim, b.x, top - 0.25, b.z, b.w + 0.5, 0.42, b.d + 0.5, light);
+        const t = 0.25, ph = b.style === 0 ? 1.4 : 1.0;
+        put(trim, b.x, top + ph / 2, b.z - b.d / 2 + t / 2, b.w, ph, t, light);
+        put(trim, b.x, top + ph / 2, b.z + b.d / 2 - t / 2, b.w, ph, t, light);
+        put(trim, b.x - b.w / 2 + t / 2, top + ph / 2, b.z, t, ph, b.d - 2 * t, light);
+        put(trim, b.x + b.w / 2 - t / 2, top + ph / 2, b.z, t, ph, b.d - 2 * t, light);
+        // rooftop plant
+        if (b.style === 0 && b.h > 25) {
+          put(plant, b.x + (rng.next() - 0.5) * b.w * 0.2, top + 1.8, b.z + (rng.next() - 0.5) * b.d * 0.2, b.w * 0.42, 3.6, b.d * 0.42, grey);
+          if (rng.chance(0.5)) put(plant, b.x, top + 3.6 + 3, b.z, 0.25, 6, 0.25, dark);
+        } else if (b.w > 6 && b.d > 6) {
+          const n = 1 + Math.floor(rng.next() * 3);
+          for (let i = 0; i < n; i++)
+            put(plant, b.x + (rng.next() - 0.5) * (b.w - 4), top + 0.55, b.z + (rng.next() - 0.5) * (b.d - 4), 1.4 + rng.next(), 1.1, 1.2 + rng.next(), rng.chance(0.5) ? grey : white);
+        }
+      }
+      // the long faces get the balconies and awnings
+      const alongZ = b.d >= b.w;
+      const len = alongZ ? b.d : b.w;
+      if ((b.style === 1 || b.style === 3) && b.h > 9 && b.y0 === 0 && len > 8) {
+        const y0 = b.style === 1 ? 1.2 : 0.8, cy = b.style === 1 ? 3.3 : 3.2;
+        const bl = len * (b.style === 1 ? 0.62 : 0.78);
+        for (const sgn of [-1, 1]) {
+          for (let k = 1; y0 + k * cy < b.h - 2.2; k++) {
+            if (b.style === 3 && k === 1) continue; // shops below
+            const y = y0 + k * cy - 0.12;
+            const off = (alongZ ? b.w : b.d) / 2;
+            if (alongZ) {
+              put(balc, b.x + sgn * (off + 0.65), y, b.z, 1.3, 0.18, bl, light);
+              put(rail, b.x + sgn * (off + 1.27), y + 0.5, b.z, 0.07, 0.95, bl, white);
+            } else {
+              put(balc, b.x, y, b.z + sgn * (off + 0.65), bl, 0.18, 1.3, light);
+              put(rail, b.x, y + 0.5, b.z + sgn * (off + 1.27), bl, 0.95, 0.07, white);
+            }
+          }
+        }
+      }
+      // shop awnings over the street floor
+      if ((b.style === 3 || b.style === 1) && b.y0 === 0 && len > 6) {
+        const c = new THREE.Color(rng.pick(awnCols));
+        for (const sgn of [-1, 1]) {
+          const off = (alongZ ? b.w : b.d) / 2 + 0.7;
+          const tilt = new THREE.Quaternion().setFromAxisAngle(alongZ ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0), (alongZ ? -sgn : sgn) * 0.32);
+          if (alongZ) put(awn, b.x + sgn * off, 3.65, b.z, 1.5, 0.06, len * 0.9, c, tilt);
+          else put(awn, b.x, 3.65, b.z + sgn * off, len * 0.9, 0.06, 1.5, c, tilt);
+        }
+      }
+    }
+    const box1 = new THREE.BoxGeometry(1, 1, 1);
+    const stucco = D(new THREE.MeshStandardMaterial({ roughness: 0.85 }), 'white_stucco_02', { scale: 3, albedo: 0.5, normal: 0.7 });
+    chunked(this.scene, this.chunks, trim, box1, stucco, { far: 1400, shadow: true });
+    chunked(this.scene, this.chunks, balc, box1, stucco, { far: 600, shadow: true });
+    chunked(this.scene, this.chunks, rail, box1, stucco, { far: 450, shadow: true });
+    const metal = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.5 });
+    chunked(this.scene, this.chunks, plant, box1, metal, { far: 900, shadow: true });
+    const canvas = new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide });
+    chunked(this.scene, this.chunks, awn, box1, canvas, { far: 420, shadow: true });
   }
 
   private pushRoof(b: BuildingSpec, out: Inst[]) {
@@ -641,7 +797,12 @@ export class City {
     this.palmMats.push(palmMat, palmMatFar);
     const palms = groups.get('palm') ?? [];
     // near and far LOD share instance buffers
-    chunked(this.scene, this.chunks, palms, palmGeometry(true), palmMat, { far: 520, shadow: true, lodGeo: palmGeometry(false), lodDist: 140 });
+    const pk = palmKit();
+    const tm = swayMaterial(pk.trunkMat, 8), fm = swayMaterial(pk.frondMat, 8), dm = swayMaterial(pk.dryMat, 8);
+    this.palmMats.push(tm, fm, dm);
+    chunked(this.scene, this.chunks, palms, pk.trunk, tm, { far: 520, shadow: true, lodGeo: pk.trunkLo, lodDist: 140 });
+    chunked(this.scene, this.chunks, palms, pk.crown, [fm, dm] as unknown as THREE.Material, { far: 520, shadow: true, lodGeo: pk.crownLo, lodDist: 140 });
+    void palmMat;
     chunked(this.scene, this.chunks, groups.get('tree') ?? [], treeGeometry(true), std(), { far: 420, shadow: true, lodGeo: treeGeometry(false), lodDist: 120 });
     chunked(this.scene, this.chunks, groups.get('cypress') ?? [], cypressGeometry(), std(), { far: 420, shadow: true });
     chunked(this.scene, this.chunks, groups.get('bush') ?? [], bushGeometry(), std(), { far: 250, shadow: false });
@@ -679,7 +840,7 @@ export class City {
         sides.quad([xa, da, zw0], [xb, db, zw0], [xb, db, zw1], [xa, da, zw1], [0, 0], [1, 0], [1, 1], [0, 1]);
       }
     }
-    this.add(deck.geo(), new THREE.MeshStandardMaterial({ map: T.roadTexture(), roughness: 0.9 }));
+    this.add(deck.geo(), D(new THREE.MeshStandardMaterial({ map: T.roadTexture(), roughness: 0.9 }), 'asphalt_02', { scale: 6, albedo: 0.7, normal: 0.9, rough: [0.55, 0.95] }));
     const sideMat = new THREE.MeshStandardMaterial({ map: T.concreteTexture(), color: 0xf3efe8, roughness: 0.8, side: THREE.DoubleSide });
     this.add(sides.geo(), sideMat, true);
     // railings, pillars, pylons
@@ -778,10 +939,10 @@ export class City {
     this.chunks.update(cam);
     cityUniforms.uNight.value = night;
     cityUniforms.uTime.value = elapsed;
-    const k = 0.55 + night * 3.2;
+    const k = 0.55 + night * 2.4;
     this.lampHeadMat.color.setRGB(k, k * 0.88, k * 0.66);
-    this.poolMat.opacity = clamp(night * 0.95, 0, 0.95);
-    const n = 0.7 + night * 2.6;
+    this.poolMat.opacity = clamp(night * 0.32, 0, 0.32);
+    const n = 0.7 + night * 1.8;
     this.neonMat.color.setRGB(n, n, n);
     const blink = Math.sin(elapsed * 3) > 0 ? 1 : 0.2;
     const bk = (0.6 + night * 3) * blink;

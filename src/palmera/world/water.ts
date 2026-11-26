@@ -23,7 +23,23 @@ uniform float uDay;
 uniform float uNight;
 uniform sampler2D uMask;
 uniform vec4 uRect;
+uniform sampler2D tA;
+uniform sampler2D tB;
+uniform float uRotA;
+uniform float uRotB;
+uniform float uMix;
+uniform float uLevel;
+uniform float uHasPhoto;
 varying vec3 vWPos;
+vec3 skyPhoto(sampler2D t, vec3 d, float rot) {
+  float az = atan(d.z, d.x) + rot;
+  float el = asin(clamp(d.y, -1.0, 1.0));
+  vec2 uv = vec2(fract(az / 6.2831853 + 0.5), 0.5 + el / 3.14159265);
+  return min(texture2D(t, uv).rgb, vec3(6.0));
+}
+float wHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float wNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
+  return mix(mix(wHash(i), wHash(i+vec2(1,0)), f.x), mix(wHash(i+vec2(0,1)), wHash(i+vec2(1,1)), f.x), f.y); }
 #include <fog_pars_fragment>
 vec2 wv(vec2 p, vec2 dir, float f, float a, float s) {
   float ph = dot(p, dir) * f + uTime * s;
@@ -38,6 +54,15 @@ void main() {
   g += wv(p, normalize(vec2(0.2, -1.0)), 0.57, 0.04, 3.1);
   g += wv(p, normalize(vec2(-0.7, -0.6)), 1.13, 0.018, 4.4);
   g += wv(p, normalize(vec2(0.5, 0.9)), 2.1, 0.009, 6.0);
+  g += wv(p, normalize(vec2(-0.9, 0.4)), 3.7, 0.005, 8.1);
+  g += wv(p, normalize(vec2(0.1, 1.0)), 6.3, 0.0028, 10.5);
+  // fine chop: scrolling noise slopes
+  float e = 0.35;
+  vec2 q = p * 1.7 + vec2(uTime * 0.6, uTime * 0.35);
+  float n0 = wNoise(q), nx = wNoise(q + vec2(e, 0.0)), nz = wNoise(q + vec2(0.0, e));
+  vec2 q2 = p * 4.1 - vec2(uTime * 0.9, -uTime * 0.5);
+  float m0 = wNoise(q2), mx = wNoise(q2 + vec2(e, 0.0)), mz = wNoise(q2 + vec2(0.0, e));
+  g += vec2(nx - n0, nz - n0) * 0.11 + vec2(mx - m0, mz - m0) * 0.06;
   vec2 muv = (p - uRect.xy) / uRect.zw;
   float mask = 0.0;
   if (muv.x > 0.0 && muv.y > 0.0 && muv.x < 1.0 && muv.y < 1.0) mask = texture2D(uMask, muv).r;
@@ -48,15 +73,18 @@ void main() {
   float ndv = max(dot(n, v), 0.0);
   float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
   vec3 r = reflect(-v, n);
-  r.y = abs(r.y);
+  r.y = max(abs(r.y), 0.015);
   vec3 sky = mix(uHorizon, uZenith, pow(clamp(r.y, 0.0, 1.0), 0.5));
+  if (uHasPhoto > 0.5) sky = mix(skyPhoto(tA, r, uRotA), skyPhoto(tB, r, uRotB), uMix) * uLevel;
   float light = 0.08 + 0.92 * uDay;
-  vec3 deep = vec3(0.015, 0.16, 0.24);
-  vec3 shallow = vec3(0.07, 0.48, 0.5);
+  vec3 deep = vec3(0.006, 0.07, 0.13);
+  vec3 shallow = vec3(0.05, 0.42, 0.42);
   float sh = smoothstep(0.02, 0.5, mask);
   vec3 body = mix(deep, shallow, sh) * light;
   body += vec3(0.02, 0.07, 0.06) * max(n.x * 0.5 + 0.5, 0.0) * light;
-  vec3 col = mix(body, sky, clamp(fres * 0.9, 0.0, 1.0));
+  // light scattered up through the wave crests
+  body += vec3(0.02, 0.12, 0.1) * pow(max(dot(normalize(vec3(g.x, 0.3, g.y)), -v), 0.0), 3.0) * light;
+  vec3 col = mix(body, sky, clamp(fres, 0.0, 1.0));
   float sd = max(dot(r, uSunDir), 0.0);
   float sunVis = smoothstep(-0.05, 0.05, uSunDir.y);
   col += uSunColor * (pow(sd, 400.0) * 9.0 + pow(sd, 60.0) * 0.35) * sunVis;
@@ -109,6 +137,7 @@ export class Water {
     this.uniforms.uHorizon = { value: sky.horizon };
     this.uniforms.uZenith = { value: sky.zenith };
     this.uniforms.uMask.value = makeLandMask();
+    for (const k of ['tA', 'tB', 'uRotA', 'uRotB', 'uMix', 'uLevel', 'uHasPhoto']) this.uniforms[k] = sky.uniforms[k];
     const mat = new THREE.ShaderMaterial({ vertexShader: vert, fragmentShader: frag, uniforms: this.uniforms, fog: true });
     const geo = new THREE.PlaneGeometry(9000, 9000, 1, 1);
     geo.rotateX(-Math.PI / 2);

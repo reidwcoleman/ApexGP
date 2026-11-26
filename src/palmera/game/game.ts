@@ -20,6 +20,8 @@ import { PlayerController, TUNING } from './player';
 import { PursuitAI, Wanted } from './police';
 import { Traffic, TrafficAI } from './traffic';
 import { Weapons, type Loadout } from './weapons';
+import { Post } from '../render/post';
+import { SkinnedCrowd } from '../entities/skinned';
 
 export type Mode = 'title' | 'play' | 'paused';
 
@@ -72,14 +74,15 @@ export class Game {
   private pixelRatio: number;
   stats = { kills: 0, carsStolen: 0, shots: 0 };
   events: VehicleEvents;
+  post: Post;
+  skinned: SkinnedCrowd;
 
   constructor(canvas: HTMLCanvasElement) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, stencil: false, depth: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
     this.pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
     this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.toneMapping = THREE.NoToneMapping; // AgX in the post chain
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.15, 2600);
@@ -88,9 +91,12 @@ export class Game {
     this.map = new CityMap();
     this.city = new City(this.scene, this.map);
     this.sky = new SkySystem(this.scene, this.renderer);
+    this.post = new Post(this.renderer, this.scene, this.camera);
+    this.post.setSize(window.innerWidth, window.innerHeight);
     this.water = new Water(this.scene, this.sky);
     this.effects = new Effects(this.scene);
     this.humanR = new HumanRenderer(this.scene);
+    this.skinned = new SkinnedCrowd(this.scene);
     this.input = new Input(canvas);
     this.player = new Human('player');
     this.player.pos.set(START.x, 0, START.z);
@@ -161,6 +167,7 @@ export class Game {
   resize() {
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h, false);
+    this.post?.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -826,7 +833,8 @@ export class Game {
     this.water.update(this.elapsed, this.sky, cam);
     this.city.update(cam, this.sky.night, this.elapsed);
     this.effects.update(sdt, this.renderer.domElement.height, this.camera.fov);
-    this.humanR.render(this.humans, cam, 150);
+    this.skinned.update(dt, this.humans, cam);
+    this.humanR.render(this.humans, cam, 150, this.skinned.taken);
     if (this.mode === 'play') {
       this.hud.update(dt);
       this.updateAudio(dt);
@@ -859,7 +867,7 @@ export class Game {
   }
 
   private render() {
-    this.renderer.render(this.scene, this.camera);
+    this.post.render(this.elapsed, this.sky.night, this.sky.exposure);
   }
 
   /** Keep the frame rate up by lowering the render resolution if needed. */
