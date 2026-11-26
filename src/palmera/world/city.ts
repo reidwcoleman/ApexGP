@@ -503,6 +503,7 @@ export class City {
   lampHeadMat = new THREE.MeshBasicMaterial({ color: 0x999988 });
   poolMat: THREE.MeshBasicMaterial;
   neonMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: true });
+  signMat = neonSignMaterial();
   palmMats: THREE.MeshStandardMaterial[] = [];
   private beaconMat = new THREE.MeshBasicMaterial({ color: 0xffeeaa });
 
@@ -693,7 +694,7 @@ export class City {
 
   /** what gives a box a building's silhouette: cornices and parapets, balconies, rooftop plant, awnings */
   private buildBuildingDetail() {
-    const trim: Inst[] = [], balc: Inst[] = [], rail: Inst[] = [], plant: Inst[] = [], awn: Inst[] = [];
+    const trim: Inst[] = [], balc: Inst[] = [], rail: Inst[] = [], plant: Inst[] = [], awn: Inst[] = [], signs: Inst[] = [];
     const rng = new Rng(4242);
     const q0 = new THREE.Quaternion();
     const put = (list: Inst[], x: number, y: number, z: number, sx: number, sy: number, sz: number, c: THREE.Color, q = q0) =>
@@ -757,6 +758,11 @@ export class City {
             const fh = b.h + 2.5 + rng.next() * 3;
             if (alongZ) put(trim, b.x + sgn * (off + 0.3), fh / 2, b.z, 0.6, fh, 1.3, accent);
             else put(trim, b.x, fh / 2, b.z + sgn * (off + 0.3), 1.3, fh, 0.6, accent);
+            // the hotel's name in neon down the fin
+            const sh = Math.min(9, b.h * 0.55), sy = b.h - sh / 2 - 0.6;
+            const yaw = alongZ ? (sgn > 0 ? Math.PI / 2 : -Math.PI / 2) : sgn > 0 ? 0 : Math.PI;
+            const pos = alongZ ? new THREE.Vector3(b.x + sgn * (off + 0.62), sy, b.z) : new THREE.Vector3(b.x, sy, b.z + sgn * (off + 0.62));
+            signs.push({ m: new THREE.Matrix4().compose(pos, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(1.15, sh, 1)), a: [Math.floor(rng.next() * NEON_NAMES.length)] });
           }
         }
       }
@@ -798,6 +804,7 @@ export class City {
     chunked(this.scene, this.chunks, plant, box1, metal, { far: 900, shadow: true });
     const canvas = new THREE.MeshStandardMaterial({ roughness: 0.9, side: THREE.DoubleSide });
     chunked(this.scene, this.chunks, awn, box1, canvas, { far: 420, shadow: true });
+    chunked(this.scene, this.chunks, signs, new THREE.PlaneGeometry(1, 1), this.signMat, { far: 1500, shadow: false, receive: false, attr: { name: 'aCell', size: 1 } });
   }
 
   private pushRoof(b: BuildingSpec, out: Inst[]) {
@@ -996,8 +1003,55 @@ export class City {
     this.poolMat.opacity = clamp(night * 0.32, 0, 0.32);
     const n = 0.7 + night * 1.8;
     this.neonMat.color.setRGB(n, n, n);
+    const sn = 0.55 + night * 3.2;
+    this.signMat.color.setRGB(sn, sn, sn);
     const blink = Math.sin(elapsed * 3) > 0 ? 1 : 0.2;
     const bk = (0.6 + night * 3) * blink;
     this.beaconMat.color.setRGB(bk * 1.0, bk * 0.25, bk * 0.2);
   }
+}
+
+// ------------------------------------------------------------ neon hotel signs
+const NEON_NAMES = ['SEABRIGHT', 'CORALINE', 'AZURA', 'SOLANA', 'LUNA MAR', 'PALMETTO', 'THE VESPER', 'MARISOL', 'TIDEWATER', 'BELLAMAR'];
+const NEON_COLS = ['#ff4fa0', '#38e8ff', '#ffd23f', '#b57bff', '#5dff9e', '#ff7a3c'];
+
+/** one atlas: each name lettered top to bottom in its own column, in a neon tube colour */
+function neonSignMaterial(): THREE.MeshBasicMaterial {
+  const n = NEON_NAMES.length, cw = 96, ch = 1024;
+  const c = document.createElement('canvas');
+  c.width = cw * n;
+  c.height = ch;
+  const x = c.getContext('2d')!;
+  x.fillStyle = '#0d0f14';
+  x.fillRect(0, 0, c.width, ch);
+  NEON_NAMES.forEach((name, i) => {
+    const col = NEON_COLS[i % NEON_COLS.length];
+    const letters = name.replace(/ /g, '').split('');
+    const step = (ch - 60) / letters.length;
+    x.font = `bold ${Math.min(84, step * 0.92)}px system-ui, sans-serif`;
+    x.textAlign = 'center';
+    x.textBaseline = 'middle';
+    x.shadowColor = col;
+    x.shadowBlur = 18;
+    x.fillStyle = col;
+    letters.forEach((l, k) => x.fillText(l, i * cw + cw / 2, 30 + step * (k + 0.5)));
+    x.shadowBlur = 0;
+    x.fillStyle = '#fffaf0';
+    x.font = `bold ${Math.min(84, step * 0.92) * 0.82}px system-ui, sans-serif`;
+    letters.forEach((l, k) => x.fillText(l, i * cw + cw / 2, 30 + step * (k + 0.5)));
+    x.strokeStyle = col;
+    x.lineWidth = 5;
+    x.strokeRect(i * cw + 6, 6, cw - 12, ch - 12);
+  });
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  const m = new THREE.MeshBasicMaterial({ map: t, side: THREE.DoubleSide });
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aCell;')
+      .replace('#include <uv_vertex>', `#include <uv_vertex>\nvMapUv.x = (vMapUv.x + aCell) / ${n}.0;`);
+  };
+  m.customProgramCacheKey = () => 'palmera-neon-sign';
+  return m;
 }

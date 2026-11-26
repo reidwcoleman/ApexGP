@@ -76,6 +76,8 @@ void main() {
   r.y = max(abs(r.y), 0.015);
   vec3 sky = mix(uHorizon, uZenith, pow(clamp(r.y, 0.0, 1.0), 0.5));
   if (uHasPhoto > 0.5) sky = mix(skyPhoto(tA, r, uRotA), skyPhoto(tB, r, uRotB), uMix) * uLevel;
+  // at night the sea mirrors the navy sky, the city's glow on the horizon and a moon path
+  sky += (vec3(0.006, 0.011, 0.026) + vec3(0.11, 0.06, 0.035) * exp(-r.y * 9.0)) * uNight;
   float light = 0.08 + 0.92 * uDay;
   vec3 deep = vec3(0.006, 0.07, 0.13);
   vec3 shallow = vec3(0.05, 0.42, 0.42);
@@ -88,6 +90,9 @@ void main() {
   float sd = max(dot(r, uSunDir), 0.0);
   float sunVis = smoothstep(-0.05, 0.05, uSunDir.y);
   col += uSunColor * (pow(sd, 400.0) * 9.0 + pow(sd, 60.0) * 0.35) * sunVis;
+  vec3 moonD = normalize(vec3(-0.6, 0.35, -0.3));
+  float md2 = max(dot(r, moonD), 0.0);
+  col += vec3(0.7, 0.78, 0.95) * (pow(md2, 300.0) * 2.0 + pow(md2, 30.0) * 0.05) * uNight;
   float foamBand = smoothstep(0.38, 0.62, mask) * (1.0 - smoothstep(0.75, 0.95, mask));
   float foam = foamBand * (0.55 + 0.45 * sin(dot(p, vec2(0.06, 0.9)) * 0.7 + uTime * 1.6 + mask * 9.0));
   col = mix(col, vec3(0.92, 0.95, 0.95) * light, clamp(foam, 0.0, 1.0) * 0.55);

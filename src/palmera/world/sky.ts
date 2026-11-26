@@ -75,6 +75,9 @@ void main() {
   float sd = max(dot(d, uSunDir), 0.0);
   col += uSunColor * (pow(sd, 900.0) * 0.6 + pow(sd, 60.0) * 0.12) * uSunI;
   col += uSunColor * smoothstep(0.99962, 0.9998, sd) * 60.0 * uSunI;
+  // night: never quite black — a navy dome and the city's orange glow low over the horizon
+  col += vec3(0.006, 0.011, 0.026) * uNight * (1.0 - uGrey * 0.5);
+  col += vec3(0.11, 0.06, 0.035) * uNight * exp(-max(d.y, 0.0) * 9.0) * (1.0 + uGrey);
   // moon
   float md = dot(d, uMoonDir);
   col += vec3(0.85, 0.9, 1.0) * smoothstep(0.99935, 0.9996, md) * 1.2 * uNight;
