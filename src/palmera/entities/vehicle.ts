@@ -106,6 +106,8 @@ export class Vehicle {
   seat: THREE.Vector3 | null = null;
   /** top of the cabin roof in the car frame (kit cars) */
   roofY = 0;
+  /** the kit model's tail-lamp spot, for the glows */
+  tail: { y: number; x: number; z: number } | null = null;
   /** an airboat's spinning fan */
   fan: THREE.Mesh | null = null;
   vid = Math.floor(Math.random() * 1e9);
@@ -124,6 +126,7 @@ export class Vehicle {
     this.root.add(this.body);
     if (kitM) this.seat = kitM.seat;
     if (kitM) this.roofY = kitM.roofY;
+    if (kitM) this.tail = kitM.tail;
     // a jet ski's rider sits astride, out in the open
     if (type === 'jetski') this.seat = new THREE.Vector3(0, 0.62, -0.3);
     if (type === 'airboat') {
@@ -397,7 +400,8 @@ export class Vehicle {
       const s = this.spec;
       const mk = (mat: THREE.Material, x: number, w: number) => {
         const m = new THREE.Mesh(lampGlowGeo(), mat);
-        m.position.set(x, s.hgt * 0.42, -s.len / 2 - 0.06);
+        const tl = this.tail;
+        m.position.set(x, tl ? tl.y : s.hgt * 0.42, tl ? tl.z - 0.05 : -s.len / 2 - 0.06);
         m.scale.set(w, 1, 1);
         m.rotation.y = Math.PI;
         m.renderOrder = 4;
@@ -405,11 +409,13 @@ export class Vehicle {
         return m;
       };
       const brakeGroup = new THREE.Group();
-      const bl = mk(brakeMat, s.wid * 0.36, 1), br = mk(brakeMat, -s.wid * 0.36, 1);
+      const tx = this.tail ? this.tail.x : s.wid * 0.36;
+      const bl = mk(brakeMat, tx, 1), br = mk(brakeMat, -tx, 1);
       this.root.remove(bl, br);
       brakeGroup.add(bl, br);
       this.root.add(brakeGroup);
-      this.lights = { brake: brakeGroup as unknown as THREE.Mesh, l: mk(blinkMat, s.wid * 0.47, 0.6), r: mk(blinkMat, -s.wid * 0.47, 0.6) };
+      const bx = this.tail ? Math.min(s.wid * 0.47, this.tail.x + 0.18) : s.wid * 0.47;
+      this.lights = { brake: brakeGroup as unknown as THREE.Mesh, l: mk(blinkMat, bx, 0.6), r: mk(blinkMat, -bx, 0.6) };
     }
     const fs = this.forwardSpeed;
     const braking = this.driver !== null && !this.wrecked && ((fs > 0.5 && this.input.thr < -0.05) || (fs < -0.5 && this.input.thr > 0.05) || (this.input.hand && Math.abs(fs) < 1 && this.driver === 'npc'));

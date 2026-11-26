@@ -317,6 +317,8 @@ export interface KitModel {
   roofY: number;
   /** where the driver sits (passenger: mirror x) */
   seat: THREE.Vector3;
+  /** the tail lamps: height, half-spread and rear face (for the brake/indicator glows) */
+  tail: { y: number; x: number; z: number } | null;
 }
 
 const cache = new Map<string, KitModel>();
@@ -384,7 +386,14 @@ export function kitModel(type: CarType, spec: CarSpec, variant: number): KitMode
   const wx = (b.W / 2 - 0.12) * sx, wz = (b.wb / 2) * sz, r = b.r * sy;
   const wheels = id === 'bike' ? [new THREE.Vector3(0, r, wz), new THREE.Vector3(0, r, -wz)] : [new THREE.Vector3(wx, r, wz), new THREE.Vector3(-wx, r, wz), new THREE.Vector3(wx, r, -wz), new THREE.Vector3(-wx, r, -wz)];
   const seat = id === 'bike' ? new THREE.Vector3(0, 0.58, -0.18) : id === 'bus' ? new THREE.Vector3(0.7, 1.05, b.L / 2 - 1.5) : new THREE.Vector3(b.W * 0.2 * sx, b.H * sy - 1.36, -b.L * 0.07 * sz);
-  const out = { geo, wheels, wheelR: r, roofY: b.H * sy, seat };
+  // where the tail lamps really are (the glows used to sit at a fixed 42% of the height, below them)
+  let tail: { y: number; x: number; z: number } | null = null;
+  if (p.tails && id !== 'bike') {
+    p.tails.computeBoundingBox();
+    const tb = p.tails.boundingBox!;
+    if (Number.isFinite(tb.min.y)) tail = { y: ((tb.min.y + tb.max.y) / 2) * sy, x: Math.max(0.2, (tb.max.x - (tb.max.x - Math.max(0, tb.min.x)) * 0.25) * sx * 0.92), z: tb.min.z * sz };
+  }
+  const out = { geo, wheels, wheelR: r, roofY: b.H * sy, seat, tail };
   cache.set(key, out);
   return out;
 }
