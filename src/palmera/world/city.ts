@@ -745,6 +745,77 @@ function lifeguardGeometry(): THREE.BufferGeometry {
   return merge(p);
 }
 
+/**
+ * Pitched roofs: barrel clay tiles on reddish roofs, asphalt shingles on the rest - colour and normal
+ * maps of 2 m patches modelled and rendered in Blender (tools/palmera/roofs.py -> roofs.webp). Each
+ * slope is mapped in world metres along its own ridge (from the face's screen-space normal, as the
+ * prism instances are non-uniformly scaled); the gable ends stay plain.
+ */
+function pitchedRoofMaterial(): THREE.MeshStandardMaterial {
+  const base = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'palmera/';
+  const u = { uRoofTex: { value: new THREE.Texture() as THREE.Texture }, uRoofOn: { value: 0 } };
+  new THREE.TextureLoader().load(base + 'roofs.webp', (t) => {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    t.colorSpace = THREE.NoColorSpace;
+    u.uRoofTex.value = t;
+    u.uRoofOn.value = 1;
+  });
+  const m = new THREE.MeshStandardMaterial({ roughness: 0.78 });
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, u);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRW;')
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+{
+  vec4 rw = vec4(transformed, 1.0);
+  #ifdef USE_INSTANCING
+  rw = instanceMatrix * rw;
+  #endif
+  vRW = (modelMatrix * rw).xyz;
+}`,
+      );
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRW; uniform sampler2D uRoofTex; uniform float uRoofOn;\nvec3 rN; vec3 rT; vec3 rB; vec2 rUv; float rOn; float rCol;')
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+rN = normalize(cross(dFdx(vRW), dFdy(vRW)));
+if (rN.y < 0.0) rN = -rN;
+rOn = uRoofOn * step(0.2, rN.y) * step(rN.y, 0.985);
+rT = normalize(vec3(-rN.z, 0.0, rN.x) + 1e-5);
+rB = normalize(cross(rN, rT));
+if (rB.y < 0.0) { rB = -rB; rT = -rT; }
+rUv = vec2(dot(vRW, rT), dot(vRW, rB)) / 2.0;
+#if defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
+rCol = step(vColor.g * 1.25, vColor.r);
+#else
+rCol = 1.0;
+#endif
+if (rOn > 0.5) {
+  vec2 cell = (fract(rUv) * 0.484 + 0.008) + vec2(rCol > 0.5 ? 0.0 : 0.5, 0.5);
+  vec3 tc = textureGrad(uRoofTex, cell, dFdx(rUv) * 0.484, dFdy(rUv) * 0.484).rgb;
+  diffuseColor.rgb *= rCol > 0.5 ? pow(tc, vec3(4.5)) * 1.7 : pow(tc, vec3(2.2)) * 1.25;
+}`,
+      )
+      .replace(
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>
+if (rOn > 0.5) {
+  vec2 cell = (fract(rUv) * 0.484 + 0.008) + vec2(rCol > 0.5 ? 0.0 : 0.5, 0.0);
+  vec3 tn = textureGrad(uRoofTex, cell, dFdx(rUv) * 0.484, dFdy(rUv) * 0.484).rgb * 2.0 - 1.0;
+  tn.xy *= rCol > 0.5 ? 1.6 : 1.0;
+  vec3 wn = normalize(rT * tn.x + rB * tn.y + rN * tn.z);
+  normal = normalize(mat3(viewMatrix) * wn);
+}`,
+      );
+  };
+  m.customProgramCacheKey = () => 'palmera-roof-v3';
+  return m;
+}
+
 function roofGeometry(): THREE.BufferGeometry {
   // unit gable prism, ridge along x, base at y=0
   const pos = [
@@ -1027,7 +1098,7 @@ export class City {
     const attr = { name: 'aStyle', size: 2 };
     chunked(this.scene, this.chunks, big, geo, mat, { far: 2200, shadow: true, attr });
     chunked(this.scene, this.chunks, small, geo, mat, { far: 750, shadow: true, attr });
-    const roofMat = D(new THREE.MeshStandardMaterial({ roughness: 0.9 }), 'concrete_floor_01', { scale: 3, albedo: 0.8, normal: 1 });
+    const roofMat = pitchedRoofMaterial();
     chunked(this.scene, this.chunks, roofs, roofGeometry(), roofMat, { far: 700, shadow: true });
     const ng = new THREE.BoxGeometry(1, 1, 1);
     chunked(this.scene, this.chunks, neon, ng, this.neonMat, { far: 1500, shadow: false, receive: false });
