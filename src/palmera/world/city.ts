@@ -203,23 +203,92 @@ vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office
   }
   // furniture silhouettes low in the room
   if (office < 1.5 && h.y < cellSz.y * 0.32 && t != tf.y && h.z > depth * 0.35) col *= 0.45;
-  // a shop: stocked shelving round the walls, a tiled floor, a strip light
+  // a shop: one of four kinds, by the window's seed
   if (office > 1.5) {
-    if (t == tf.y && rd.y < 0.0) {
-      vec2 tl = floor(h.xz * 1.6);
-      col = mix(vec3(0.72, 0.72, 0.7), vec3(0.58, 0.6, 0.6), mod(tl.x + tl.y, 2.0));
-    } else if (t != tf.y && h.y < 1.9 && h.y > 0.12) {
-      float along = t == tf.z ? h.x : h.z;
-      float row = floor(h.y / 0.4);
-      float band = fract(h.y / 0.4);
-      float slot = fract(along * 6.0);
-      if (band < 0.08) col = vec3(0.78, 0.79, 0.8);
-      else if (band > 0.72 || slot < 0.1 || slot > 0.92) col = vec3(0.16, 0.17, 0.18);
-      else {
-        // runs of one product: the colour changes every few facings
+    float kind = floor(fract(seed * 13.7) * 4.0);
+    bool floorHit = t == tf.y && rd.y < 0.0;
+    bool wallHit = t != tf.y;
+    if (kind < 0.5) {
+      // grocery: stocked shelving round the walls, a tiled floor
+      if (floorHit) {
+        vec2 tl = floor(h.xz * 1.6);
+        col = mix(vec3(0.72, 0.72, 0.7), vec3(0.58, 0.6, 0.6), mod(tl.x + tl.y, 2.0));
+      } else if (wallHit && h.y < 1.9 && h.y > 0.12) {
+        float along = t == tf.z ? h.x : h.z;
+        float row = floor(h.y / 0.4);
+        float band = fract(h.y / 0.4);
+        float slot = fract(along * 6.0);
         float k = bhash(vec3(floor(along * 1.5), row, seed * 31.0));
-        vec3 prod = 0.5 + 0.5 * cos(6.2832 * (k + vec3(0.0, 0.33, 0.67)));
-        col = mix(vec3(0.55), prod, 0.5) * 0.85;
+        float top = 0.45 + 0.3 * bhash(vec3(floor(along * 6.0), row, seed));
+        if (band < 0.08) col = vec3(0.78, 0.79, 0.8);
+        else if (band > 0.08 + top * 0.72 || slot < 0.1 || slot > 0.92) col = vec3(0.16, 0.17, 0.18);
+        else {
+          vec3 prod = 0.5 + 0.5 * cos(6.2832 * (k + vec3(0.0, 0.33, 0.67)));
+          col = mix(vec3(0.55), prod, 0.5) * 0.85;
+          // a pale label band on each pack
+          if (abs(band - 0.08 - top * 0.36) < 0.05) col = mix(col, vec3(0.9), 0.6);
+        }
+      }
+    } else if (kind < 1.5) {
+      // boutique: white walls, a timber floor, garments on a rail along the side walls
+      if (floorHit) col = vec3(0.55, 0.38, 0.24) * (0.85 + 0.2 * step(0.5, fract(h.x * 2.2)));
+      else if (wallHit) {
+        col = vec3(0.9, 0.88, 0.85);
+        float along = t == tf.z ? h.x : h.z;
+        if (t != tf.z && h.y > 0.55 && h.y < 1.55) {
+          float gi = floor(along * 3.2);
+          float gx = fract(along * 3.2);
+          float len = 0.55 + 0.4 * bhash(vec3(gi, seed, 2.0));
+          if (gx > 0.08 && gx < 0.92 && h.y > 1.55 - len) col = 0.55 + 0.45 * cos(6.2832 * (bhash(vec3(gi, seed, 5.0)) + vec3(0.0, 0.33, 0.67)));
+          if (abs(h.y - 1.58) < 0.02) col = vec3(0.6);
+        }
+      }
+    } else if (kind < 2.5) {
+      // cafe: warm walls, a dark menu board with chalk lines on the back wall, a wooden floor
+      if (floorHit) col = vec3(0.42, 0.28, 0.18) * (0.85 + 0.25 * step(0.5, fract(h.z * 1.8)));
+      else if (wallHit) {
+        col = mix(vec3(0.82, 0.62, 0.42), vec3(0.62, 0.74, 0.62), step(0.6, fract(seed * 5.9)));
+        vec2 q = h.xy / cellSz;
+        if (t == tf.z && abs(q.x - 0.5) < 0.3 && h.y > 1.55 && h.y < 2.35) {
+          col = vec3(0.08, 0.12, 0.1);
+          if (fract(h.y * 7.0) < 0.12 && fract(h.x * 1.7 + floor(h.y * 7.0) * 0.37) < 0.7) col = vec3(0.85);
+        }
+      }
+    } else {
+      // electronics: dark walls lined with bright screens
+      if (floorHit) col = vec3(0.2, 0.21, 0.23);
+      else if (wallHit) {
+        col = vec3(0.12, 0.12, 0.14);
+        float along = t == tf.z ? h.x : h.z;
+        vec2 sc = vec2(fract(along * 1.4), fract((h.y - 0.6) * 1.6));
+        if (h.y > 0.6 && h.y < 2.2 && sc.x > 0.1 && sc.x < 0.9 && sc.y > 0.12 && sc.y < 0.88) {
+          float k = bhash(vec3(floor(along * 1.4), floor((h.y - 0.6) * 1.6), seed));
+          vec3 a = 0.5 + 0.5 * cos(6.2832 * (k + vec3(0.0, 0.33, 0.67)));
+          col = mix(a, a.zxy, sc.y) * 2.2;
+        }
+      }
+    }
+    // cut-outs standing in the room, in front of whatever the ray reached: a mannequin in the boutique
+    // window, the counter in the cafe
+    if (kind > 0.5 && kind < 2.5 && abs(rd.z) > 1e-3) {
+      float zp = kind < 1.5 ? depth * 0.18 : depth * 0.5;
+      float tp = (zp - ro.z) / rd.z;
+      if (tp > 0.0 && tp < t) {
+        vec3 hp = ro + rd * tp;
+        if (kind < 1.5) {
+          float mx = cellSz.x * (0.3 + 0.4 * step(0.5, fract(seed * 3.3)));
+          float dx = abs(hp.x - mx);
+          bool head = length(vec2(dx, hp.y - 1.64)) < 0.1;
+          bool torso = hp.y > 0.95 && hp.y < 1.5 && dx < 0.19 - (1.5 - hp.y) * 0.08;
+          bool skirt = hp.y > 0.45 && hp.y <= 0.95 && dx < 0.12 + (0.95 - hp.y) * 0.22;
+          bool pole = hp.y > 0.05 && hp.y <= 0.45 && dx < 0.02;
+          if (head) col = vec3(0.86, 0.84, 0.8);
+          else if (torso || skirt) col = 0.45 + 0.4 * cos(6.2832 * (fract(seed * 9.1) + vec3(0.0, 0.33, 0.67)));
+          else if (pole) col = vec3(0.2);
+        } else if (hp.y < 1.05 && hp.x > cellSz.x * 0.12 && hp.x < cellSz.x * 0.88) {
+          col = vec3(0.36, 0.22, 0.13) * (0.8 + 0.25 * step(0.5, fract(hp.x * 3.0)));
+          if (hp.y > 0.98) col = vec3(0.75, 0.73, 0.7);
+        }
       }
     }
   }
@@ -349,7 +418,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v5';
+  mat.customProgramCacheKey = () => 'palmera-building-v6';
   return mat;
 }
 
