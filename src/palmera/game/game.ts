@@ -26,6 +26,7 @@ import { Shop } from './shop';
 import { Life } from './life';
 import { Ambient } from '../world/ambient';
 import { Heli } from './heli';
+import { Reactions } from './reactions';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
 
@@ -86,6 +87,7 @@ export class Game {
   life!: Life;
   ambient!: Ambient;
   heli!: Heli;
+  reactions!: Reactions;
   rain!: Rain;
   wet = 0;
   private ambLight = new THREE.Color();
@@ -125,6 +127,7 @@ export class Game {
     this.life = new Life(this);
     this.ambient = new Ambient(this.scene);
     this.heli = new Heli(this);
+    this.reactions = new Reactions(this);
     this.rain = new Rain(this.scene);
     this.missions = new Missions(this);
     this.hud = new Hud(this);
@@ -363,6 +366,7 @@ export class Game {
       }
       if (this.player.weapon !== 'fist' && Math.hypot(this.player.pos.x - pos.x, this.player.pos.z - pos.z) < 2) {
         this.stats.shots++;
+        this.reactions.witness(pos.x, pos.z);
         this.wanted.crime('shots', pos.x, pos.z, false);
       }
     }
@@ -382,6 +386,8 @@ export class Game {
     this.alertDanger(h.pos, how === 'gun' ? 30 : 16, false);
     if (attacker === this.player) {
       if (killed) this.stats.kills++;
+      if (how === 'punch' && !killed) this.reactions.punched(h);
+      this.reactions.witness(h.pos.x, h.pos.z);
       if (how !== 'punch' || h.kind === 'cop') this.hud.hitT = 0.15;
       if (h.kind === 'cop') {
         this.wanted.crime(killed ? 'copKill' : 'copAssault', h.pos.x, h.pos.z, true);
@@ -857,6 +863,7 @@ export class Game {
       this.weapons.update(sdt, this.elapsed);
       this.shop.update();
       this.heli.update(sdt, this.elapsed);
+      this.reactions.update(sdt);
       this.missions.update(sdt);
       this.playerCtl.updateCamera(dt);
       if (p.health <= 0 && !this.overlayKind) this.die();

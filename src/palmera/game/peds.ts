@@ -88,8 +88,12 @@ export class Peds {
   }
 
   /** React to danger at (x,z). */
-  scare(h: Human, x: number, z: number, t = 8) {
+  scare(h: Human, x: number, z: number, t = 8, force = false) {
     if (h.dead || h.kind !== 'ped') return;
+    if (!force) {
+      if (h.state === 'phone' || h.state === 'fight' || h.state === 'handsup' || h.state === 'cower') return;
+      if (this.game.reactions.cower(h, x, z)) return;
+    }
     h.state = 'flee';
     h.clip = '';
     h.swimming = false;
@@ -110,6 +114,7 @@ export class Peds {
       if (h.down <= 0 && h.state !== 'flee') this.scare(h, h.pos.x - Math.sin(h.yaw), h.pos.z - Math.cos(h.yaw));
       return;
     }
+    if (g.reactions.think(h, dt)) return;
     if (g.life.think(h, dt)) return;
     if (h.clip && h.state !== 'flee') h.clip = '';
     if (h.state === 'flee') {

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Person, loadPeople, setPeopleCore, setPeopleRest, type Look, type PeopleKit } from '../../people/Humans.ts';
 import { LONG_GUNS, type Human, type WeaponId } from './humans';
 import type { Vehicle } from './vehicle';
+import { reactionArms } from '../game/reactions';
 
 /**
  * The people up close: Rocketbox scans (the same kit ApexGP's garages use), animated by their own
@@ -239,6 +240,10 @@ export class SkinnedCrowd {
     if (armed && aimW > 0.01) {
       this.aimArm(p, 'r', want, aimW);
       if (LONG_GUNS.has(h.weapon)) this.aimArm(p, 'l', this.v2.copy(want).addScaledVector(new THREE.Vector3(-fz, 0, fx), -0.35).normalize(), aimW * 0.9);
+    } else if (reactionArms(h)) {
+      const ra = reactionArms(h)!;
+      if (ra.r) this.aimArm(p, 'r', ra.r, 1);
+      if (ra.l) this.aimArm(p, 'l', ra.l, 1);
     } else if (punch > 0.01) {
       const swing = h.weapon === 'bat' ? this.v2.set(fx + -fz * (1 - punch) * 0.8, 0.35 - punch * 0.4, fz + fx * (1 - punch) * 0.8).normalize() : this.v2.set(fx, 0.15, fz).normalize();
       this.aimArm(p, 'r', swing, punch);
