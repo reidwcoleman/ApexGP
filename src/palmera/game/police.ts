@@ -57,6 +57,78 @@ export class Wanted {
     this.maxSeen = Math.max(this.maxSeen, this.level);
   }
 
+  /** roadblocks set up ahead of you at three stars and up: two cruisers across the road, officers behind */
+  roadblocks: { cars: Vehicle[]; cops: Human[]; x: number; z: number }[] = [];
+  private roadblockT = 8;
+
+  private updateRoadblocks(dt: number) {
+    const g = this.game;
+    const p = g.player;
+    const ref = p.vehicle ? p.vehicle.pos : p.pos;
+    // tear down ones far behind (or all, once you're clear)
+    this.roadblocks = this.roadblocks.filter((rb) => {
+      const far = Math.hypot(rb.x - ref.x, rb.z - ref.z) > 260;
+      if (this.level > 0 && !far) return true;
+      for (const v of rb.cars) if (g.vehicles.includes(v) && v.driver !== 'player') g.removeVehicle(v);
+      for (const h of rb.cops) if (g.npcs.includes(h) && !h.dead) g.removeNpc(h);
+      return false;
+    });
+    if (this.level < 3 || !p.vehicle || p.vehicle.isBoat || p.vehicle.speed < 8) return;
+    this.roadblockT -= dt;
+    if (this.roadblockT > 0 || this.roadblocks.length >= 2) return;
+    this.roadblockT = 22 + Math.random() * 10;
+    const v = p.vehicle;
+    const fx = Math.sin(v.heading), fz = Math.cos(v.heading);
+    // a junction well ahead, roughly on the road you're on, out of sight
+    let best: { n: typeof g.map.nodes[number]; along: number } | null = null;
+    for (const n of g.map.nodes) {
+      const ox = n.x - v.pos.x, oz = n.z - v.pos.z;
+      const along = ox * fx + oz * fz, lat = Math.abs(ox * -fz + oz * fx);
+      if (along < 120 || along > 230 || lat > 14 || n.edges.length < 2) continue;
+      if (this.canSee(n.x, 1.5, n.z, 400) && along < 150) continue;
+      if (!best || along < best.along) best = { n, along };
+    }
+    if (!best) return;
+    // on the road leading in from your side, 16 m short of the junction
+    const n = best.n;
+    let dx = -fx, dz = -fz;
+    let bestDot = -2;
+    for (const eid of n.edges) {
+      const o = g.map.nodes[g.map.otherEnd(g.map.edges[eid], n.id)];
+      const ex = o.x - n.x, ez = o.z - n.z, el = Math.hypot(ex, ez) || 1;
+      const dot = (ex * -fx + ez * -fz) / el;
+      if (dot > bestDot) (bestDot = dot), (dx = ex / el), (dz = ez / el);
+    }
+    if (bestDot < 0.7) return;
+    const cx = n.x + dx * 16, cz = n.z + dz * 16;
+    const across = Math.atan2(-dz, dx); // heading pointing across the road
+    const cars: Vehicle[] = [], cops: Human[] = [];
+    for (const s of [-1, 1]) {
+      const x = cx + -dz * s * 2.9, z = cz + dx * s * 2.9;
+      const c = g.spawnCar('police', x + dx * s * 0.8, z + dz * s * 0.8, across + s * 0.35 + (s < 0 ? Math.PI : 0));
+      c.siren = true;
+      c.occupants = 0;
+      c.despawnable = false;
+      cars.push(c);
+    }
+    const lvl = this.level;
+    for (let i = 0; i < 3; i++) {
+      const h = new Human('cop');
+      const o = (i - 1) * 2.6;
+      const x = cx - dx * 3.2 + -dz * o, z = cz - dz * 3.2 + dx * o;
+      h.pos.set(x, groundAt(x, z), z);
+      h.yaw = Math.atan2(dx, dz);
+      h.weapon = lvl >= 4 ? 'rifle' : i === 1 ? 'shotgun' : 'smg';
+      if (lvl >= 4) h.armor = 100;
+      h.state = 'chase';
+      h.post = h.pos.clone();
+      g.addNpc(h);
+      cops.push(h);
+    }
+    this.roadblocks.push({ cars, cops, x: cx, z: cz });
+    g.hud.toast('Roadblock ahead');
+  }
+
   clear() {
     this.heat = 0;
     this.level = 0;
@@ -100,6 +172,7 @@ export class Wanted {
     const p = g.player;
     if (this.level === 0) {
       this.flash = false;
+      if (this.roadblocks.length) this.updateRoadblocks(dt);
       // patrol cars notice crimes in progress only via crime(); nothing else to do
       return;
     }
@@ -150,6 +223,7 @@ export class Wanted {
         v.despawnable = true;
       }
     }
+    this.updateRoadblocks(dt);
     // foot cops limit
     for (const h of g.npcs) if (h.kind === 'cop') this.thinkCop(h, dt);
     this.v.set(0, 0, 0);
@@ -204,7 +278,7 @@ export class Wanted {
       h.yaw = Math.atan2(dx, dz);
       h.aim = Math.min(1, h.aim + dt * 4);
       h.aimPitch = Math.atan2(tp.y + 1.0 - (h.pos.y + 1.5), d);
-      const keep = d > 14 ? 3.2 : d < 6 ? -1.5 : 0;
+      const keep = h.post ? 0 : d > 14 ? 3.2 : d < 6 ? -1.5 : 0;
       g.setDesired(h, (dx / d) * keep, (dz / d) * keep);
       if (h.fireT <= 0 && h.aim > 0.8) {
         h.fireT = 0.7 + Math.random() * 0.7;
@@ -217,6 +291,13 @@ export class Wanted {
       return;
     }
     h.aim = Math.max(0, h.aim - dt * 3);
+    // roadblock officers hold their spot unless you're on foot close by
+    if (h.post && !(sees && d < 25 && !p.vehicle)) {
+      const px = h.post.x - h.pos.x, pz = h.post.z - h.pos.z, pd = Math.hypot(px, pz);
+      g.setDesired(h, pd > 0.8 ? (px / pd) * 3 : 0, pd > 0.8 ? (pz / pd) * 3 : 0);
+      if (pd < 0.8) h.yaw = Math.atan2(dx, dz);
+      return;
+    }
     // run towards the player (or last known position)
     const goal = sees ? tp : this.lastKnown;
     const gx = goal.x - h.pos.x, gz = goal.z - h.pos.z;

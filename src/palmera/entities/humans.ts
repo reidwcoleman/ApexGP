@@ -29,6 +29,8 @@ export class Human {
   texting = false;
   /** down on the pavement waiting for an ambulance */
   injured = false;
+  /** a spot to hold (officers at a roadblock) */
+  post: THREE.Vector3 | null = null;
   armor = 0;
   dead = false;
   down = 0; // seconds left lying down
