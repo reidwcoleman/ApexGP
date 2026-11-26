@@ -21,9 +21,10 @@ class GradeEffect extends Effect {
         float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
         // warm highlights, teal shadows (less of both at night, where the lamps already do it)
         float k = 1.0 - uNight * 0.6;
-        c += ( vec3( 1.0, 0.92, 0.8 ) - 1.0 ) * 0.28 * k * smoothstep( 0.4, 1.0, l );
-        c += ( vec3( 0.84, 0.97, 1.04 ) - 1.0 ) * 0.3 * k * ( 1.0 - smoothstep( 0.0, 0.45, l ) );
-        c = mix( vec3( l ), c, 1.12 );
+        // (kept subtle: a strong teal in the shadows turned every shaded road navy by late afternoon)
+        c += ( vec3( 1.0, 0.92, 0.8 ) - 1.0 ) * 0.22 * k * smoothstep( 0.4, 1.0, l );
+        c += ( vec3( 0.95, 0.99, 1.02 ) - 1.0 ) * 0.3 * k * ( 1.0 - smoothstep( 0.0, 0.45, l ) );
+        c = mix( vec3( l ), c, 1.04 );
         c = ( c - 0.5 ) * 1.06 + 0.5;
         float g = gh( uv * vec2( 1931.0, 1171.0 ) + fract( uTime * 13.7 ) * 97.0 ) - 0.5;
         c += g * 0.01;

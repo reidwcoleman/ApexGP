@@ -787,10 +787,10 @@ export class City {
         cross.quad([cx - rx - fx, y, cz - rz - fz], [cx + rx - fx, y, cz + rz - fz], [cx + rx + fx, y, cz + rz + fz], [cx - rx + fx, y, cz - rz + fz], [0, 0], [1, 0], [1, 1], [0, 1]);
       }
     }
-    const asph = { scale: 6, albedo: 0.7, normal: 0.9, rough: [0.55, 0.95] as [number, number] };
-    this.add(roads.geo(), D(new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.92 }), 'asphalt_02', asph));
+    const asph = { scale: 6, albedo: 0.7, normal: 0.9, rough: [0.8, 1.0] as [number, number] };
+    this.add(roads.geo(), D(new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.92  }), 'asphalt_02', asph));
     this.add(swamp.geo(), D(new THREE.MeshStandardMaterial({ map: roadTex, roughness: 1, color: 0xb8a888 }), 'asphalt_02', asph));
-    this.add(inter.geo(), D(new THREE.MeshStandardMaterial({ map: T.intersectionTexture(), roughness: 0.92 }), 'asphalt_02', asph));
+    this.add(inter.geo(), D(new THREE.MeshStandardMaterial({ map: T.intersectionTexture(), roughness: 0.92  }), 'asphalt_02', asph));
     const cw = this.add(cross.geo(), new THREE.MeshStandardMaterial({ map: T.crosswalkTexture(), transparent: true, roughness: 0.9, depthWrite: false }));
     cw.renderOrder = 1;
   }
@@ -822,7 +822,7 @@ export class City {
       rim: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.8 }), y: 0.05, rep: 4 },
       pond: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ color: 0x1c2213, roughness: 0.22, metalness: 0.2 }), y: 0.04, rep: 8 },
       court: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ map: T.courtTexture(), roughness: 0.9 }), y: 0.04, rep: 1 },
-      lot: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.lotTexture(), roughness: 0.92 }), 'asphalt_02', { scale: 6, albedo: 0.7, normal: 0.9, rough: [0.55, 0.95] }), y: 0.03, rep: 10 },
+      lot: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.lotTexture(), roughness: 0.92  }), 'asphalt_02', { scale: 6, albedo: 0.7, normal: 0.9, rough: [0.55, 0.95] }), y: 0.03, rep: 10 },
       plaza: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.concreteTexture(), color: 0xf7e2c8, roughness: 0.85 }), 'terrazzo_tiles', { scale: 3, albedo: 0.8, normal: 0.6, rough: [0.3, 0.7] }), y: 0.04, rep: 3 },
       grass: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.grassTexture(), roughness: 0.95 }), 'leafy_grass', { scale: 2.5, albedo: 0.9, normal: 0.9, rough: [0.75, 1] }), y: 0.035, rep: 20 },
     };
@@ -1218,7 +1218,7 @@ export class City {
         sides.quad([xa, da, zw0], [xb, db, zw0], [xb, db, zw1], [xa, da, zw1], [0, 0], [1, 0], [1, 1], [0, 1]);
       }
     }
-    this.add(deck.geo(), D(new THREE.MeshStandardMaterial({ map: T.roadTexture(), roughness: 0.9 }), 'asphalt_02', { scale: 6, albedo: 0.7, normal: 0.9, rough: [0.55, 0.95] }));
+    this.add(deck.geo(), D(new THREE.MeshStandardMaterial({ map: T.roadTexture(), roughness: 0.9  }), 'asphalt_02', { scale: 6, albedo: 0.7, normal: 0.9, rough: [0.55, 0.95] }));
     const sideMat = new THREE.MeshStandardMaterial({ map: T.concreteTexture(), color: 0xf3efe8, roughness: 0.8, side: THREE.DoubleSide });
     this.add(sides.geo(), sideMat, true);
     // railings, pillars, pylons

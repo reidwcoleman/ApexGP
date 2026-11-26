@@ -140,14 +140,26 @@ async function loadPhoto(renderer: THREE.WebGLRenderer, name: string): Promise<P
   // lower half turned into warm ground bounce
   const out = new Uint16Array(data.length);
   const toH = THREE.DataUtils.toHalfFloat;
+  // and the low sky is mostly city, not open air: from the horizon to ~35 degrees it fades to a warm
+  // neutral of the same brightness (sunlit walls bouncing light), and the whole dome keeps only 40% of
+  // its saturation (the late-day photos' deep blue zenith turned roads in shade navy) - shade under a blue sky photo was going navy blue (roads, pavements, white walls)
+  const city = 35 * (Math.PI / 180);
+  // the sunset and dusk skies are the bluest of all (the sun's gone, it's all zenith): least colour kept
+  const sat = /sunset|dusk/.test(name) ? 0.22 : 0.4;
   for (let y = 0; y < h; y++) {
     const lower = y >= h / 2;
+    const el = (0.5 - (y + 0.5) / h) * Math.PI;
+    const wall = lower ? 0 : 0.7 * (1 - Math.min(1, el / city)) ** 1.3;
     for (let x = 0; x < w; x++) {
       const o = (y * w + x) * 4;
-      for (let c = 0; c < 3; c++) {
-        let v = Math.min(6, half(data[o + c]));
-        if (lower) v = [hor.r, hor.g, hor.b][c] * 0.35 * (c === 0 ? 1.1 : c === 2 ? 0.8 : 1);
-        out[o + c] = toH(v);
+      if (lower) {
+        for (let c = 0; c < 3; c++) out[o + c] = toH([hor.r, hor.g, hor.b][c] * 0.35 * (c === 0 ? 1.1 : c === 2 ? 0.8 : 1));
+      } else {
+        const r = Math.min(6, half(data[o])), g = Math.min(6, half(data[o + 1])), b = Math.min(6, half(data[o + 2]));
+        const L = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        const rgb = [r, g, b].map((v) => L + (v - L) * sat);
+        const warm = [L * 1.06, L * 1.0, L * 0.9];
+        for (let c = 0; c < 3; c++) out[o + c] = toH(rgb[c] + (warm[c] - rgb[c]) * wall);
       }
       out[o + 3] = toH(1);
     }
