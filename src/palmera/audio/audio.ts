@@ -167,6 +167,55 @@ export class AudioSys {
     this.siren.g.gain.setTargetAtTime(Math.min(0.08, level * 0.08), this.ctx.currentTime, 0.1);
   }
 
+  private rainN: { g: GainNode } | null = null;
+  /** rain hissing on everything, 0..1 */
+  setRain(level: number) {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    if (!this.rainN) {
+      if (level <= 0.01) return;
+      const s = this.noiseSrc();
+      const f = c.createBiquadFilter();
+      f.type = 'bandpass';
+      f.frequency.value = 2600;
+      f.Q.value = 0.4;
+      const g = c.createGain();
+      g.gain.value = 0;
+      s.connect(f).connect(g).connect(this.sfx);
+      s.start();
+      this.rainN = { g };
+    }
+    this.rainN.g.gain.setTargetAtTime(Math.min(0.16, level * 0.16), c.currentTime, 0.5);
+  }
+
+  private rotor: { g: GainNode } | null = null;
+  /** the helicopter overhead: a low thudding noise, 0 (gone) .. 1 (right above) */
+  setRotor(level: number) {
+    if (!this.ctx) return;
+    const c = this.ctx;
+    if (!this.rotor) {
+      if (level <= 0) return;
+      const s = this.noiseSrc();
+      const f = c.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 320;
+      const am = c.createGain();
+      am.gain.value = 0.5;
+      const lfo = c.createOscillator();
+      lfo.frequency.value = 11;
+      const depth = c.createGain();
+      depth.gain.value = 0.5;
+      lfo.connect(depth).connect(am.gain);
+      const g = c.createGain();
+      g.gain.value = 0;
+      s.connect(f).connect(am).connect(g).connect(this.sfx);
+      s.start();
+      lfo.start();
+      this.rotor = { g };
+    }
+    this.rotor.g.gain.setTargetAtTime(Math.min(0.5, level * level * 0.5), c.currentTime, 0.2);
+  }
+
   setHorn(on: boolean) {
     if (!this.ctx || !this.horn) return;
     this.horn.g.gain.setTargetAtTime(on ? 0.1 : 0, this.ctx.currentTime, 0.02);

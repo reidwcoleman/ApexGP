@@ -25,6 +25,9 @@ import { SkinnedCrowd } from '../entities/skinned';
 import { Shop } from './shop';
 import { Life } from './life';
 import { Ambient } from '../world/ambient';
+import { Heli } from './heli';
+import { Rain } from '../world/rain';
+import { detailUniforms } from '../render/detail';
 
 export type Mode = 'title' | 'play' | 'paused';
 
@@ -82,6 +85,9 @@ export class Game {
   shop!: Shop;
   life!: Life;
   ambient!: Ambient;
+  heli!: Heli;
+  rain!: Rain;
+  wet = 0;
   private ambLight = new THREE.Color();
 
   constructor(canvas: HTMLCanvasElement) {
@@ -118,6 +124,8 @@ export class Game {
     this.shop = new Shop(this);
     this.life = new Life(this);
     this.ambient = new Ambient(this.scene);
+    this.heli = new Heli(this);
+    this.rain = new Rain(this.scene);
     this.missions = new Missions(this);
     this.hud = new Hud(this);
 
@@ -833,6 +841,7 @@ export class Game {
     if (this.mode === 'play') {
       this.weapons.update(sdt, this.elapsed);
       this.shop.update();
+      this.heli.update(sdt, this.elapsed);
       this.missions.update(sdt);
       this.playerCtl.updateCamera(dt);
       if (p.health <= 0 && !this.overlayKind) this.die();
@@ -854,7 +863,12 @@ export class Game {
     this.water.update(this.elapsed, this.sky, cam);
     this.city.update(cam, this.sky.night, this.elapsed);
     this.effects.update(sdt, this.renderer.domElement.height, this.camera.fov);
-    const dl = 0.08 + 0.92 * this.sky.day;
+    // the rain, and the streets drying after it
+    this.rain.update(this.elapsed, cam, this.sky.rain, 0.2 + 0.8 * this.sky.day);
+    this.wet += ((this.sky.rain > 0.15 ? 1 : 0) - this.wet) * Math.min(1, sdt * (this.sky.rain > 0.15 ? 0.15 : 0.02));
+    detailUniforms.dWet.value = this.wet;
+    this.audio.setRain(this.sky.rain);
+    const dl = (0.08 + 0.92 * this.sky.day) * (1 - 0.4 * this.sky.rain);
     this.ambient.update(sdt, this.elapsed, this.focus, this.sky.day, this.ambLight.setRGB(dl, dl, dl * 0.97));
     this.skinned.update(dt, this.humans, cam);
     this.skinned.updateDrivers(dt, this.vehicles, cam, this.player);

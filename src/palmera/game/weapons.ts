@@ -69,6 +69,7 @@ export interface ShotHit {
   human: Human | null;
   vehicle: Vehicle | null;
   dist: number;
+  heli?: boolean;
 }
 
 type PickupKind = AmmoId | 'bat' | 'health' | 'armor';
@@ -391,6 +392,11 @@ export class Weapons {
   private applyHit(hit: ShotHit, dmg: number, shooter: Human, from: THREE.Vector3, tracer = true) {
     const g = this.game;
     if (tracer) g.effects.tracer(from, hit.point);
+    if (hit.heli) {
+      g.heli.damage(dmg);
+      g.effects.sparks(hit.point.x, hit.point.y, hit.point.z, 8);
+      return;
+    }
     if (hit.human) {
       const h = hit.human;
       const headshot = hit.point.y - h.pos.y > 1.5 && h.fall < 0.3;
@@ -467,8 +473,18 @@ export class Weapons {
         bh = null;
       }
     }
+    let heli = false;
+    if (ignore === g.player) {
+      const th = g.heli.hit(o, d, best);
+      if (th !== null) {
+        best = th;
+        heli = true;
+        bh = null;
+        bv = null;
+      }
+    }
     const point = new THREE.Vector3().copy(o).addScaledVector(d, best);
-    return { point, normal: n, human: bh, vehicle: bv, dist: best };
+    return { point, normal: n, human: bh, vehicle: bv, dist: best, heli };
   }
 }
 

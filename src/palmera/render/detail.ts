@@ -53,6 +53,9 @@ export interface DetailOpts {
 
 let nextId = 0;
 
+/** shared by every detailed surface: 0 dry .. 1 soaked (puddles stand where the ground dips) */
+export const detailUniforms = { dWet: { value: 0 } };
+
 export function addDetail<M extends THREE.MeshStandardMaterial>(mat: M, name: SurfaceName, o: DetailOpts): M {
   const s = surface(name);
   const id = nextId++;
@@ -69,6 +72,7 @@ export function addDetail<M extends THREE.MeshStandardMaterial>(mat: M, name: Su
     sh.uniforms.dAlb = { value: o.albedo ?? 0.8 };
     sh.uniforms.dNorK = { value: o.normal ?? 1 };
     sh.uniforms.dRoughR = { value: new THREE.Vector2(rough?.[0] ?? 0, rough?.[1] ?? 1) };
+    sh.uniforms.dWet = detailUniforms.dWet;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vDW; varying vec3 vDN;')
       .replace(
@@ -88,7 +92,7 @@ vDN = normalize(mat3(modelMatrix) * dN3);`,
         '#include <common>',
         `#include <common>
 uniform sampler2D dDiff; uniform sampler2D dNor; uniform sampler2D dRough;
-uniform float dScale; uniform float dAlb; uniform float dNorK; uniform vec2 dRoughR;
+uniform float dScale; uniform float dAlb; uniform float dNorK; uniform vec2 dRoughR; uniform float dWet;
 varying vec3 vDW; varying vec3 vDN;
 float dHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float dNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
@@ -115,13 +119,20 @@ vec3 dTn = mix(texture2D(dNor, dUv).xyz, texture2D(dNor, dUv2).xyz, dW) * 2.0 - 
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
-diffuseColor.rgb *= mix(vec3(1.0), clamp(dCol, 0.0, 2.5), dAlb * dOn);`,
+diffuseColor.rgb *= mix(vec3(1.0), clamp(dCol, 0.0, 2.5), dAlb * dOn);
+float dPud = dUp && vDN.y > 0.0 ? dWet * mix(0.45, 1.0, smoothstep(0.52, 0.7, dNoise(vDW.xz * 0.12 + 7.0))) : dWet * 0.35;
+diffuseColor.rgb *= 1.0 - 0.32 * dPud;`,
+      )
+      .replace(
+        '#include <metalnessmap_fragment>',
+        `#include <metalnessmap_fragment>
+roughnessFactor = mix(roughnessFactor, 0.04, dPud * dPud);`,
       )
       .replace(
         '#include <normal_fragment_maps>',
         `#include <normal_fragment_maps>
 {
-  vec3 dWn = normalize(vDN + (dT * dTn.x + dB * dTn.y) * dNorK * dOn);
+  vec3 dWn = normalize(vDN + (dT * dTn.x + dB * dTn.y) * dNorK * dOn * (1.0 - dPud * 0.8));
   normal = normalize((viewMatrix * vec4(dWn, 0.0)).xyz);
   #ifdef DOUBLE_SIDED
   normal *= faceDirection;

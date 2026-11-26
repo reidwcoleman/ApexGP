@@ -48,6 +48,7 @@ uniform vec3 uSunColor;
 uniform float uSunI;
 uniform float uNight;
 uniform float uTime;
+uniform float uGrey;
 varying vec3 vDir;
 float h3(vec3 p){ p = fract(p*0.3183099+0.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
 vec3 photo(sampler2D t, vec3 d, float rot) {
@@ -65,6 +66,9 @@ void main() {
   } else {
     col = mix(uHorizon, uZenith, pow(clamp(d.y, 0.0, 1.0), 0.42));
   }
+  // a rain sky: the photo drained to grey and darker
+  float gl = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col = mix(col, vec3(gl) * vec3(0.86, 0.88, 0.91) * 0.9, uGrey);
   // below the horizon: the sea's haze
   if (d.y < 0.0) col = mix(col, uHorizon * 0.8, clamp(-d.y * 6.0, 0.0, 1.0));
   // the game's sun: a disc and its glow, where the shadows are cast from
@@ -168,6 +172,11 @@ export class SkySystem {
   sunset = 0;
   /** what the post chain multiplies the frame by */
   exposure = 1;
+  /** weather: 0 clear .. 1 a downpour, easing toward rainTarget; showers come and go by themselves */
+  rain = 0;
+  rainTarget = 0;
+  private weatherT = 90 + Math.random() * 120;
+  forceWeather: 'rain' | 'clear' | null = null;
   light: THREE.DirectionalLight;
   hemi: THREE.HemisphereLight;
   mesh: THREE.Mesh;
@@ -194,6 +203,7 @@ export class SkySystem {
       uSunI: { value: 1 },
       uNight: { value: 0 },
       uTime: { value: 0 },
+      uGrey: { value: 0 },
     };
     const mat = new THREE.ShaderMaterial({ vertexShader: skyVert, fragmentShader: skyFrag, uniforms: this.uniforms, side: THREE.BackSide, depthWrite: false, fog: false });
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24), mat);
@@ -327,10 +337,29 @@ export class SkySystem {
     this.hemi.groundColor.setRGB(0.12, 0.1, 0.08);
     this.hemi.intensity = 0.42 * this.night;
 
+    // weather
+    this.weatherT -= dt;
+    if (this.forceWeather) this.rainTarget = this.forceWeather === 'rain' ? 1 : 0;
+    else if (this.weatherT <= 0) {
+      const raining = this.rainTarget > 0;
+      this.rainTarget = raining ? 0 : Math.random() < 0.45 ? 0.6 + Math.random() * 0.4 : 0;
+      this.weatherT = raining ? 150 + Math.random() * 240 : this.rainTarget > 0 ? 60 + Math.random() * 90 : 120 + Math.random() * 200;
+    }
+    this.rain += (this.rainTarget - this.rain) * Math.min(1, dt * 0.08);
+    const rn = this.rain;
+    u.uGrey.value = rn;
+    u.uLevel.value = (u.uLevel.value as number) * lerp(1, 0.66, rn);
+    this.horizon.multiplyScalar(lerp(1, 0.7, rn));
+    this.zenith.multiplyScalar(lerp(1, 0.45, rn));
+    L.intensity *= 1 - 0.85 * rn;
+    u.uSunI.value = (u.uSunI.value as number) * (1 - rn);
+    this.scene.environmentIntensity *= lerp(1, 0.7, rn);
+    this.hemi.intensity += 0.25 * rn * this.day;
     const fog = this.scene.fog as THREE.FogExp2;
     // haze: the horizon's colour pulled toward the sky's blue (a white fog bleaches the skyline)
     fog.color.copy(this.horizon).lerp(this.zenith, 0.45).multiplyScalar(0.85);
-    fog.density = lerp(0.00032, 0.0008, this.night) + this.sunset * 0.00012;
+    fog.density = lerp(0.00032, 0.0008, this.night) + this.sunset * 0.00012 + rn * 0.0032;
+    fog.color.lerp(new THREE.Color(0.5, 0.53, 0.57).multiplyScalar(0.15 + 0.85 * this.day), rn * 0.8);
     // exposure: keep the frame bright as the light falls (eyes adapt), but let night be night
     const e = this.sunDir.y;
     this.exposure = lerp(1, 1.75, 1 - smoothstep(-0.18, 0.2, e)) * lerp(1, 1.12, this.sunset);
