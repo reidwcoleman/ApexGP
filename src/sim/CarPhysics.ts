@@ -155,6 +155,21 @@ export const F1_SPEC: CarSpec = {
   halfWidth: 0.95,
 };
 
+/**
+ * The aero package each circuit is run with, as a fraction of the medium-downforce F1_SPEC (2026-11-26,
+ * realism after Assetto Corsa, where every circuit has its wing level): Monza's "skinny" wings trade
+ * about a quarter of the downforce for ~15 % less drag (slower Lesmos and Parabolica, ~350 km/h in the
+ * speed trap); Spa and Baku-like straights a lighter package; the twisty tracks a heavier one. Lap times
+ * then line up with the real poles (tools: scratch laps.mjs, RacingProfile vs real pole laps).
+ */
+export const AERO_TRIM: Record<string, number> = { monza: 0.62, spa: 0.84, montreal: 0.82, suzuka: 0.9, interlagos: 0.93, sakhir: 0.95, mexico: 0.97, silverstone: 1.03, hungaroring: 1.05, melbourne: 1.03 };
+/** a spec trimmed to a circuit's aero package (downforce × k, drag less so: low wings keep the floor's) */
+export function circuitSpec(spec: CarSpec, circuit: string): CarSpec {
+  const k = AERO_TRIM[circuit] ?? 1;
+  if (k === 1) return spec;
+  return { ...spec, gears: spec.gears.slice(), clA: spec.clA * k, cdA: spec.cdA * (0.6 + 0.4 * k) };
+}
+
 
 export interface DriveInput {
   throttle: number;

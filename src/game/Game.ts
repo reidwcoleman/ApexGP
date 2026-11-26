@@ -50,7 +50,7 @@ import { aerialGround, aerialLens, aerialParams } from '../world/env/fog.ts';
 import { buildGarageBox, pitComplexBuilder, type GarageBox, type PitComplex } from '../world/PitComplex.ts';
 import { PlayerControl } from '../sim/PlayerControl.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
-import { F1_SPEC } from '../sim/CarPhysics.ts';
+import { F1_SPEC, circuitSpec } from '../sim/CarPhysics.ts';
 import { RacingLineAssist } from './RacingLineAssist.ts';
 import { Celebration } from './Celebration.ts';
 import type { AssistConfig } from './Assists.ts';
@@ -961,7 +961,7 @@ export class Game {
     // the skid marks and the racing line, shown once their programs are linked too
     const marks = work(() => {
       const skids = new SkidMarks(this.track, trackside.groundLift);
-      const line = new RacingLineAssist(this.track, RacingProfile.for(this.track, F1_SPEC));
+      const line = new RacingLineAssist(this.track, RacingProfile.for(this.track, circuitSpec(F1_SPEC, this.track.def.id)));
       line.setMode(this.menu.setup.assists.line);
       return { skids, line };
     });
@@ -1726,9 +1726,9 @@ export class Game {
     this.hud.flash('Qualifying', 'one flying lap', '', 2.5);
   }
 
-  /** this circuit's lap relative to Monza's, from the speed profiles (AI qualifying is fitted at Monza) */
+  /** this circuit's lap relative to Monza's, from the speed profiles (AI qualifying is fitted at Monza,
+   *  on the medium-downforce spec: Monza's own low-wing package now scales it too) */
   private trackLapScale(): number {
-    if (this.track.def.id === 'monza') return 1;
     this.monzaLap ||= RacingProfile.for(this.trackFor(MONZA), F1_SPEC).lapTime;
     return this.race.profile.lapTime / this.monzaLap;
   }

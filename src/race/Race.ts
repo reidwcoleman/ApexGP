@@ -1,5 +1,5 @@
 import type { Track } from '../world/Track.ts';
-import { CarPhysics, F1_SPEC, DMG, wetGrip, type CarSpec, type DriveInput, type DamageMode } from '../sim/CarPhysics.ts';
+import { CarPhysics, F1_SPEC, DMG, wetGrip, circuitSpec, type CarSpec, type DriveInput, type DamageMode } from '../sim/CarPhysics.ts';
 import { AIDriver, MISTAKE, VSC_SPEED, type Neighbour } from '../sim/AIDriver.ts';
 import { RacingProfile } from '../sim/RacingProfile.ts';
 import { AILearning, CornerClock, eliteLevel } from '../sim/AILearning.ts';
@@ -119,8 +119,8 @@ export function aiPace(entry: Entry, difficulty: number): number {
  * the road); re-run after a change to the physics, the profile or the AI's driving.
  */
 export const LIMIT_PACE: Record<string, number> = {
-  monza: 1.03, spa: 1.0, silverstone: 1.0, suzuka: 0.97, montreal: 0.99, melbourne: 1.03, spielberg: 1.03,
-  zandvoort: 0.97, austin: 0.98, interlagos: 0.98, hungaroring: 0.98, sakhir: 1.02, mexico: 1.02, yasmarina: 0.98,
+  monza: 1.03, spa: 1.0, silverstone: 1.0, suzuka: 0.97, montreal: 0.98, melbourne: 1.03, spielberg: 1.03,
+  zandvoort: 0.97, austin: 0.98, interlagos: 0.97, hungaroring: 0.97, sakhir: 1.02, mexico: 1.02, yasmarina: 0.98,
   // the scenic road courses (measured 2026-10-20 with the rubbered-line physics)
   serena: 1.0, bergsee: 1.03, redmesa: 1.02,
 };
@@ -379,7 +379,12 @@ export class Race {
       const t = mulberry32(strHash(`${track.def.id}/${e.team.id}`));
       this.forms.set(e, { form: 1 + Math.max(-0.013, Math.min(0.013, gauss(r) * 0.0055)), suit: 1 + gauss(t) * 0.0018, quali: gauss(r) * 0.12 });
     });
-    this.profile = RacingProfile.for(track, opts.aiSpec ?? F1_SPEC);
+    // (each circuit's aero package: CarPhysics AERO_TRIM)
+    const cid = track.def.id;
+    if (opts.aiSpec) opts = { ...opts, aiSpec: circuitSpec(opts.aiSpec, cid) };
+    if (opts.playerSpec) opts = { ...opts, playerSpec: circuitSpec(opts.playerSpec, cid) };
+    this.opts = opts;
+    this.profile = RacingProfile.for(track, opts.aiSpec ?? circuitSpec(F1_SPEC, cid));
     this.learning = new AILearning(track.def.id, this.profile, opts.difficulty, !!opts.learning && opts.mode === 'race');
     this.weather = new Weather(opts.weather);
     this.weatherState = this.weather.state;
@@ -405,7 +410,7 @@ export class Race {
     order.forEach((entry, i) => {
       const isPlayer = entry === opts.playerEntry;
       const remote = !isPlayer && !!opts.online?.remote(entry);
-      const car = new CarPhysics(isPlayer && opts.playerSpec ? opts.playerSpec : !isPlayer && opts.aiSpec ? opts.aiSpec : F1_SPEC);
+      const car = new CarPhysics(isPlayer && opts.playerSpec ? opts.playerSpec : !isPlayer && opts.aiSpec ? opts.aiSpec : circuitSpec(F1_SPEC, cid));
       car.weather = this.weather;
       car.damageMode = opts.damage ?? 'full';
       if (opts.mode === 'timetrial') {

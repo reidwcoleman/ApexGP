@@ -1,11 +1,13 @@
 // Solo AI laps at a list of pace levels: lap time, time off the road, spins. node tools/aipace.mjs [track] [paces]
 import { Track } from '../src/world/Track.ts';
 import { ALL_CIRCUITS as CIRCUITS } from '../src/world/Circuits.ts';
-import { CarPhysics, F1_SPEC } from '../src/sim/CarPhysics.ts';
+import { CarPhysics, F1_SPEC as BASE_SPEC, circuitSpec } from '../src/sim/CarPhysics.ts';
 import { RacingProfile } from '../src/sim/RacingProfile.ts';
 import { AIDriver } from '../src/sim/AIDriver.ts';
 const [tid = 'monza', paces = '0.92,0.97,1.0,1.03,1.06,1.09'] = process.argv.slice(2);
 const track = new Track(CIRCUITS.find((c) => c.id === tid));
+// (the circuit's aero package, as a race runs it)
+const F1_SPEC = circuitSpec(BASE_SPEC, tid);
 const profile = RacingProfile.for(track, F1_SPEC);
 for (const p of paces.split(',').map(Number)) {
   const car = new CarPhysics(F1_SPEC);
