@@ -93,9 +93,11 @@ const QUALITY_ORDER: QualityLevel[] = ['low', 'medium', 'high', 'ultra', 'tuned'
  * the trees and the cars stay legible. (It was 2.5 → 6.5 flat out, up to 13× a 180° shutter: the
  * whole frame smeared into radial streaks and the cars beside you into ghosts.)
  */
-const MOTION_SHUTTER: Record<MotionBlurLevel, number> = { off: 0, subtle: 0.35, cinematic: 0.7 };
+// (2026-11-26, AC realism: halved — AC's onboards stay crisp at 300 km/h; the old shutter smeared the
+// whole roadside into a speed effect)
+const MOTION_SHUTTER: Record<MotionBlurLevel, number> = { off: 0, subtle: 0.18, cinematic: 0.36 };
 /** extra shutter flat out (×(1 + gain) at 320 km/h and up, eased in from 140 km/h) */
-const MOTION_SPEED_GAIN = 0.8;
+const MOTION_SPEED_GAIN = 0.4;
 
 /**
  * The race grade on top of the weather's look: a touch more contrast and colour than the broadcast

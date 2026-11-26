@@ -862,13 +862,14 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   l = dot(c, vec3(0.2126, 0.7152, 0.0722));
   // a camera's greens: foliage, grass and green paint come out olive and muted, never the pure
   // RGB green of a game render (x pulls them toward yellow, y toward grey; by how green they are)
-  // (not in the sim look: ACC's Monza park is a rich, clean green)
-  float gp = clamp((c.g - max(c.r, c.b)) / max(c.g, 1e-4), 0.0, 1.0) * (1.0 - sim);
+  // (2026-11-26: the sim look keeps most of it too — Assetto Corsa's Monza footage is an olive, muted
+  // park, not the clean lime the old exemption gave the driving cameras)
+  float gp = clamp((c.g - max(c.r, c.b)) / max(c.g, 1e-4), 0.0, 1.0) * (1.0 - 0.25 * sim);
   c.r += (c.g - c.r) * gp * greenTame.x;
   c = mix(c, vec3(l), gp * greenTame.y);
   // (the footage layer pulls the colour back to ~0.7 of the render's (Environment FILM.saturation);
   // the sim look gives most of it back: saturated but natural, the tone curve adds the rest)
-  c = mix(vec3(l), c, saturation * lookSaturation * (1.0 + 0.32 * sim));
+  c = mix(vec3(l), c, saturation * lookSaturation * (1.0 + 0.04 * sim));
   // vibrance: lift the muted colours (grass, sky, liveries in the shade) more than the already vivid
   // ones, so the picture has the broadcast punch without clipping a red car into a flat blob
   float cMax = max(c.r, max(c.g, c.b));

@@ -268,7 +268,9 @@ export function sunDirection(p: TimePreset, out: { x: number; y: number; z: numb
  * rolls off the highlights; a light touch of broadcast-camera punch on top. The per-time
  * values above stay relative to each other.
  */
-const TONE_SAT = 0.88;
+// (2026-11-26, AC realism: 0.88 → 0.76 — a bright Monza day in Assetto Corsa footage (yt 0TSdZGB15dA)
+// measures saturation 0.17 against our 0.39: lime trees, blue-cartoon sky)
+const TONE_SAT = 0.76;
 const TONE_CONTRAST = 1.0;
 /**
  * The game's look on top of the physical light: a touch darker than a straight exposure, deeper

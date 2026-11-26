@@ -101,8 +101,8 @@ export const TERRAIN_PALETTES: Record<string, TerrainPalette> = {
   // Red Mesa: red sand, slickrock and dark juniper
   canyon: { arid: 1, sand: 0xb07c58, rock: 0x8e5236, earth: 0x9a6a48, gravel: 0xb08a68, lawn: 0x6a6a3a, meadow: 0x8a7a4c, straw: 0xa8885a, canopy: 0x3a3a26 },
 };
-const LAWN_LUSH = new THREE.Color(1.0, 1.03, 0.92);
-const MEADOW_LUSH = new THREE.Color(1.04, 1.08, 0.92);
+const LAWN_LUSH = new THREE.Color(1.0, 0.99, 0.94);
+const MEADOW_LUSH = new THREE.Color(1.03, 1.02, 0.94);
 const PALETTE_KEYS: Record<keyof Omit<TerrainPalette, 'arid' | 'forest' | 'pasture'>, string> = {
   lawn: 'uLawn', meadow: 'uMeadow', straw: 'uStraw', grassDark: 'uGrassDark', earth: 'uEarth', gravel: 'uGravel',
   sand: 'uSand', rock: 'uRock', litter: 'uLitter', canopy: 'uCanopy',
