@@ -290,7 +290,8 @@ function randomType(): CarType {
 
 export class Traffic {
   maxCars = 46;
-  radius = 210;
+  // traffic is kept within ~150 m of you so the streets you see are busy (the same 46 cars used to spread over 290 m)
+  radius = 150;
   private parked = new Map<number, Vehicle>();
   private parkT = 0;
   private lightT = 0;
@@ -355,7 +356,7 @@ export class Traffic {
       const v = g.vehicles[i];
       if (v.driver === 'player' || v.persistent || !v.despawnable) continue;
       const d = Math.hypot(v.pos.x - p.x, v.pos.z - p.z);
-      const far = d > (v.ai ? 290 : 240) || (v.sunk && d > 60) || (v.wrecked && d > 150);
+      const far = d > (v.ai ? 200 : 240) || (v.sunk && d > 60) || (v.wrecked && d > 150);
       if (far && !g.inView(v.pos.x, v.pos.y + 1, v.pos.z)) g.removeVehicle(v);
       else if (d > 420) g.removeVehicle(v);
     }
@@ -364,7 +365,7 @@ export class Traffic {
     for (const v of g.vehicles) if (v.ai instanceof TrafficAI && !v.police) moving++;
     const target = Math.round(this.maxCars * (g.sky.night > 0.6 ? 0.7 : 1));
     // close in, but never in view within 160 m (spawnOnRoad skips those)
-    if (moving < target) this.spawnOnRoad(g.settled ? 60 : 25, this.radius);
+    if (moving < target) this.spawnOnRoad(g.settled ? 50 : 25, this.radius);
     // parked cars
     this.parkT -= dt;
     if (this.parkT <= 0) {
