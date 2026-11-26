@@ -62,12 +62,15 @@ const FILM = {
   lift: [0.0011, 0.001, 0.0008],
   nightLift: [0.0006, 0.0007, 0.0004],
   /** wet: the veil of spray and water on the lens lifts the whole dark end (wet AC onboard: blacks ~0.09) */
-  wetLift: [0.0062, 0.0064, 0.0068],
+  wetLift: [0.003, 0.0031, 0.0033],
   /** how much brighter the rain's grey veil (fog) is than the deck that lights it */
   rainVeil: 0.7,
   /** a storm's deck held back from white (share of the visible sky) and its frame left dimmer */
   stormSky: 0.78,
   stormExposure: 0.32,
+  /** (2026-11-26, AC realism) a wet day isn't metered back up to a bright grey: AC's rain at Monza
+   *  (yt KPf7CXQ33j8) sits at mean 0.15 with blacks at 0.07, where ours read 0.70 / 0.31 — white murk */
+  wetExposure: 0.56,
   /** how much hotter a sunny daytime sky is let run (the camera exposes for the land) */
   skyHot: 0.3,
   /** the milky haze over a sunny day's sky (sky.ts uMilk) */
@@ -598,6 +601,7 @@ export function createEnvironment(
     );
     // (and doesn't meter a storm's gloom all the way back up to a bright day: it stays dim)
     gradeLook.exposure *= 1 - FILM.stormExposure * stormK;
+    gradeLook.exposure *= 1 - FILM.wetExposure * wetK * filmDay;
     // (a misty blue hour is darker than a clear one: the mist eats the last light — sim dusk footage sits
     // at ~0.11 mid-grey)
     gradeLook.exposure *= 1 - 0.35 * THREE.MathUtils.smoothstep(L.mist, 0.1, 0.5) * blueHour;
