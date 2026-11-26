@@ -10,7 +10,7 @@ import {
 import {
   PC, TC, WC, paintCellUV, trimUV, wheelCellUV, rectUV,
   R_FLAP, R_MAIN, R_FWING, R_EP_OL, R_EP_OR, R_EP_IN, R_FIN_L, R_FIN_R,
-  R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_TCAM_NUM, R_CODE_L, R_CODE_R, R_HALO_SPON, DRV_W, DRV_H,
+  R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_TCAM_NUM, R_CODE_L, R_CODE_R, R_HALO_SPON, R_HALO_ARM_L, R_HALO_ARM_R, DRV_W, DRV_H,
   DC, drvCellUV, TRIM_W, TRIM_H, R_SIDEWALL, R_TREAD, R_RIMFACE, WHEEL_TEX_W, WHEEL_TEX_H,
   WHEEL_R, RIM_R, TYRE_W_F, TYRE_W_R, TRACK_F, TRACK_R, Z_FRONT_AXLE, Z_REAR_AXLE, SIDEWALL_R0, SIDEWALL_R1,
   DASH_W, DASH_H, R_SCREEN, R_SHIFT, SHIFT_N, SHIFT_CELL, SCREEN_W, SCREEN_H, SCREEN_CY, faceUV, WHEEL_BUTTONS, WHEEL_ROTARIES,
@@ -1324,6 +1324,62 @@ function decals(mb: MB) {
       }
     }
     void ids;
+  }
+  // partner wordmarks along the top of the side arms (2026-11-26, after AC's T-cam: the real cars brand
+  // the whole hoop). Read left to right from behind: the left arm rear → front, the right front → rear,
+  // the letters' tops toward the outside
+  for (const side of [1, -1]) {
+    const sel: number[] = [];
+    for (let i = 0; i < n; i++) if (path[i][0] * side > 0.16 && path[i][2] > 0.02 && path[i][2] < 0.33) sel.push(i);
+    if (sel.length < 2) continue;
+    const arc: number[] = [0];
+    for (let q = 1; q < sel.length; q++) {
+      const a = path[sel[q - 1]], c = path[sel[q]];
+      arc.push(arc[q - 1] + Math.hypot(c[0] - a[0], c[1] - a[1], c[2] - a[2]));
+    }
+    const L = arc[arc.length - 1];
+    const rear = path[sel[0]][2] < path[sel[sel.length - 1]][2];
+    const nv = 4;
+    const base = mb.count;
+    const R = side > 0 ? R_HALO_ARM_L : R_HALO_ARM_R;
+    for (let q = 0; q < sel.length; q++) {
+      const i = sel[q];
+      // (a: 0 → 1 along the reading direction)
+      const fromRear = rear ? arc[q] / L : 1 - arc[q] / L;
+      const a = side > 0 ? fromRear : 1 - fromRear;
+      // (the sweep's own frame rolls along the arms — its "up" points forward-out there — so the strip
+      // is laid on the world-up crown of the tube: tangent t, up perpendicular to it, across = t × up)
+      const ip = Math.min(i + 1, n - 1), im = Math.max(i - 1, 0);
+      const t = norm3(sub3(path[ip], path[im]));
+      const upW = norm3(sub3([0, 1, 0], scl3(t, t[1])));
+      let acr = norm3(cross3(t, upW));
+      const out: V3 = norm3([path[i][0], 0, path[i][2] - 0.12]);
+      if (dot3(acr, out) < 0) acr = scl3(acr, -1);
+      for (let k = 0; k <= nv; k++) {
+        // across the crown from the inner edge (v 0) to the outer (v 1): the letters' tops outward,
+        // the strip bent down a little at its edges to follow the tube
+        const x = lerp(-1, 1, k / nv);
+        const off = add3(scl3(upW, 0.0345 - 0.006 * x * x), scl3(acr, x * 0.021));
+        const nn = norm3(add3(upW, scl3(acr, x * 0.35)));
+        mb.vert(add3(path[i], off), nn, drvUV(R, a, k / nv));
+      }
+    }
+    for (let q = 0; q < sel.length - 1; q++) {
+      for (let k = 0; k < nv; k++) {
+        const a = base + q * (nv + 1) + k;
+        const b2 = a + nv + 1;
+        const pa: V3 = [mb.pos[a * 3], mb.pos[a * 3 + 1], mb.pos[a * 3 + 2]];
+        const pb: V3 = [mb.pos[b2 * 3], mb.pos[b2 * 3 + 1], mb.pos[b2 * 3 + 2]];
+        const pc: V3 = [mb.pos[(a + 1) * 3], mb.pos[(a + 1) * 3 + 1], mb.pos[(a + 1) * 3 + 2]];
+        if (cross3(sub3(pb, pa), sub3(pc, pa))[1] > 0) {
+          mb.tri(a, b2, a + 1);
+          mb.tri(a + 1, b2, b2 + 1);
+        } else {
+          mb.tri(a, a + 1, b2);
+          mb.tri(a + 1, b2 + 1, b2);
+        }
+      }
+    }
   }
   // the title sponsor across the hoop's front arc — what the onboard and T-cam look over (the F1
   // games and the sims all brand it): read from the cockpit, left (+X) to right

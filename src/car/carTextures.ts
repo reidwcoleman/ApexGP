@@ -2,6 +2,7 @@
  * Canvas-generated textures for the car: carbon weave (shared), wheel/tyre atlas (shared),
  * motion-blur disc (shared), per-car trim palette + emissive masks, per-driver helmet/decal sheet.
  */
+import { partnersOf } from '../race/TeamPartners.ts';
 import * as THREE from 'three';
 import '@fontsource/titillium-web/700.css';
 import '@fontsource/titillium-web/900.css';
@@ -12,7 +13,7 @@ import {
   GLOVE_W, GLOVE_H, R_GL_BACK, R_GL_PALM, R_GL_FINGER, R_GL_THUMB, R_GL_CUFF,
   WHEEL_TEX_W, WHEEL_TEX_H, R_SIDEWALL, R_TREAD, R_RIMFACE, WC, WHEEL_PROPS, WHEEL_CELL,
   SIDEWALL_R0, SIDEWALL_R1, RIM_R, WHEEL_R,
-  DRV_W, DRV_H, R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_CODE_L, R_CODE_R, R_TCAM_NUM, R_HELM_SPON, R_HALO_SPON, type Rect,
+  DRV_W, DRV_H, R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_CODE_L, R_CODE_R, R_TCAM_NUM, R_HELM_SPON, R_HALO_SPON, R_HALO_ARM_L, R_HALO_ARM_R, type Rect,
 } from './carLayout.ts';
 
 export const FONT = '"Titillium Web", "Arial Narrow", Arial, sans-serif';
@@ -1226,6 +1227,13 @@ export function driverTexture(teamIn: Team, driverIn: Driver): THREE.Texture {
     // (the strip is ~16:1 on the car, as the cell)
     const haloPaint = team.halo ?? (team.pattern === 'split' || team.pattern === 'block' ? team.secondary : team.primary);
     drawInRect(g, R_HALO_SPON, team.sponsor, contrastOn(haloPaint), null, 0.94, 1.05, 900, false);
+    // the side arms: the two principal partners (TeamPartners); the arm strip is ~8:1 on the car against the
+    // cell's 16:1, so the letters are drawn ~2× wide to come out upright
+    {
+      const P = partnersOf(team.id);
+      drawInRect(g, R_HALO_ARM_L, P.principal[0].name, contrastOn(haloPaint), null, 0.86, 1.95, 800, false);
+      drawInRect(g, R_HALO_ARM_R, P.principal[1].name, contrastOn(haloPaint), null, 0.86, 1.95, 800, false);
+    }
     // flat cells: visor, suit, suit2, HANS, gloves, belts
     const cells = ['#121722', team.primary, team.secondary, '#18191b', team.secondary, team.accent];
     cells.forEach((col, i) => {
