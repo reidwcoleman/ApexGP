@@ -62,14 +62,14 @@ function grassMask(map: CityMap): THREE.Texture {
 /** one tuft: five tapered, slightly curved blades round a point, unit height */
 function tuftGeometry(): THREE.BufferGeometry {
   const pos: number[] = [], idx: number[] = [];
-  for (let b = 0; b < 7; b++) {
-    const a = (b / 7) * Math.PI * 2 + b * 0.7;
+  for (let b = 0; b < 10; b++) {
+    const a = (b / 10) * Math.PI * 2 + b * 0.7;
     const r = 0.03 + (b % 4) * 0.05;
     const ox = Math.cos(a) * r, oz = Math.sin(a) * r;
     const lean = 0.18 + (b % 2) * 0.12;
     const dx = Math.cos(a) * lean, dz = Math.sin(a) * lean;
     const px = -Math.sin(a), pz = Math.cos(a);
-    const w = 0.028;
+    const w = 0.019;
     const base = pos.length / 3;
     const ring = (h: number, wd: number, bend: number) => {
       pos.push(ox + dx * bend - px * wd, h, oz + dz * bend - pz * wd, ox + dx * bend + px * wd, h, oz + dz * bend + pz * wd);
@@ -141,14 +141,18 @@ transformed.xz += cell;
 transformed.y += 0.02;
 vH = position.y;
 float dry = smoothstep(0.55, 0.95, sin(cell.x * 0.09 + 1.3) * sin(cell.y * 0.11) * 0.5 + 0.5 + aRnd.y * 0.25);
-vTint = mix(mix(vec3(0.85, 1.0, 0.8), vec3(1.0, 1.0, 0.75), aRnd.z), vec3(1.3, 1.1, 0.6), dry * 0.45);
+vTint = mix(mix(vec3(0.85, 1.0, 0.85), vec3(1.08, 1.04, 0.8), aRnd.z), vec3(1.3, 1.05, 0.6), dry * 0.25);
 vTint = mix(vTint, vec3(0.72, 0.8, 0.52), mk.g * 0.7);`);
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', '#include <common>\nvarying float vH; varying vec3 vTint;')
-        .replace('vec4 diffuseColor = vec4( diffuse, opacity );', 'vec4 diffuseColor = vec4(mix(vec3(0.045, 0.075, 0.02), vec3(0.17, 0.25, 0.07), vH) * vTint, 1.0);')
-        .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\nnormal = normalize(vNormal);');
+        .replace('vec4 diffuseColor = vec4( diffuse, opacity );', 'vec4 diffuseColor = vec4(mix(vec3(0.065, 0.14, 0.03), vec3(0.17, 0.33, 0.075), vH) * vTint, 1.0);')
+        .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n// lit mostly like the lawn they grow from: thin blades facing sideways went near black whenever the sun was not behind you\nnormal = normalize(mix(normalize(vNormal) * (gl_FrontFacing ? 1.0 : -1.0), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz), 0.78));');
     };
+    // no depth write: the AO pass reads depth, and thousands of thin blades read as deep crevices (near-black grass at dusk).
+    // Drawn after everything opaque, so they still hide behind and in front of the right things; blade-vs-blade order doesn't show.
+    mat.depthWrite = false;
     this.mesh = new THREE.Mesh(g, mat);
+    this.mesh.renderOrder = 1;
     this.mesh.frustumCulled = false;
     this.mesh.receiveShadow = true;
     this.mesh.castShadow = false;
