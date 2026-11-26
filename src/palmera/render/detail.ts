@@ -92,6 +92,7 @@ vDN = normalize(mat3(modelMatrix) * dN3);`,
         '#include <common>',
         `#include <common>
 uniform sampler2D dDiff; uniform sampler2D dNor; uniform sampler2D dRough;
+#define P_DETAIL 1
 uniform float dScale; uniform float dAlb; uniform float dNorK; uniform vec2 dRoughR; uniform float dWet;
 varying vec3 vDW; varying vec3 vDN;
 float dHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }

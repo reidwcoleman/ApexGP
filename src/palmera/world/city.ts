@@ -1,4 +1,5 @@
 // Builds all static city meshes from the CityMap: ground, roads, buildings, props, bridge and docks.
+import { decalGeometry, placeDecals, type DecalKind } from './decals';
 import * as THREE from 'three';
 const ni = (g: THREE.BufferGeometry) => (g.index ? g.toNonIndexed() : g);
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -540,6 +541,10 @@ if (bn.y > 0.5) {
     // the ribs catch the light a little
     float rib = 0.94 + 0.06 * cos(u / 0.15 * 6.2832);
     diffuseColor.rgb *= t * 1.02 * mix(rib, 1.0, door * step(fv, 0.75));
+    // metal, not stucco: no scanned plaster bump on the siding
+    #ifdef P_DETAIL
+    dOn = 0.0;
+    #endif
   }
   diffuseColor.rgb *= mix(0.8, 1.0, smoothstep(0.0, 2.5, v));
 }`,
@@ -776,6 +781,7 @@ export class City {
     this.buildBuildings();
     this.buildProps();
     this.buildFurniture();
+    this.buildDecals();
     this.buildBridge();
     this.buildDocks();
     this.buildLandmarks();
@@ -1253,6 +1259,25 @@ export class City {
     chunked(this.scene, this.chunks, groups.get('umbrella') ?? [], umbrellaGeometry(), std({ side: THREE.DoubleSide }), { far: 300, shadow: true });
     chunked(this.scene, this.chunks, groups.get('lounger') ?? [], loungerGeometry(), std(), { far: 160, shadow: false });
     chunked(this.scene, this.chunks, groups.get('tower') ?? [], lifeguardGeometry(), std(), { far: 600, shadow: true });
+  }
+
+  /** manholes, drains, patches and oil on the roads (world/decals.ts; atlas from Blender) */
+  private buildDecals() {
+    const base = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'palmera/';
+    const tex = new THREE.TextureLoader().load(base + 'decals.webp');
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    const lists = placeDecals(this.map);
+    const look = {
+      manhole: { c: 0xffffff, rough: 0.5, metal: 0, a: 1, k: 1.25 }, grate: { c: 0xffffff, rough: 0.55, metal: 0, a: 1, k: 1.15 },
+      patch: { c: 0x9a9a9a, rough: 0.9, metal: 0, a: 0.8 }, oil: { c: 0xffffff, rough: 0.4, metal: 0, a: 0.8 },
+    } as Record<DecalKind, { c: number; rough: number; metal: number; a: number; k?: number }>;
+    for (const k of Object.keys(lists) as DecalKind[]) {
+      const m = new THREE.MeshStandardMaterial({ map: tex, color: look[k].c, roughness: look[k].rough, metalness: look[k].metal, opacity: look[k].a, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+      if (look[k].k) m.color.multiplyScalar(look[k].k!);
+      const meshes = chunked(this.scene, this.chunks, lists[k], decalGeometry(k), m, { far: k === 'oil' || k === 'patch' ? 140 : 110, shadow: false });
+      meshes.forEach((x) => (x.renderOrder = 1));
+    }
   }
 
   private buildFurniture() {
