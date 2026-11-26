@@ -2,12 +2,16 @@
 import * as THREE from 'three';
 import { clamp, damp, lerp, wrapAngle } from '../core/math';
 import type { Vehicle } from '../entities/vehicle';
+import type { Human } from '../entities/humans';
 import { WATER_Y, groundAt, groundBase } from '../world/map';
 import type { Game } from './game';
 import { WEAPONS, WEAPON_ORDER } from './weapons';
 
 /** an invisible stand-in for a car's glass, seen from inside in first person */
 const NO_GLASS = new THREE.MeshBasicMaterial({ visible: false });
+
+/** states in which someone is already on guard: no sneaking up on them */
+const ALERT = new Set(['flee', 'fight', 'handsup', 'cower', 'bench', 'towel', 'lounge']);
 
 export const TUNING = {
   runSpeed: 5.0,
@@ -222,6 +226,7 @@ export class PlayerController {
     this.punchCd -= dt;
     if (!p.swimming) {
       if (p.weapon === 'fist' || p.weapon === 'bat') {
+        if (this.takedownTarget()) g.hud.prompt(`<kbd>LMB</kbd> Takedown`);
         if ((inp.lmbPressed || inp.hit('Mouse0')) && this.punchCd <= 0) this.punch();
       } else {
         const auto = WEAPONS[p.weapon].auto;
@@ -250,9 +255,73 @@ export class PlayerController {
     }
   }
 
+  /** someone unaware, with their back to you, within arm's reach in front of you */
+  takedownTarget(): Human | null {
+    const g = this.game;
+    const p = g.player;
+    if (p.vehicle || p.swimming || p.dead || !p.onGround) return null;
+    const fx = Math.sin(p.yaw), fz = Math.cos(p.yaw);
+    let best: Human | null = null, bd = 1.7;
+    for (const h of g.npcs) {
+      if (h.dead || h.hidden || h.vehicle || h.down > 0 || ALERT.has(h.state)) continue;
+      if (h.kind === 'cop' && h.state === 'chase') continue;
+      const dx = h.pos.x - p.pos.x, dz = h.pos.z - p.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d > bd || d < 0.05 || Math.abs(h.pos.y - p.pos.y) > 0.8) continue;
+      // in front of you, and you're behind them
+      if ((dx * fx + dz * fz) / d < 0.5) continue;
+      if ((Math.sin(h.yaw) * dx + Math.cos(h.yaw) * dz) / d < 0.35) continue;
+      best = h;
+      bd = d;
+    }
+    return best;
+  }
+
+  /** a quiet knockout from behind: only a crime if somebody sees it */
+  private takedown(h: Human) {
+    const g = this.game;
+    const p = g.player;
+    this.punchCd = 0.9;
+    p.punchT = 0.38;
+    p.yaw = Math.atan2(h.pos.x - p.pos.x, h.pos.z - p.pos.z);
+    h.health = Math.max(1, h.health - 8);
+    h.flinch = 0.3;
+    h.down = 22 + Math.random() * 10;
+    h.vx += Math.sin(p.yaw) * 1.2;
+    h.vz += Math.cos(p.yaw) * 1.2;
+    h.clip = '';
+    g.audio.punch();
+    let seen = 0;
+    for (const w of g.npcs) {
+      if (w === h || w.dead || w.hidden || w.down > 0 || w.vehicle) continue;
+      const dx = h.pos.x - w.pos.x, dz = h.pos.z - w.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 24 || d < 0.01) continue;
+      // looking roughly that way (or right next to it), with nothing in between
+      if (d > 3 && (Math.sin(w.yaw) * dx + Math.cos(w.yaw) * dz) / d < 0.1) continue;
+      const hit = g.map.colliders.raycast(w.pos.x, w.pos.y + 1.6, w.pos.z, dx / d, (h.pos.y + 1 - w.pos.y - 1.6) / d, dz / d, d, true);
+      if (hit && hit.t < d - 0.5) continue;
+      seen++;
+    }
+    if (seen) {
+      g.onHumanHurt(h, p, false, 'punch');
+      g.hud.toast('Takedown · you were seen');
+    } else {
+      this.takedowns++;
+      g.hud.toast('Silent takedown');
+    }
+  }
+
+  takedowns = 0;
+
   private punch() {
     const g = this.game;
     const p = g.player;
+    const tk = this.takedownTarget();
+    if (tk) {
+      this.takedown(tk);
+      return;
+    }
     this.punchCd = TUNING.punchCooldown;
     p.punchT = 0.38;
     g.audio.whoosh();
