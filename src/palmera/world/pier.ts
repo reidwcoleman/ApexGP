@@ -7,6 +7,8 @@ import { box, cyl, merge, prep } from '../core/geo';
 import { groundBase, platforms, type CityMap } from './map';
 
 const Z = 140, X0 = 712, X1 = 860, W = 12, DECK = 1.25;
+/** where the pier is, for the people walking on it */
+export const PIER = { z: Z, x0: X0, x1: X1, w: W, deck: DECK, endX: X1 + 26, endHalf: 15 };
 const HUB = { x: 868, y: DECK + 24, z: Z }, R = 20, N = 20;
 
 export class Pier {
@@ -171,10 +173,31 @@ export class Pier {
       this.wheel.add(n);
     }
     this.stringMat = new THREE.MeshBasicMaterial({ color: 0xffe2a8, toneMapped: false });
+    // posts on the rails every 8 m, a sagging wire between each pair, bulbs hung along it
     const sB: THREE.Matrix4[] = [];
-    for (const s of [-1, 1]) for (let x = X0; x <= X1; x += 1.6) sB.push(m.clone().makeTranslation(x, railTop + 0.35 + 0.18 * Math.sin(((x - X0) / 8) * Math.PI) ** 2, Z + s * (W / 2 - 0.1)));
-    for (const s of [-1, 1]) for (let x = X0; x <= X1; x += 8) sB.push(m.clone().makeTranslation(x, railTop + 0.6, Z + s * (W / 2 - 0.1)).scale(new THREE.Vector3(0.5, 3.6, 0.5)));
-    const sb = new THREE.InstancedMesh(new THREE.SphereGeometry(0.09, 5, 3), this.stringMat, sB.length);
+    const posts: THREE.BufferGeometry[] = [];
+    const wire: number[] = [];
+    const postH = railTop + 1.5, sag = 0.45, span = 8;
+    for (const s of [-1, 1]) {
+      const z = Z + s * (W / 2 - 0.1);
+      for (let x = X0; x <= X1; x += span) posts.push(cyl(0.04, 0.05, postH - DECK, 5, x, (postH + DECK) / 2, z, 0x3a3c40));
+      for (let x = X0; x < X1; x += span) {
+        let px = x, py = postH;
+        for (let k = 1; k <= 8; k++) {
+          const u = k / 8, nx = x + span * u, ny = postH - sag * 4 * u * (1 - u);
+          wire.push(px, py, z, nx, ny, z);
+          px = nx;
+          py = ny;
+          if (k < 8) sB.push(m.clone().makeTranslation(nx, ny - 0.1, z));
+        }
+      }
+    }
+    const pm = new THREE.Mesh(merge(posts), steel);
+    root.add(pm);
+    const wg = new THREE.BufferGeometry();
+    wg.setAttribute('position', new THREE.Float32BufferAttribute(wire, 3));
+    root.add(new THREE.LineSegments(wg, new THREE.LineBasicMaterial({ color: 0x2a2a2a })));
+    const sb = new THREE.InstancedMesh(new THREE.SphereGeometry(0.075, 5, 3), this.stringMat, sB.length);
     sB.forEach((mm, i) => sb.setMatrixAt(i, mm));
     root.add(sb);
   }

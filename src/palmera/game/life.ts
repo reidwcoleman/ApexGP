@@ -6,6 +6,7 @@ import { Human } from '../entities/humans';
 import { BEACH, ISLAND, groundAt, isWater } from '../world/map';
 import { placeFurniture } from '../world/furniture';
 import type { Game } from './game';
+import { PIER } from '../world/pier';
 
 const TOWEL_COLS = [0xff6f61, 0x29b6c4, 0xffd23f, 0x7b6cff, 0xff8fc4, 0x5fd38a, 0xffffff];
 
@@ -82,6 +83,11 @@ export class Life {
           if (this.count('beachchat') < 12) this.spawnBeachGroup(f);
         }
         if (this.count('jog') < 6) this.spawnJogger(f);
+      }
+      // the pier, day and evening
+      if (Math.hypot(f.x - (PIER.x0 + PIER.x1) / 2, f.z - PIER.z) < 220) {
+        if (this.count('pierwalk') < (day ? 10 : 6)) this.spawnPierWalker(f);
+        if (this.count('rail') < (day ? 12 : 7)) this.spawnRail(f);
         if (this.count('dance') < 5 && Math.random() < 0.4) this.spawnDancers(f);
       }
     }
@@ -205,6 +211,46 @@ export class Life {
     }
   }
 
+  /** strolling the pier: out to the end and back, then off along the beach */
+  private spawnPierWalker(f: THREE.Vector3) {
+    const x = PIER.x0 + 4 + Math.random() * (PIER.x1 - PIER.x0 - 4), z = PIER.z + (Math.random() - 0.5) * (PIER.w - 3);
+    if (!this.ok(x, z, f, 25, 200)) return;
+    const n = Math.random() < 0.35 ? 2 : 1;
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    for (let i = 0; i < n; i++) {
+      const h = this.newPed(x + i * 0.3, z + i * 0.75, 'pierwalk', '', 60 + Math.random() * 120);
+      h.dir = dir;
+      h.target.set(0, 0, z + i * 0.75);
+      h.yaw = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+    }
+  }
+
+  /** leaning on the rail, looking at the water (some in twos, chatting) */
+  private spawnRail(f: THREE.Vector3) {
+    const end = Math.random() < 0.3;
+    let x: number, z: number, yaw: number;
+    if (end) {
+      // round the end platform, looking out to sea or along it
+      const side = Math.floor(Math.random() * 3);
+      if (side === 0) (x = PIER.endX - 0.8), (z = PIER.z + (Math.random() - 0.5) * 26), (yaw = Math.PI / 2);
+      else (x = PIER.x1 + 2 + Math.random() * 22), (z = PIER.z + (side === 1 ? 1 : -1) * (PIER.endHalf - 0.8)), (yaw = side === 1 ? 0 : Math.PI);
+    } else {
+      const s = Math.random() < 0.5 ? 1 : -1;
+      x = PIER.x0 + 8 + Math.random() * (PIER.x1 - PIER.x0 - 12);
+      z = PIER.z + s * (PIER.w / 2 - 0.75);
+      yaw = s > 0 ? 0 : Math.PI;
+    }
+    if (!this.ok(x, z, f, 25, 200)) return;
+    const pair = Math.random() < 0.4;
+    for (let i = 0; i < (pair ? 2 : 1); i++) {
+      const ox = Math.cos(yaw) * 0.75 * i, oz = -Math.sin(yaw) * 0.75 * i;
+      const h = this.newPed(x + ox, z + oz, 'rail', pair ? 'talk' : 'idle', 40 + Math.random() * 100);
+      // a pair turn a little toward each other
+      h.yaw = yaw + (pair ? (i ? -0.5 : 0.5) : (Math.random() - 0.5) * 0.4);
+      h.target.set(x + ox, 0, z + oz);
+    }
+  }
+
   private spawnJogger(f: THREE.Vector3) {
     const x = BEACH.x0 + 28 + Math.random() * 14;
     const z = f.z + (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 60);
@@ -292,6 +338,33 @@ export class Life {
         const dx = tx - h.pos.x, dz = tz - h.pos.z, d = Math.hypot(dx, dz) || 1;
         g.setDesired(h, (dx / d) * Math.min(1, d) * 0.8, (dz / d) * Math.min(1, d) * 0.8);
         if (h.stateT <= 0) g.removeNpc(h);
+        return true;
+      }
+      case 'pierwalk': {
+        h.stateT -= dt;
+        const xEnd = h.dir > 0 ? PIER.x1 + 18 : PIER.x0 + 2;
+        if (h.dir > 0 && h.pos.x > xEnd) h.dir = -1;
+        // done strolling: off the landward end and back to the streets
+        if (h.dir < 0 && h.pos.x < xEnd) {
+          if (h.stateT <= 0) {
+            h.state = 'walk';
+            return false;
+          }
+          h.dir = 1;
+        }
+        g.setDesired(h, h.dir * 1.25, (h.target.z - h.pos.z) * 0.6);
+        return true;
+      }
+      case 'rail': {
+        h.stateT -= dt;
+        g.setDesired(h, 0, 0);
+        if (h.stateT <= 0) {
+          h.state = 'pierwalk';
+          h.clip = '';
+          h.dir = -1;
+          h.target.z = PIER.z + (Math.random() - 0.5) * (PIER.w - 4);
+          h.stateT = 0;
+        }
         return true;
       }
       case 'jog': {
