@@ -142,7 +142,7 @@ export class Vehicle {
     this.paint = paintMat(this.color);
     const kitM = kitModel(type, this.spec, Math.floor(Math.random() * 16));
     const model = carModel(type);
-    this.body = new THREE.Mesh(kitM ? kitM.geo : model.geo, [this.paint, carMats.detail, carMats.lamps, carMats.glass]);
+    this.body = new THREE.Mesh(kitM ? kitM.geo : model.geo, [this.paint, carMats.detail, carMats.lamps, type === 'bus' ? carMats.busGlass : carMats.glass]);
     this.body.castShadow = true;
     this.body.receiveShadow = true;
     this.root.add(this.body);

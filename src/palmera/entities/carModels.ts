@@ -508,6 +508,8 @@ export const carMats = {
   detail: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.32, metalness: 0.35 }),
   glass: new THREE.MeshPhysicalMaterial({ vertexColors: true, color: 0xffffff, roughness: 0.04, metalness: 0.0, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.8, transparent: true, opacity: 0.55, depthWrite: false }),
   lamps: lampMaterial(),
+  /** a bus's windows: its strip lights glow through them after dark (setCarNight) */
+  busGlass: busGlassMaterial(),
   wheel: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.3, side: THREE.DoubleSide }),
   burnt: new THREE.MeshStandardMaterial({ color: 0x1e1b19, roughness: 1, metalness: 0 }),
   sirenRed: new THREE.MeshBasicMaterial({ color: 0xff2020 }),
@@ -538,6 +540,45 @@ export function paintMat(color: number): THREE.MeshStandardMaterial {
   return m;
 }
 
+/**
+ * the bus's glazing: by day the same tinted glass as the cars; after dark the cabin's strip lights show
+ * through it - brightest under the ceiling, falling off down the window, with the seat backs and
+ * heads of the riders as darker shapes along the lower half (from the body-space position)
+ */
+function busGlassMaterial() {
+  const m = new THREE.MeshPhysicalMaterial({ vertexColors: true, color: 0xffffff, roughness: 0.04, metalness: 0.0, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.8, transparent: true, opacity: 0.62, depthWrite: false, emissive: 0xd8e6ff, emissiveIntensity: 0 });
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vBusP;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBusP = position;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vBusP;')
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+{
+  float y = vBusP.y;
+  float lit = smoothstep(1.35, 2.55, y);
+  lit = 0.25 + 0.75 * lit * lit;
+  // seat backs and heads along the lower part of each window
+  float row = fract(vBusP.z / 0.82) * 0.82;
+  float dz = row - 0.3;
+  // a seat back with a rounded top, and (in some seats) a rider's head and shoulders above it
+  float backTop = 1.72 - dz * dz * 3.0;
+  float seat = smoothstep(0.03, -0.03, y - backTop) * smoothstep(0.05, -0.02, abs(dz) - 0.2);
+  float rider = step(0.45, fract(sin(floor(vBusP.z / 0.82) * 12.9898 + vBusP.x * 3.0) * 43758.5453));
+  float head = smoothstep(0.11, 0.085, length(vec2(dz, (y - 1.98) * 0.85)));
+  float shoulders = smoothstep(0.03, -0.03, y - (1.86 - dz * dz * 6.0)) * smoothstep(0.05, -0.02, abs(dz) - 0.21);
+  float dark = max(seat * 0.55, rider * max(head, shoulders) * 0.7);
+  totalEmissiveRadiance *= lit * (1.0 - dark);
+}`,
+      );
+  };
+  m.customProgramCacheKey = () => 'palmera-busglass-v2';
+  return m;
+}
+
 export function setCarNight(night: number) {
   lampGlow.value = 0.35 + night * 2.6;
+  carMats.busGlass.emissiveIntensity = Math.max(0, night - 0.15) * 0.75;
 }
