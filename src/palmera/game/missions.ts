@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { Vehicle } from '../entities/vehicle';
 import { groundAt } from '../world/map';
 import type { Game } from './game';
-import { FleeAI } from './traffic';
+import { FleeAI, TrafficAI } from './traffic';
 
 export interface Blip {
   x: number;
@@ -65,6 +65,30 @@ export class Marker {
 }
 
 const near = (a: THREE.Vector3, x: number, z: number, r: number) => Math.hypot(a.x - x, a.z - z) < r;
+
+/** checkpoints: a walk along the roads from a junction, keeping fairly straight */
+function roadRoute(game: Game, start: number, n: number): THREE.Vector3[] {
+  const m = game.map;
+  const out: THREE.Vector3[] = [];
+  const seen = new Set<number>([start]);
+  let cur = m.nodes[start], pdx = 0, pdz = 0;
+  for (let k = 0; k < n; k++) {
+    const opts = cur.edges.map((e) => m.edges[e]).filter((e) => !e.swamp).map((e) => m.nodes[e.a === cur.id ? e.b : e.a]).filter((o) => !seen.has(o.id));
+    if (!opts.length) break;
+    opts.sort((a, b) => {
+      const s = (o: typeof a) => ((o.x - cur.x) * pdx + (o.z - cur.z) * pdz) / (Math.hypot(o.x - cur.x, o.z - cur.z) || 1) * 0.5 + Math.random();
+      return s(b) - s(a);
+    });
+    const nx = opts[0];
+    const l = Math.hypot(nx.x - cur.x, nx.z - cur.z) || 1;
+    pdx = (nx.x - cur.x) / l;
+    pdz = (nx.z - cur.z) / l;
+    seen.add(nx.id);
+    out.push(new THREE.Vector3(nx.x, groundAt(nx.x, nx.z), nx.z));
+    cur = nx;
+  }
+  return out;
+}
 
 export const MISSIONS: MissionDef[] = [
   {
@@ -295,6 +319,212 @@ export const MISSIONS: MissionDef[] = [
       return a;
     },
   },
+  {
+    id: 3,
+    title: 'Paper Route',
+    contact: 'Nina Calloway',
+    start: { x: -232, z: 68 },
+    reward: 2200,
+    color: '#ffb020',
+    intro: [
+      'NINA: Envelope for a lawyer across Sabal Heights. Signed by noon or the deal dies.',
+      'NINA: Take the bike. Hit every drop point, and don’t drop the bike — the envelope’s in the tail.',
+    ],
+    create(game) {
+      const bike = new Vehicle('bike', 0xf2b705);
+      bike.place(-237, 76, 0);
+      bike.persistent = true;
+      game.addVehicle(bike);
+      const map = game.map;
+      const cps = roadRoute(game, map.nodeIndex.get('-240,60') ?? map.nearestNode(-240, 60).id, 8);
+      const mk = new Marker(game.scene, 0xffb020, 4.5, 8);
+      let i = 0, time = 0, off = 0, started = false;
+      const a: ActiveMission = {
+        objective: 'Get on the courier bike',
+        timer: null,
+        blips: [],
+        update(dt) {
+          mk.spin(game.elapsed);
+          const p = game.player;
+          if (bike.wrecked || bike.sunk || bike.burnTimer > 0) {
+            a.failReason = 'The bike is wrecked';
+            return 'failed';
+          }
+          if (!started) {
+            a.blips = [{ x: bike.pos.x, z: bike.pos.z, color: '#ffb020', label: 'Bike', kind: 'car' }];
+            if (p.vehicle === bike) {
+              started = true;
+              time = 14 + cps.length * 11;
+            }
+            return 'running';
+          }
+          time -= dt;
+          a.timer = time;
+          const c = cps[i];
+          mk.at(c.x, c.z);
+          a.blips = [{ x: c.x, z: c.z, color: '#ffb020', label: '', kind: 'dest' }];
+          a.objective = p.vehicle === bike ? `Drop point ${i + 1} / ${cps.length}` : 'Get back on the bike';
+          off = p.vehicle === bike ? 0 : off + dt;
+          if (off > 12) {
+            a.failReason = 'You left the bike';
+            return 'failed';
+          }
+          if (p.vehicle === bike && near(bike.pos, c.x, c.z, 9)) {
+            i++;
+            game.audio.cue('cash');
+            if (i >= cps.length) return 'passed';
+          }
+          if (time <= 0) {
+            a.failReason = 'The deal died';
+            return 'failed';
+          }
+          return 'running';
+        },
+        cleanup() {
+          mk.dispose(game.scene);
+          bike.persistent = false;
+        },
+      };
+      return a;
+    },
+  },
+  {
+    id: 4,
+    title: 'Long Lens',
+    contact: 'Teo Brandt',
+    start: { x: 248, z: -412 },
+    reward: 3500,
+    color: '#c77dff',
+    intro: [
+      'TEO: My client thinks her business partner is cooking the books. He drives a silver sedan.',
+      'TEO: Follow him. Not close enough to be seen, not so far you lose him. I just need to know where he goes.',
+    ],
+    create(game) {
+      const car = new Vehicle('sedan', 0x2a2d31);
+      car.place(244, -400, 0);
+      car.persistent = true;
+      game.addVehicle(car);
+      const map = game.map;
+      const from = map.nearestNode(240, -360);
+      const to = map.nodes[map.otherEnd(map.edges[from.edges[0]], from.id)];
+      const mark = new Vehicle('sedan', 0xc0c4c8);
+      mark.place(from.x + 2, from.z + 2, Math.atan2(to.x - from.x, to.z - from.z));
+      mark.driver = 'npc';
+      mark.persistent = true;
+      mark.missionTag = 'target';
+      const ai = new TrafficAI(game, from.id, to.id);
+      ai.cruise = 9;
+      game.addVehicle(mark);
+      let started = false, tail = 70, close = 0, far = 0;
+      const a: ActiveMission = {
+        objective: 'Get in the car',
+        timer: null,
+        blips: [],
+        update(dt) {
+          const p = game.player;
+          if (!started) {
+            mark.input.thr = 0;
+            mark.input.hand = true;
+            a.blips = [{ x: car.pos.x, z: car.pos.z, color: '#4dd2ff', label: 'Car', kind: 'car' }, { x: mark.pos.x, z: mark.pos.z, color: '#c77dff', label: 'Mark', kind: 'target' }];
+            if (p.vehicle) {
+              started = true;
+              mark.ai = ai;
+              game.hud.subtitle('TEO: He’s moving. Keep him in sight.');
+            }
+            return 'running';
+          }
+          if (mark.driver !== 'npc' || mark.wrecked) {
+            a.failReason = 'You blew the tail';
+            return 'failed';
+          }
+          const ref = p.vehicle ? p.vehicle.pos : p.pos;
+          const d = Math.hypot(ref.x - mark.pos.x, ref.z - mark.pos.z);
+          close = d < 14 ? close + dt : Math.max(0, close - dt);
+          far = d > 110 ? far + dt : 0;
+          tail -= dt;
+          a.timer = tail;
+          a.blips = [{ x: mark.pos.x, z: mark.pos.z, color: '#c77dff', label: 'Mark', kind: 'target' }];
+          a.objective = d < 22 ? `Too close! Back off · ${Math.round(d)} m` : d > 85 ? `You’re losing him · ${Math.round(d)} m` : `Tail the silver sedan · ${Math.round(d)} m`;
+          if (close > 3) {
+            a.failReason = 'He spotted you';
+            return 'failed';
+          }
+          if (far > 6) {
+            a.failReason = 'You lost him';
+            return 'failed';
+          }
+          if (tail <= 0) {
+            game.hud.subtitle('TEO: That’s the place. Got it all on camera. Nice work.');
+            return 'passed';
+          }
+          return 'running';
+        },
+        cleanup() {
+          car.persistent = false;
+          mark.persistent = false;
+          mark.missionTag = '';
+        },
+      };
+      return a;
+    },
+  },
+  {
+    id: 5,
+    title: 'Gilded',
+    contact: 'Celeste Marchetti',
+    start: { x: 168, z: 148 },
+    reward: 5000,
+    color: '#ffd23f',
+    intro: [
+      'CELESTE: A collector in the south end keeps a gold coupe on his drive like a lawn ornament. My buyer wants it.',
+      'CELESTE: It has a tracker; the police will know the moment you sit in it. Lose them, then bring it to the marina crane lot. Not a scratch.',
+    ],
+    create(game) {
+      const prize = new Vehicle('sports', 0xd4af37);
+      prize.place(-152, -330, Math.PI / 2);
+      prize.persistent = true;
+      prize.missionTag = 'cargo';
+      game.addVehicle(prize);
+      const dest = { x: 396, z: 308 };
+      const mk = new Marker(game.scene, 0xffd23f, 4.5, 6).at(dest.x, dest.z);
+      let taken = false;
+      const a: ActiveMission = {
+        objective: 'Steal the gold coupe',
+        timer: null,
+        blips: [],
+        update() {
+          mk.spin(game.elapsed);
+          const p = game.player;
+          const cond = Math.round((prize.health / prize.spec.health) * 100);
+          if (prize.wrecked || prize.sunk || prize.burnTimer > 0 || cond < 50) {
+            a.failReason = 'The coupe is ruined';
+            return 'failed';
+          }
+          if (!taken) {
+            a.blips = [{ x: prize.pos.x, z: prize.pos.z, color: '#ffd23f', label: 'Coupe', kind: 'car' }];
+            if (p.vehicle === prize) {
+              taken = true;
+              game.wanted.setLevel(Math.max(2, game.wanted.level));
+              game.hud.subtitle('CELESTE: There goes the tracker. Lose the heat first.');
+            }
+            return 'running';
+          }
+          const hot = game.wanted.level > 0;
+          a.objective = p.vehicle !== prize ? 'Get back in the coupe' : hot ? `Lose the police · condition ${cond}%` : `Deliver to the marina crane lot · condition ${cond}%`;
+          a.blips = hot ? [] : [{ x: dest.x, z: dest.z, color: '#ffd23f', label: 'Lot', kind: 'dest' }];
+          if (p.vehicle !== prize) a.blips.push({ x: prize.pos.x, z: prize.pos.z, color: '#ffd23f', label: 'Coupe', kind: 'car' });
+          if (!hot && p.vehicle === prize && near(prize.pos, dest.x, dest.z, 7) && prize.speed < 4) return 'passed';
+          return 'running';
+        },
+        cleanup() {
+          mk.dispose(game.scene);
+          prize.persistent = false;
+          prize.missionTag = '';
+        },
+      };
+      return a;
+    },
+  },
 ];
 
 export class Missions {
@@ -355,7 +585,7 @@ export class Missions {
       g.addCash(d.reward);
       g.hud.bigMessage('JOB DONE', `+$${d.reward.toLocaleString()}`, '#7dff9a');
       g.audio.cue('pass');
-      if (this.done.size === MISSIONS.length) setTimeout(() => g.hud.subtitle('All three jobs done. Port Palmera is yours to roam.'), 4000);
+      if (this.done.size === MISSIONS.length) setTimeout(() => g.hud.subtitle('Every job done. Port Palmera is yours to roam.'), 4000);
     } else {
       g.hud.bigMessage('JOB FAILED', reason, '#ff5a5a');
       g.audio.cue('fail');
