@@ -138,6 +138,9 @@ export const cityUniforms = {
   /** the shop interiors rendered in Blender (tools/palmera/shops.py): an atlas, and whether it's loaded */
   uShops: { value: new THREE.Texture() as THREE.Texture },
   uShopsOn: { value: 0 },
+  /** the offices and flats rendered in Blender (tools/palmera/rooms.py) */
+  uRooms: { value: new THREE.Texture() as THREE.Texture },
+  uRoomsOn: { value: 0 },
 };
 
 // the shop atlas: 4 shops x (back wall, wall at x = 0, wall at x = W, floor); until it arrives the
@@ -150,6 +153,13 @@ export const cityUniforms = {
     cityUniforms.uShops.value = t;
     cityUniforms.uShopsOn.value = 1;
   });
+  // the upper floors: 2 offices (glass towers) and 2 flats (everything else), same layout
+  new THREE.TextureLoader().load(base + 'rooms.webp', (t) => {
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    cityUniforms.uRooms.value = t;
+    cityUniforms.uRoomsOn.value = 1;
+  });
 }
 
 function buildingMaterial(): THREE.MeshStandardMaterial {
@@ -159,6 +169,8 @@ function buildingMaterial(): THREE.MeshStandardMaterial {
     sh.uniforms.uTime = cityUniforms.uTime;
     sh.uniforms.uShops = cityUniforms.uShops;
     sh.uniforms.uShopsOn = cityUniforms.uShopsOn;
+    sh.uniforms.uRooms = cityUniforms.uRooms;
+    sh.uniforms.uRoomsOn = cityUniforms.uRoomsOn;
     sh.vertexShader = sh.vertexShader
       .replace(
         '#include <common>',
@@ -187,7 +199,7 @@ vStyle = aStyle;`,
       .replace(
         '#include <common>',
         `#include <common>
-uniform float uNight; uniform float uTime; uniform sampler2D uShops; uniform float uShopsOn;
+uniform float uNight; uniform float uTime; uniform sampler2D uShops; uniform float uShopsOn; uniform sampler2D uRooms; uniform float uRoomsOn;
 varying vec3 vBN; varying vec3 vLP; varying vec3 vBS; varying vec2 vStyle; varying vec3 vBW;
 float bhash(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719)))*43758.5453); }
 // a person in a room: a cut-out figure standing at depth zp, centred on x = px, scale sc, legs
@@ -236,8 +248,21 @@ vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office
   } else {
     col = wall * 0.7;
   }
-  // furniture silhouettes low in the room
-  if (office < 1.5 && h.y < cellSz.y * 0.32 && t != tf.y && h.z > depth * 0.35) col *= 0.45;
+  // offices and flats modelled and lit in Blender: walls and floor from the rooms atlas (the
+  // ceiling stays painted); which of the two kinds by the window's seed
+  bool roomAtlas = false;
+  if (uRoomsOn > 0.5 && office < 1.5 && !(t == tf.y && rd.y > 0.0)) {
+    vec2 uv; float ci;
+    if (t == tf.z) { uv = h.xy / cellSz; ci = 0.0; }
+    else if (t == tf.x) { uv = vec2(h.z / depth, h.y / cellSz.y); ci = rd.x < 0.0 ? 1.0 : 2.0; }
+    else { uv = vec2(h.x / cellSz.x, h.z / depth); ci = 3.0; }
+    float row = office > 0.5 ? step(0.5, fract(seed * 4.7)) : 2.0 + step(0.5, fract(seed * 6.1));
+    vec2 a = (vec2(ci, 3.0 - row) + clamp(uv, 0.006, 0.994)) / 4.0;
+    col = texture2D(uRooms, a).rgb * 1.6;
+    roomAtlas = true;
+  }
+  // furniture silhouettes low in the room (the painted rooms only)
+  if (!roomAtlas && office < 1.5 && h.y < cellSz.y * 0.32 && t != tf.y && h.z > depth * 0.35) col *= 0.45;
   // somebody home: about a third of offices and flats have a person in them, a worker standing at a
   // desk or a resident pacing slowly about the room (a silhouette against the lamp at night)
   if (office < 1.5) {
@@ -511,7 +536,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v9';
+  mat.customProgramCacheKey = () => 'palmera-building-v10';
   return mat;
 }
 

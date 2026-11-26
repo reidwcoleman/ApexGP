@@ -14,7 +14,7 @@ import sys, math, random
 import bpy, bmesh
 from mathutils import Vector, Euler
 
-OUT = sys.argv[sys.argv.index('--') + 1]
+OUT = sys.argv[sys.argv.index('--') + 1] if '--' in sys.argv else ''
 W, H, D = 6.035, 4.646, 8.0
 random.seed(7)
 
@@ -389,28 +389,35 @@ def cam(name, loc, rot, ortho, clip, res):
 
 
 R = math.radians
-for ki, (name, fn) in enumerate((('grocery', grocery), ('boutique', boutique), ('cafe', cafe), ('electronics', electronics))):
-    sc = reset()
-    m = mats()
-    k = Kit()
-    fn(k)
-    k.build(m)
-    sc.view_settings.exposure = {'grocery': -0.6, 'boutique': 1.1, 'cafe': 0.4, 'electronics': 0.0}[name]
-    # Blender: X = room x, Y = room depth z, Z = room height y
-    shots = {
-        'back': ((W / 2, D - 2.6, H / 2), (R(90), 0, 0), W, 2.65, (640, round(640 * H / W))),
-        'xlo': ((1.7, D / 2, H / 2), (R(90), 0, R(90)), D, 1.75, (640, round(640 * H / D))),
-        'xhi': ((W - 1.7, D / 2, H / 2), (R(90), 0, R(-90)), D, 1.75, (640, round(640 * H / D))),
-        'floor': ((W / 2, D / 2, 0.3), (0, 0, 0), D, 0.33, (round(640 * W / D), 640)),
-    }
-    for face, (loc, rot, ortho, clip, res) in shots.items():
-        c = cam(face, loc, rot, ortho, clip, res)
-        bpy.context.view_layer.update()
-        mw = c.matrix_world.to_3x3()
-        right, up = mw @ Vector((1, 0, 0)), mw @ Vector((0, 1, 0))
-        sc.render.filepath = f'{OUT}/{name}_{face}.png'
-        bpy.ops.render.render(write_still=True)
-        # how the image's axes map to room axes (for the atlas step): right/up as world vectors
-        with open(f'{OUT}/{name}_{face}.axes', 'w') as fh:
-            fh.write(f'{right.x:.0f} {right.y:.0f} {right.z:.0f} {up.x:.0f} {up.y:.0f} {up.z:.0f}\n')
-        print('rendered', name, face, 'right', tuple(round(v) for v in right), 'up', tuple(round(v) for v in up))
+
+
+def main():
+    for ki, (name, fn) in enumerate((('grocery', grocery), ('boutique', boutique), ('cafe', cafe), ('electronics', electronics))):
+        sc = reset()
+        m = mats()
+        k = Kit()
+        fn(k)
+        k.build(m)
+        sc.view_settings.exposure = {'grocery': -0.6, 'boutique': 1.1, 'cafe': 0.4, 'electronics': 0.0}[name]
+        # Blender: X = room x, Y = room depth z, Z = room height y
+        shots = {
+            'back': ((W / 2, D - 2.6, H / 2), (R(90), 0, 0), W, 2.65, (640, round(640 * H / W))),
+            'xlo': ((1.7, D / 2, H / 2), (R(90), 0, R(90)), D, 1.75, (640, round(640 * H / D))),
+            'xhi': ((W - 1.7, D / 2, H / 2), (R(90), 0, R(-90)), D, 1.75, (640, round(640 * H / D))),
+            'floor': ((W / 2, D / 2, 0.3), (0, 0, 0), D, 0.33, (round(640 * W / D), 640)),
+        }
+        for face, (loc, rot, ortho, clip, res) in shots.items():
+            c = cam(face, loc, rot, ortho, clip, res)
+            bpy.context.view_layer.update()
+            mw = c.matrix_world.to_3x3()
+            right, up = mw @ Vector((1, 0, 0)), mw @ Vector((0, 1, 0))
+            sc.render.filepath = f'{OUT}/{name}_{face}.png'
+            bpy.ops.render.render(write_still=True)
+            # how the image's axes map to room axes (for the atlas step): right/up as world vectors
+            with open(f'{OUT}/{name}_{face}.axes', 'w') as fh:
+                fh.write(f'{right.x:.0f} {right.y:.0f} {right.z:.0f} {up.x:.0f} {up.y:.0f} {up.z:.0f}\n')
+            print('rendered', name, face, 'right', tuple(round(v) for v in right), 'up', tuple(round(v) for v in up))
+
+
+if __name__ == '__main__':
+    main()
