@@ -49,7 +49,8 @@ export async function loadCarKit(): Promise<void> {
     gl.scene.updateMatrixWorld(true);
     gl.scene.traverse((o) => {
       const m = o as THREE.Mesh;
-      const r = /^car_(\w+?)_(body|glass|heads|tails)$/.exec(o.name);
+      // _trim: parts modelled separately in Blender (tools/palmera/cars_exhausts.py: the exhaust tips)
+      const r = /^car_(\w+?)_(body|glass|heads|tails|trim)$/.exec(o.name);
       if (!m.isMesh || !r) return;
       const g = m.geometry.clone();
       g.applyMatrix4(m.matrixWorld);
