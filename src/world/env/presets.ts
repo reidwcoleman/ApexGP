@@ -277,6 +277,9 @@ const TONE_CONTRAST = 1.0;
  * touch cool: footage's low-sun shade is a warm near-black, not the navy of a game's skylight.)
  */
 const LOOK_EXPOSURE = 0.84;
+/** overcast (AC reference): exposure down, contrast and saturation up, a touch warm (see dExposure) */
+export const OVER = { dim: 0.24, contrast: 0.1, sat: 0.12, warm: 0.025 };
+const OVER_DIM = OVER.dim, OVER_CONTRAST = OVER.contrast, OVER_SAT = OVER.sat, OVER_WARM = OVER.warm;
 const LOOK_FILL = 0.9;
 const LOOK_SHADOW: [number, number, number] = [1.0, 1.0, 0.95];
 const LOOK_HIGH: [number, number, number] = [1.04, 1.0, 0.95];
@@ -462,11 +465,12 @@ export function weatherLook(w: WeatherState): WeatherLook {
   const saturation = mix(P.saturation, mix(0.93, 0.78, wetDark), dim) * (1 - 0.12 * fog * (1 - 0.5 * mistKind) - 0.14 * greyK) * TONE_SAT;
   const contrast = mix(P.contrast, mix(1.02, 1.08, wetK), dim) * (1 - 0.08 * greyK) * TONE_CONTRAST;
   const tintK = dim;
-  const tint: [number, number, number] = [mix(P.tint[0], 0.975, tintK) * LOOK_HIGH[0], mix(P.tint[1], 0.99, tintK) * LOOK_HIGH[1], mix(P.tint[2], 1.02, tintK) * LOOK_HIGH[2]];
+  // (a dry grey day is neutral in AC's footage, not blue: the cool cast is the rain's)
+  const tint: [number, number, number] = [mix(P.tint[0], mix(0.995, 0.975, wetK), tintK) * LOOK_HIGH[0], mix(P.tint[1], 0.995, tintK) * LOOK_HIGH[1], mix(P.tint[2], mix(0.99, 1.02, wetK), tintK) * LOOK_HIGH[2]];
   const shadowTint: [number, number, number] = [
-    mix(P.shadowTint[0], 0.93, tintK) * LOOK_SHADOW[0],
-    mix(P.shadowTint[1], 0.975, tintK) * LOOK_SHADOW[1],
-    mix(P.shadowTint[2], 1.06, tintK) * LOOK_SHADOW[2],
+    mix(P.shadowTint[0], mix(0.97, 0.93, wetK), tintK) * LOOK_SHADOW[0],
+    mix(P.shadowTint[1], mix(0.99, 0.975, wetK), tintK) * LOOK_SHADOW[1],
+    mix(P.shadowTint[2], mix(0.98, 1.06, wetK), tintK) * LOOK_SHADOW[2],
   ];
 
   // ---- each condition its own character (the wet looks had it; the dry ones were one flat grey):
@@ -482,13 +486,17 @@ export function weatherLook(w: WeatherState): WeatherLook {
   const brokenK = sunVis * smooth(0.3, 0.55, cloud) * (1 - smooth(0.7, 0.9, cloud)) * dryK;
   const overK = overcast * dryK * (1 - thick);
   const mistK = smooth(0.4, 0.95, fog) * dryK;
-  const dExposure = (1 + 0.08 * overK) * (1 + 0.04 * hazeK);
-  const dContrast = (1 + 0.06 * clearK + 0.08 * brokenK + 0.06 * windK) * (1 - 0.06 * overK) * (1 - 0.08 * hazeK) * (1 + 0.07 * snowFall) * (1 - 0.08 * dust);
-  const dSat = (1 + 0.1 * clearK + 0.07 * brokenK + 0.06 * windK) * (1 - 0.13 * overK) * (1 - 0.08 * hazeK) * (1 - 0.12 * snowK) * (1 - 0.12 * dust);
+  // (2026-11-26, Reid: "realism on the level of Assetto Corsa" — AC's overcast Monza (yt WrepkeRJpHw)
+  // is not a bright metered-up grey: mean L 0.26 against our 0.37, blacks at 0.04 not 0.09, a quarter of
+  // the frame in real shade, warm-neutral mids and deep olive foliage. So overcast exposes down, holds
+  // its contrast and colour, and loses the blue cast)
+  const dExposure = (1 - OVER_DIM * overK) * (1 + 0.04 * hazeK);
+  const dContrast = (1 + 0.06 * clearK + 0.08 * brokenK + 0.06 * windK) * (1 + OVER_CONTRAST * overK) * (1 - 0.08 * hazeK) * (1 + 0.07 * snowFall) * (1 - 0.08 * dust);
+  const dSat = (1 + 0.1 * clearK + 0.07 * brokenK + 0.06 * windK) * (1 + OVER_SAT * overK) * (1 - 0.08 * hazeK) * (1 - 0.12 * snowK) * (1 - 0.12 * dust);
   // (a low sun is orange enough on its own: haze on top of it turned every grey olive)
   const warm = hazeK * 0.06 * smooth(8, 25, P.elevation) + dust * 0.15;
   // (snow light is blue: the shade on white lit by the sky alone)
-  const cool = overK * 0.03 + snowK * 0.05;
+  const cool = -OVER_WARM * overK + snowK * 0.05;
   const dTint: [number, number, number] = [1 + warm - cool, 1 + warm * 0.25 - cool * 0.3, 1 - warm * 1.4 + cool];
   const dShafts = 1 + 0.6 * clearK + 1.2 * brokenK + 2.2 * mistK * sunVis + 0.8 * hazeK;
   const dLobe = 1 + 1.6 * hazeK + 1.0 * mistK;
