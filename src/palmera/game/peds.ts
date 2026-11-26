@@ -116,6 +116,8 @@ export class Peds {
       if (h.down <= 0 && h.state !== 'flee') this.scare(h, h.pos.x - Math.sin(h.yaw), h.pos.z - Math.cos(h.yaw));
       return;
     }
+    // someone a street event is steering (game/events.ts): leave their heading alone
+    if (h.state === 'event') return;
     if (g.reactions.think(h, dt)) return;
     if (g.life.think(h, dt)) return;
     if (h.clip && h.state !== 'flee') h.clip = '';

@@ -40,6 +40,7 @@ import { Dogs } from './dogs';
 import { SkyTours } from './skytours';
 import { Parts } from './parts';
 import { Garages } from './garage';
+import { StreetEvents } from './events';
 import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
@@ -114,6 +115,7 @@ export class Game {
   skyTours!: SkyTours;
   parts!: Parts;
   garages!: Garages;
+  street!: StreetEvents;
   interiors!: Interiors;
   saveGame!: SaveGame;
   phone!: Phone;
@@ -171,6 +173,7 @@ export class Game {
     this.skyTours = new SkyTours(this);
     this.parts = new Parts(this);
     this.garages = new Garages(this);
+    this.street = new StreetEvents(this);
     this.interiors = new Interiors(this);
     this.saveGame = new SaveGame(this);
     this.phone = new Phone(this);
@@ -937,6 +940,7 @@ export class Game {
       this.skyTours.update(sdt);
       this.parts.update(sdt);
       this.garages.update(sdt);
+      this.street.update(sdt);
       this.reactions.update(sdt);
       this.activities.update(sdt);
       this.robbery.update(sdt);
