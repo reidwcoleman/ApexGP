@@ -70,7 +70,7 @@ export class SkinnedCrowd {
   private slots = new Map<number, Slot>();
   private t = 0;
   private reassignT = 0;
-  private readonly max = 54;
+  private readonly max = 72;
   private frame = 0;
   private readonly lastCam = new THREE.Vector3();
   private readonly camFwd = new THREE.Vector3();
@@ -261,13 +261,19 @@ export class SkinnedCrowd {
       const act = (p as unknown as { current: THREE.AnimationAction | null }).current;
       if (act) act.timeScale = THREE.MathUtils.clamp(sp / clipSpeed, 0.5, 1.6);
     }
-    const lie = h.fall;
+    // sunbathers lie fully flat on their towels (fall settles a little short of 1 elsewhere)
+    const towel = h.state === 'towel' && !h.dead;
+    const lie = towel ? 1 : h.fall;
     const lounge = h.state === 'lounge' ? 1 : 0;
     p.root.position.set(h.pos.x - Math.sin(h.yaw) * lounge * 0.25, h.pos.y + lie * 0.12 + (h.swimming ? -1.15 : 0) + lounge * 0.38, h.pos.z - Math.cos(h.yaw) * lounge * 0.25);
-    p.root.rotation.set(-lie * 1.5 - lounge * 0.75, h.yaw, 0, 'YXZ');
+    p.root.rotation.set(towel ? -Math.PI / 2 : -lie * 1.5 - lounge * 0.75, h.yaw, 0, 'YXZ');
     // past 45 m the skeleton is updated every other frame (twice the step), which nobody can see
     const far = h.kind !== 'player' && s.p.root.position.distanceToSquared(this.lastCam) > 45 * 45;
-    if (!far) p.update(dt);
+    // people lying or sitting still (towels, loungers, benches) barely move: a quarter of the frames
+    const still = h.state === 'towel' || h.state === 'lounge' || h.state === 'bench';
+    if (still) {
+      if ((this.frame + h.id) % 4 === 0) p.update(dt * 4);
+    } else if (!far) p.update(dt);
     else if ((this.frame + h.id) % 2 === 0) p.update(dt * 2);
     // the arm on the aim, or thrown in a punch (or a swing of the bat)
     const gunHeld = h.weapon !== 'fist' && h.weapon !== 'bat' && h.weapon !== 'grenade';

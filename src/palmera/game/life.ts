@@ -77,8 +77,9 @@ export class Life {
       if (day && nearBeach) {
         for (let i = 0; i < 3; i++) {
           if (this.count('lounge') < 18) this.spawnLounger(f);
-          if (this.count('towel') < 26) this.spawnTowel(f);
-          if (this.count('swim') < 14) this.spawnSwimmer(f);
+          if (this.count('towel') < 40) this.spawnTowel(f);
+          if (this.count('swim') < 20) this.spawnSwimmer(f);
+          if (this.count('beachchat') < 12) this.spawnBeachGroup(f);
         }
         if (this.count('jog') < 6) this.spawnJogger(f);
         if (this.count('dance') < 5 && Math.random() < 0.4) this.spawnDancers(f);
@@ -104,6 +105,23 @@ export class Life {
   private ok(x: number, z: number, f: THREE.Vector3, min = 25, max = 110) {
     const d = Math.hypot(x - f.x, z - f.z);
     return d > min && d < max && !(d < 70 && this.game.inView(x, 1, z));
+  }
+
+  /** two or three people standing on the sand talking, toward the water's edge */
+  private spawnBeachGroup(f: THREE.Vector3) {
+    for (let a = 0; a < 8; a++) {
+      const x = BEACH.x0 + 28 + Math.random() * 17, z = f.z + (Math.random() - 0.5) * 160;
+      if (z < ISLAND.z0 + 20 || z > ISLAND.z1 - 20 || isWater(x, z) || !this.ok(x, z, f, 10, 120)) continue;
+      const n = 2 + Math.floor(Math.random() * 2);
+      const life = 40 + Math.random() * 60;
+      for (let i = 0; i < n; i++) {
+        const a2 = (i / n) * Math.PI * 2 + Math.random() * 0.3;
+        const h = this.newPed(x + Math.cos(a2) * 0.7, z + Math.sin(a2) * 0.7, 'beachchat', i === 0 ? 'talk' : Math.random() < 0.5 ? 'listen' : 'talk', life);
+        h.yaw = Math.atan2(x - h.pos.x, z - h.pos.z);
+        h.target.set(x, 0, z);
+      }
+      return;
+    }
   }
 
   private spawnGroup(f: THREE.Vector3) {
@@ -161,7 +179,8 @@ export class Life {
 
   private spawnTowel(f: THREE.Vector3) {
     for (let a = 0; a < 8; a++) {
-      const x = BEACH.x0 + 40 + Math.random() * 50, z = f.z + (Math.random() - 0.5) * 150;
+      // dry sand only: the surf runs up from x 724
+      const x = BEACH.x0 + 22 + Math.random() * 23, z = f.z + (Math.random() - 0.5) * 150;
       if (z < ISLAND.z0 + 20 || z > ISLAND.z1 - 20 || isWater(x, z) || !this.ok(x, z, f, 8, 120)) continue;
       const h = this.newPed(x, z, 'towel', 'idle', 60 + Math.random() * 120);
       h.yaw = Math.random() * Math.PI * 2;
@@ -242,12 +261,13 @@ export class Life {
         return true;
       }
       case 'chat':
+      case 'beachchat':
       case 'lounge':
       case 'towel':
       case 'dance': {
         h.stateT -= dt;
         g.setDesired(h, 0, 0);
-        if (h.state === 'chat') {
+        if (h.state === 'chat' || h.state === 'beachchat') {
           const ty = Math.atan2(h.target.x - h.pos.x, h.target.z - h.pos.z);
           h.yaw += Math.atan2(Math.sin(ty - h.yaw), Math.cos(ty - h.yaw)) * Math.min(1, dt * 4);
           // the talker changes now and then
