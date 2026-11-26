@@ -787,6 +787,9 @@ export class City {
 
   private buildBuildingDetail() {
     const trim: Inst[] = [], balc: Inst[] = [], rail: Inst[] = [], plant: Inst[] = [], awn: Inst[] = [], signs: Inst[] = [];
+    const tanks: Inst[] = [], acs: Inst[] = [], vents: Inst[] = [], masts: Inst[] = [];
+    const roofThing = (list: Inst[], x: number, y: number, z: number, yaw: number, s = 1) =>
+      list.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(s, s, s)) });
     const rng = new Rng(4242);
     const q0 = new THREE.Quaternion();
     const put = (list: Inst[], x: number, y: number, z: number, sx: number, sy: number, sz: number, c: THREE.Color, q = q0) =>
@@ -813,10 +816,24 @@ export class City {
         } else if (b.style === 0 && b.h > 25) {
           put(plant, b.x + (rng.next() - 0.5) * b.w * 0.2, top + 1.8, b.z + (rng.next() - 0.5) * b.d * 0.2, b.w * 0.42, 3.6, b.d * 0.42, grey);
           if (rng.chance(0.5)) put(plant, b.x, top + 3.6 + 3, b.z, 0.25, 6, 0.25, dark);
+          // a bank of condensers round the plant room, and often a mast
+          const rx = b.w / 2 - 2.2, rz = b.d / 2 - 2.2;
+          for (let i = 0; i < 4; i++) {
+            const side = i % 2 ? 1 : -1;
+            if (rng.chance(0.5)) roofThing(acs, b.x + side * rx * 0.8, top, b.z + (rng.next() - 0.5) * rz, rng.int(0, 3) * Math.PI / 2);
+            else roofThing(acs, b.x + (rng.next() - 0.5) * rx, top, b.z + side * rz * 0.8, rng.int(0, 3) * Math.PI / 2);
+          }
+          if (rng.chance(0.65)) roofThing(masts, b.x + rx * 0.7 * (rng.chance(0.5) ? 1 : -1), top, b.z + rz * 0.7 * (rng.chance(0.5) ? 1 : -1), 0, 0.8 + rng.next() * 0.7);
         } else if (b.w > 6 && b.d > 6) {
           const n = 1 + Math.floor(rng.next() * 3);
           for (let i = 0; i < n; i++)
             put(plant, b.x + (rng.next() - 0.5) * (b.w - 4), top + 0.55, b.z + (rng.next() - 0.5) * (b.d - 4), 1.4 + rng.next(), 1.1, 1.2 + rng.next(), rng.chance(0.5) ? grey : white);
+          // condensers, vent stacks and, on the taller ones, a water tank on legs
+          const nAc = Math.min(6, 1 + Math.floor((b.w * b.d) / 90));
+          for (let i = 0; i < nAc; i++) roofThing(acs, b.x + (rng.next() - 0.5) * (b.w - 3), top, b.z + (rng.next() - 0.5) * (b.d - 3), rng.int(0, 3) * Math.PI / 2);
+          const nV = rng.int(1, 3);
+          for (let i = 0; i < nV; i++) roofThing(vents, b.x + (rng.next() - 0.5) * (b.w - 2), top, b.z + (rng.next() - 0.5) * (b.d - 2), 0);
+          if (b.h > 12 && rng.chance(0.4)) roofThing(tanks, b.x + (rng.next() - 0.5) * (b.w - 5), top, b.z + (rng.next() - 0.5) * (b.d - 5), rng.next() * 6.28, 0.85 + rng.next() * 0.35);
         }
       }
       // the long faces get the balconies and awnings
@@ -900,6 +917,11 @@ export class City {
     chunked(this.scene, this.chunks, rail, box1, stucco, { far: 450, shadow: true });
     const metal = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.5 });
     chunked(this.scene, this.chunks, plant, box1, metal, { far: 900, shadow: true });
+    const kit = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.35 });
+    chunked(this.scene, this.chunks, acs, roofKitGeometry('ac'), kit, { far: 700, shadow: true });
+    chunked(this.scene, this.chunks, vents, roofKitGeometry('vent'), kit, { far: 500, shadow: false });
+    chunked(this.scene, this.chunks, tanks, roofKitGeometry('tank'), kit, { far: 1100, shadow: true });
+    chunked(this.scene, this.chunks, masts, roofKitGeometry('mast'), kit, { far: 1400, shadow: false });
     chunked(this.scene, this.chunks, awn, awningGeometry(), awningMaterial(), { far: 420, shadow: true });
     chunked(this.scene, this.chunks, signs, new THREE.PlaneGeometry(1, 1), this.signMat, { far: 1500, shadow: false, receive: false, attr: { name: 'aCell', size: 1 } });
   }
@@ -1261,4 +1283,35 @@ if (!gl_FrontFacing) diffuseColor.rgb *= 0.82;`,
   };
   m.customProgramCacheKey = () => 'palmera-awning-v1';
   return m;
+}
+
+/** rooftop clutter, built standing on y = 0 */
+function roofKitGeometry(kind: 'ac' | 'vent' | 'tank' | 'mast'): THREE.BufferGeometry {
+  const P: THREE.BufferGeometry[] = [];
+  if (kind === 'ac') {
+    // a condenser: a box on a low frame, a fan in a dark ring on top, grille slats on the face
+    P.push(box(1.5, 0.08, 1.1, 0, 0.04, 0, 0x55585c));
+    P.push(box(1.4, 0.85, 1.0, 0, 0.5, 0, 0xc9cbcd));
+    P.push(cyl(0.4, 0.4, 0.05, 14, 0.25, 0.95, 0, 0x202224));
+    P.push(cyl(0.08, 0.08, 0.07, 8, 0.25, 0.97, 0, 0x7a7d80));
+    for (let i = 0; i < 5; i++) P.push(box(0.02, 0.6, 0.9, -0.71, 0.5, -0.36 + i * 0.18, 0x8d9094));
+  } else if (kind === 'vent') {
+    P.push(cyl(0.13, 0.13, 1.1, 10, 0, 0.55, 0, 0x8f9397));
+    P.push(cyl(0.02, 0.3, 0.18, 10, 0, 1.2, 0, 0x6c7074));
+  } else if (kind === 'tank') {
+    // a timber water tank on a steel stand, banded, with a conical lid
+    for (const [x, z] of [[-0.85, -0.85], [0.85, -0.85], [-0.85, 0.85], [0.85, 0.85]]) P.push(box(0.14, 2.4, 0.14, x, 1.2, z, 0x3a3d40));
+    P.push(box(2.3, 0.12, 2.3, 0, 2.42, 0, 0x3a3d40));
+    P.push(cyl(1.15, 1.15, 2.4, 18, 0, 3.68, 0, 0x7d5c3e));
+    for (const y of [2.9, 3.6, 4.3]) P.push(cyl(1.17, 1.17, 0.07, 18, 0, y, 0, 0x2a2b2d));
+    P.push(cyl(0.05, 1.25, 0.8, 18, 0, 5.28, 0, 0x5b4330));
+  } else {
+    // a lattice antenna mast with a couple of dishes
+    P.push(cyl(0.07, 0.09, 9, 6, 0, 4.5, 0, 0x2c2f33));
+    for (let i = 1; i < 6; i++) P.push(box(0.9 - i * 0.1, 0.05, 0.05, 0, i * 1.5, 0, 0x2c2f33));
+    P.push(cyl(0.32, 0.05, 0.12, 12, 0.3, 5.5, 0, 0xd8d9da, 'x'));
+    P.push(cyl(0.25, 0.05, 0.1, 12, -0.26, 7, 0, 0xd8d9da, 'x'));
+    P.push(box(0.12, 0.12, 0.12, 0, 9.05, 0, 0xc81e1e));
+  }
+  return merge(P);
 }
