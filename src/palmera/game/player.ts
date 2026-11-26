@@ -510,9 +510,9 @@ export class PlayerController {
     if (fpOn) {
       const e = this.headV;
       if (v && v.seat) {
-        const host = v.type === 'bike' || v.type === 'jetski' || v.type === 'airboat' ? v.body : v.root;
+        const host = v.twoWheel || v.type === 'jetski' || v.type === 'airboat' ? v.body : v.root;
         host.updateWorldMatrix(true, false);
-        const cabin = v.type !== 'bike' && v.type !== 'jetski' && v.type !== 'airboat' && v.type !== 'bus';
+        const cabin = !v.twoWheel && v.type !== 'jetski' && v.type !== 'airboat' && v.type !== 'bus';
         // a car: a 'bonnet' view from the top of the windscreen, ahead of the (blocky) cabin, out over the bonnet;
         // on a bike or skiff: the rider's eyes over the seat
         if (cabin && v.roofY > 0) e.set(0, v.roofY - 0.08, v.spec.len * 0.2);

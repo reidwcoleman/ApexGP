@@ -66,9 +66,14 @@ const GUNS: Partial<Record<WeaponId, { geo: THREE.BufferGeometry; mat: THREE.Mat
   grenade: { geo: new THREE.SphereGeometry(0.06, 10, 8), mat: new THREE.MeshStandardMaterial({ color: 0x3d4a2a, roughness: 0.6 }) },
 };
 
+/** cyclist leg and arm offsets (radians, about each bone's local z) */
+export const PEDAL = { thigh: 0.35, calf: -0.75, arm: -0.3, fore: 0, lean: 0.35, armY: 0, tb: 0.05, cb: 0 };
+
 export class SkinnedCrowd {
   /** humans drawn here this frame (the instanced renderer skips them) */
   readonly taken = new Set<number>();
+  /** cyclist pose offsets (exposed for tuning) */
+  readonly pedalCfg = PEDAL;
   /** a human not to draw (you, in first person) */
   hideId = -1;
   private slots = new Map<number, Slot>();
@@ -129,22 +134,46 @@ export class SkinnedCrowd {
           p.root.position.copy(v.seat!);
           if (i === 1) p.root.position.x *= -1;
           // inside a cabin: a touch lower and smaller, or the head pokes up through the roof (it cleared it by 0.1 m too little in every type)
-          if (v.type !== 'bike' && v.type !== 'jetski' && v.type !== 'bus' && v.type !== 'airboat') {
+          if (!v.twoWheel && v.type !== 'jetski' && v.type !== 'bus' && v.type !== 'airboat') {
             p.root.position.y -= 0.1;
             p.root.scale.multiplyScalar(0.92);
           }
           p.play('sit', { offset: (v.vid % 100) / 100 });
-          (v.type === 'bike' || v.type === 'jetski' || v.type === 'airboat' ? v.body : v.root).add(p.root);
+          (v.twoWheel || v.type === 'jetski' || v.type === 'airboat' ? v.body : v.root).add(p.root);
+          // a cyclist leans forward to the bars
           ps.push(p);
         }
         this.seated.set(v, { p: ps, key });
       }
     }
-    for (const s of this.seated.values())
+    for (const [v, s] of this.seated)
       for (const p of s.p) {
         p.root.visible = !(this.hideId >= 0 && s.key[0] === 'P');
         p.update(dt);
+        if (v.type === 'bicycle') this.pedal(p, v);
       }
+  }
+
+  /** a cyclist: legs turning the cranks with the wheels, hands forward on the bars (over the sitting clip) */
+  private pedal(p: Person, v: Vehicle) {
+    const c = v.wheelSpin * 0.55;
+    const b = p.bones;
+    // lean forward about the hips (not the feet), so the seat stays under them
+    const l = PEDAL.lean, hip = 0.48;
+    p.root.rotation.x = l;
+    if (v.seat) p.root.position.set(v.seat.x, v.seat.y + hip * (1 - Math.cos(l)), v.seat.z - hip * Math.sin(l));
+    for (const [side, ph] of [['L', 0], ['R', Math.PI]] as [string, number][]) {
+      const th = b[`Bip01_${side}_Thigh`], ca = b[`Bip01_${side}_Calf`];
+      const s = Math.sin(c + ph), k = Math.cos(c + ph);
+      if (th) th.rotateZ(PEDAL.thigh * s + PEDAL.tb);
+      // the knee folds most as that thigh comes up
+      if (ca) ca.rotateZ(PEDAL.calf * (0.5 + 0.5 * s) + PEDAL.cb);
+      void k;
+      const ua = b[`Bip01_${side}_UpperArm`], fa = b[`Bip01_${side}_Forearm`];
+      if (ua) ua.rotateZ(PEDAL.arm), ua.rotateY(PEDAL.armY * (side === 'L' ? 1 : -1));
+      if (fa) fa.rotateZ(PEDAL.fore);
+    }
+    p.root.updateMatrixWorld(true);
   }
 
   private lookFor(h: Human): Look {

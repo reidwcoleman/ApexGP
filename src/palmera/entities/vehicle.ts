@@ -129,6 +129,7 @@ export class Vehicle {
     if (kitM) this.tail = kitM.tail;
     // a jet ski's rider sits astride, out in the open
     if (type === 'jetski') this.seat = new THREE.Vector3(0, 0.62, -0.3);
+    if (type === 'bicycle') this.seat = new THREE.Vector3(0, 0.18, -0.3);
     if (type === 'airboat') {
       this.seat = new THREE.Vector3(0, 1.51, -0.72);
       // the fan: two long blades turning in the cage
@@ -260,7 +261,7 @@ export class Vehicle {
 
   /** a hard knock on an end: the bumper drops at one corner and hangs */
   sagBumper(end: number, side: number) {
-    if (this.isBoat || this.type === 'bike' || this.type === 'airboat' || this.bumpers[end] !== 0) return;
+    if (this.isBoat || this.twoWheel || this.type === 'airboat' || this.bumpers[end] !== 0) return;
     this.ensureOwnGeometry();
     const tris = this.bumperTriangles(end);
     if (tris.length < 6) return;
@@ -283,7 +284,7 @@ export class Vehicle {
 
   /** the bumper comes away: its triangles leave the body and come back as a loose piece (local geometry, centred) */
   detachBumper(end: number): { geo: THREE.BufferGeometry; at: THREE.Vector3 } | null {
-    if (this.isBoat || this.type === 'bike' || this.type === 'airboat' || this.bumpers[end] === 2) return null;
+    if (this.isBoat || this.twoWheel || this.type === 'airboat' || this.bumpers[end] === 2) return null;
     this.ensureOwnGeometry();
     const tris = this.bumperTriangles(end);
     if (tris.length < 6) return null;
@@ -425,6 +426,11 @@ export class Vehicle {
     this.lights.r.visible = on && this.signal > 0;
   }
 
+  /** a motorbike or a bicycle: leans into corners, the rider sits on top */
+  get twoWheel(): boolean {
+    return this.type === 'bike' || this.type === 'bicycle';
+  }
+
   get isBoat() {
     return this.type === 'boat' || this.type === 'jetski';
   }
@@ -457,6 +463,11 @@ export class Vehicle {
 
   damage(amount: number) {
     if (this.wrecked) return;
+    // a bicycle gets knocked about but doesn't catch fire
+    if (this.type === 'bicycle') {
+      this.health = Math.max(1, this.health - amount);
+      return;
+    }
     this.health -= amount;
     if (this.health <= 0) {
       this.health = 0;
@@ -677,7 +688,7 @@ export class Vehicle {
     const vLong = this.forwardSpeed;
     const accelPitch = clamp(this.input.thr * 0.02 * (Math.abs(vLong) < s.maxSpeed * 0.9 ? 1 : 0), -0.03, 0.03);
     // cars roll out of a corner; a bike leans into it, as far as the corner needs
-    const rollT = this.type === 'bike' ? clamp(Math.atan((this.yawRate * vLong) / 9.81) * -1, -0.7, 0.7) : clamp(this.yawRate * vLong * 0.004, -0.09, 0.09);
+    const rollT = this.twoWheel ? clamp(Math.atan((this.yawRate * vLong) / 9.81) * -1, -0.7, 0.7) : clamp(this.yawRate * vLong * 0.004, -0.09, 0.09);
     if (this.isBoat) tp -= clamp(Math.abs(vLong) * 0.006, 0, 0.12);
     if (dt > 0) {
       this.pitch = damp(this.pitch, tp - accelPitch, 10, dt);

@@ -138,6 +138,11 @@ export class TrafficAI implements CarAI {
       }
       if (this.busT <= -10) this.busT = 18 + Math.random() * 14;
     }
+    // cyclists: slow, and they keep to the curb side of the lane so cars can get by
+    if (v.type === 'bicycle') {
+      if (this.cruise > 8) this.cruise = 4.8 + Math.random() * 2;
+      L = { ...L, tx: L.tx - L.dz * 1.9, tz: L.tz + L.dx * 1.9 };
+    }
     const cruise = this.panic > 0 ? Math.max(21, this.cruise) : this.cruise;
     let target = cruise;
     // indicate before a turn
@@ -186,6 +191,8 @@ export class TrafficAI implements CarAI {
       if (along <= 0) continue;
       const lat = ox * rx + oz * rz;
       if (Math.abs(lat) > 2.3) continue;
+      // a cyclist by the curb can be passed in the same lane
+      if ((u.type === 'bicycle') !== (v.type === 'bicycle') && Math.abs(lat) > 1.1) continue;
       const gap = along - (v.spec.len + u.spec.len) / 2;
       target = Math.min(target, Math.max(0, gap - 2.5) * 0.8);
       if (u.driver === 'player' && gap < 8) blockedByPlayer = true;
@@ -277,7 +284,7 @@ export class FleeAI extends TrafficAI {
 }
 
 // ---------------------------------------------------------------- manager
-const TYPES: [CarType, number][] = [['sedan', 34], ['suv', 18], ['pickup', 12], ['taxi', 14], ['sports', 10], ['van', 9], ['bus', 4], ['bike', 6], ['ambulance', 2], ['police', 5]];
+const TYPES: [CarType, number][] = [['sedan', 34], ['suv', 18], ['pickup', 12], ['taxi', 14], ['sports', 10], ['van', 9], ['bus', 4], ['bike', 6], ['bicycle', 7], ['ambulance', 2], ['police', 5]];
 function randomType(): CarType {
   const tot = TYPES.reduce((a, b) => a + b[1], 0);
   let r = Math.random() * tot;

@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { box, cyl, merge, mergeGroups, prep } from '../core/geo';
 
-export type CarType = 'sedan' | 'sports' | 'suv' | 'pickup' | 'taxi' | 'police' | 'van' | 'bus' | 'bike' | 'ambulance' | 'boat' | 'jetski' | 'airboat';
+export type CarType = 'sedan' | 'sports' | 'suv' | 'pickup' | 'taxi' | 'police' | 'van' | 'bus' | 'bike' | 'bicycle' | 'ambulance' | 'boat' | 'jetski' | 'airboat';
 
 export interface CarSpec {
   type: CarType;
@@ -34,6 +34,7 @@ export const SPECS: Record<CarType, CarSpec> = {
   bus: { type: 'bus', label: 'Palmera Transit Bus', len: 11.5, wid: 2.55, hgt: 3.1, mass: 11000, maxSpeed: 25, accel: 3.4, brake: 8, grip: 4.8, steer: 0.52, wheelbase: 6.4, wheelR: 0.5, wheelZ: 3.2, colors: [0x18a3a0, 0xe8743b, 0x2e6fbf], health: 3000 },
   ambulance: { type: 'ambulance', label: 'Palmera General Ambulance', len: 5.6, wid: 2.1, hgt: 2.5, mass: 3000, maxSpeed: 42, accel: 7, brake: 13, grip: 6, steer: 0.58, wheelbase: 3.5, wheelR: 0.38, wheelZ: 1.8, colors: [0xf6f6f2], health: 1800 },
   bike: { type: 'bike', label: 'Sprint 750', len: 2.1, wid: 0.8, hgt: 1.2, mass: 230, maxSpeed: 58, accel: 12, brake: 15, grip: 7.5, steer: 0.5, wheelbase: 1.4, wheelR: 0.32, wheelZ: 0.7, colors: [0xd62828, 0x111111, 0xf2f2f2, 0x1f6fd1, 0xf2b705, 0x2a9d4a], health: 500 },
+  bicycle: { type: 'bicycle', label: 'Palmera Cruiser', len: 1.75, wid: 0.62, hgt: 1.1, mass: 95, maxSpeed: 10.5, accel: 3.4, brake: 6, grip: 4, steer: 1.0, wheelbase: 1.05, wheelR: 0.33, wheelZ: 0.53, colors: [0x7fd8d0, 0xff8a7a, 0xf2e3c6, 0x2f4f6f, 0xffd27f, 0x9ad17a, 0x222222], health: 90 },
   jetski: { type: 'jetski', label: 'Wavecat 900', len: 3.1, wid: 1.15, hgt: 1.0, mass: 380, maxSpeed: 27, accel: 10, brake: 7, grip: 2.4, steer: 1.4, wheelbase: 2, wheelR: 0, wheelZ: 0, colors: [0xffd23f, 0xff3b6b, 0x22c7e8, 0x7cff3a, 0xffffff], health: 420 },
   airboat: { type: 'airboat', label: 'Glade Skimmer', len: 4.6, wid: 2.2, hgt: 2.6, mass: 650, maxSpeed: 25, accel: 8, brake: 6, grip: 2.2, steer: 0.9, wheelbase: 3, wheelR: 0, wheelZ: 0, colors: [0x3b6e3a, 0x2f4f6f, 0xc0b8a0, 0x7a2f2a], health: 700 },
   boat: { type: 'boat', label: 'Reef Runner', len: 7.0, wid: 2.4, hgt: 1.6, mass: 1800, maxSpeed: 30, accel: 6, brake: 6, grip: 1.6, steer: 1.0, wheelbase: 4, wheelR: 0, wheelZ: 0, colors: [0xffffff, 0x1f4e79, 0xc0392b], health: 1200 },
@@ -236,6 +237,79 @@ export function carModel(type: CarType): CarModel {
       geo = mergeGroups([paint, detail, lamp]);
       model.wheels = [];
       model.wheelGeo = null;
+      break;
+    }
+    case 'bicycle': {
+      // a beach cruiser: a diamond frame in the paint colour, swept-back bars, a sprung saddle, a basket on some
+      const paint: THREE.BufferGeometry[] = [], detail: THREE.BufferGeometry[] = [], lamp: THREE.BufferGeometry[] = [];
+      const tube = (a: number[], b: number[], r: number, col: number, list: THREE.BufferGeometry[]) => {
+        const va = new THREE.Vector3(...a), vb = new THREE.Vector3(...b);
+        const len = va.distanceTo(vb);
+        const g = new THREE.CylinderGeometry(r, r, len, 6);
+        g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), vb.clone().sub(va).normalize()));
+        g.translate((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+        list.push(prep(g, col));
+      };
+      const BB = [0, 0.3, -0.04], ST = [0, 0.86, -0.24], HT = [0, 0.84, 0.36], HB = [0, 0.64, 0.42], RA = [0, 0.33, -0.52], FA = [0, 0.33, 0.53];
+      tube(BB, ST, 0.022, 0xffffff, paint);
+      tube(ST, HT, 0.02, 0xffffff, paint);
+      tube(BB, HB, 0.024, 0xffffff, paint);
+      tube(HB, HT, 0.026, 0xffffff, paint);
+      for (const s of [-1, 1]) {
+        tube([s * 0.04, 0.3, -0.04], [s * 0.05, 0.33, -0.52], 0.012, 0xffffff, paint);
+        tube([s * 0.03, 0.82, -0.22], [s * 0.05, 0.33, -0.52], 0.011, 0xffffff, paint);
+        tube([s * 0.035, 0.64, 0.42], [s * 0.05, 0.33, 0.53], 0.013, 0xcfd2d6, detail);
+      }
+      // stem, bars and grips
+      tube(HT, [0, 1.0, 0.34], 0.016, 0xcfd2d6, detail);
+      tube([-0.3, 1.02, 0.2], [0.3, 1.02, 0.2], 0.012, 0xcfd2d6, detail);
+      tube([-0.3, 1.02, 0.2], [-0.12, 1.0, 0.34], 0.012, 0xcfd2d6, detail);
+      tube([0.3, 1.02, 0.2], [0.12, 1.0, 0.34], 0.012, 0xcfd2d6, detail);
+      for (const s of [-1, 1]) detail.push(box(0.1, 0.035, 0.035, s * 0.33, 1.02, 0.2, 0x3a2a20));
+      // saddle on its post, springs under it
+      tube(ST, [0, 0.93, -0.26], 0.014, 0xcfd2d6, detail);
+      const sad = new THREE.SphereGeometry(0.13, 8, 5);
+      sad.scale(0.95, 0.32, 1.25);
+      sad.translate(0, 0.96, -0.27);
+      detail.push(prep(sad, 0x4a3426));
+      // chainring, cranks, pedals
+      const ring = new THREE.TorusGeometry(0.09, 0.01, 4, 14);
+      ring.rotateY(Math.PI / 2);
+      ring.translate(0.06, 0.3, -0.04);
+      detail.push(prep(ring, 0x9aa0a6));
+      tube([0.07, 0.3, -0.04], [0.07, 0.3, -0.52], 0.006, 0x333333, detail);
+      // fenders
+      for (const z of [-0.52, 0.53]) {
+        const f = new THREE.TorusGeometry(0.37, 0.03, 3, 10, Math.PI * 0.7);
+        f.rotateY(Math.PI / 2);
+        f.rotateX(z < 0 ? -0.35 : Math.PI * 0.3 - 0.35);
+        f.translate(0, 0.33, z);
+        paint.push(prep(f, 0xffffff));
+      }
+      // a wicker basket on the bars
+      detail.push(box(0.36, 0.22, 0.26, 0, 0.92, 0.6, 0xb08a55));
+      detail.push(box(0.32, 0.02, 0.22, 0, 1.02, 0.6, 0x6e5233));
+      lamp.push(box(0.08, 0.06, 0.04, 0, 0.82, 0.75, 0xfff4d8));
+      lamp.push(box(0.06, 0.03, 0.02, 0, 0.62, -0.83, 0xff3030));
+      geo = mergeGroups([paint, detail, lamp]);
+      // spoked wheels, axle along x
+      const wr = 0.33;
+      const tyre = new THREE.TorusGeometry(wr - 0.02, 0.022, 5, 22);
+      tyre.rotateY(Math.PI / 2);
+      const rim = new THREE.TorusGeometry(wr - 0.045, 0.01, 3, 22);
+      rim.rotateY(Math.PI / 2);
+      const parts = [prep(tyre, 0x1d1d1d), prep(rim, 0xcfd2d6)];
+      for (let i = 0; i < 9; i++) {
+        const a = (i / 9) * Math.PI;
+        const sp = new THREE.CylinderGeometry(0.003, 0.003, (wr - 0.05) * 2, 3);
+        sp.rotateX(a);
+        parts.push(prep(sp, 0xd8dade));
+      }
+      const hub = new THREE.CylinderGeometry(0.025, 0.025, 0.1, 6);
+      hub.rotateZ(Math.PI / 2);
+      parts.push(prep(hub, 0x9aa0a6));
+      model.wheels = [new THREE.Vector3(0, wr, 0.53), new THREE.Vector3(0, wr, -0.52)];
+      model.wheelGeo = merge(parts);
       break;
     }
     case 'jetski': {

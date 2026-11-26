@@ -27,7 +27,7 @@ export class Parts {
 
   /** a car took a hit of `speed` m/s at world (x, z) */
   hit(v: Vehicle, speed: number, x: number, z: number) {
-    if (v.isBoat || v.type === 'bike' || speed < 6) return;
+    if (v.isBoat || v.twoWheel || speed < 6) return;
     // which end, and which side of it
     const lx = x - v.pos.x, lz = z - v.pos.z;
     const along = lx * v.fwdX() + lz * v.fwdZ();

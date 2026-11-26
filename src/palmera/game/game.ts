@@ -883,7 +883,7 @@ export class Game {
       }
       // smoke from damaged engines
       const hf = v.health / v.spec.health;
-      if (!v.sunk && (hf < 0.45 || v.wrecked)) {
+      if (!v.sunk && v.type !== 'bicycle' && (hf < 0.45 || v.wrecked)) {
         v.smokeT -= dt;
         if (v.smokeT <= 0) {
           v.smokeT = v.wrecked ? 0.25 : hf < 0.2 ? 0.06 : 0.14;
@@ -892,7 +892,7 @@ export class Game {
         }
       }
       // drift smoke
-      if (!v.isBoat && v.type !== 'airboat' && v.slip > 4 && v.speed > 6 && !v.airborne && Math.random() < dt * 25) {
+      if (!v.isBoat && v.type !== 'airboat' && v.type !== 'bicycle' && v.slip > 4 && v.speed > 6 && !v.airborne && Math.random() < dt * 25) {
         const back = -v.spec.wheelZ;
         this.effects.puff(v.pos.x + v.fwdX() * back, v.pos.y + 0.2, v.pos.z + v.fwdZ() * back, 'tire');
       }
@@ -1126,7 +1126,7 @@ export class Game {
     const v = p.vehicle;
     if (v) {
       a.setEngine(!v.wrecked && !v.sunk, v.rpm, v.input.thr, v.isBoat);
-      a.setScreech(!v.isBoat && v.slip > 4 && v.speed > 6 ? clamp((v.slip - 4) / 6, 0, 1) : 0);
+      a.setScreech(!v.isBoat && v.type !== 'bicycle' && v.slip > 4 && v.speed > 6 ? clamp((v.slip - 4) / 6, 0, 1) : 0);
     } else {
       a.setEngine(false, 0, 0, false);
       a.setScreech(0);
