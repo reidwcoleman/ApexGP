@@ -55,6 +55,7 @@ export class TrafficAI implements CarAI {
   blockedT = 0;
   reverseT = 0;
   honkT = 0;
+  busT = 10 + Math.random() * 15;
   constructor(public game: Game, public from: number, public to: number) {
     this.cruise = 10 + Math.random() * 4;
     this.next = this.choose(to, from);
@@ -97,6 +98,21 @@ export class TrafficAI implements CarAI {
       this.next = this.choose(this.to, this.from);
       void prev;
       L = laneTarget(map, this.from, this.to, this.next, v.pos.x, v.pos.z, look);
+    }
+    // buses: slower, and they stop at the curb now and then to let people on and off
+    if (v.type === 'bus') {
+      this.cruise = 8.5;
+      this.busT -= dt;
+      if (this.busT < 0 && this.busT > -7 && this.panic <= 0) {
+        L = { ...L, tx: L.tx - L.dz * 2.4, tz: L.tz + L.dx * 2.4 };
+        v.signal = 1;
+        v.input.steer = steerTo(v, L.tx, L.tz);
+        v.input.thr = clamp((Math.max(0, this.busT + 5.5) * 1.5 - v.forwardSpeed) * 0.4, -1, 1);
+        v.input.hand = v.forwardSpeed < 0.3 && this.busT < -1.5;
+        if (v.input.hand) v.input.thr = 0;
+        return;
+      }
+      if (this.busT <= -7) this.busT = 18 + Math.random() * 14;
     }
     const cruise = this.panic > 0 ? 21 : this.cruise;
     let target = cruise;
@@ -211,7 +227,7 @@ export class FleeAI extends TrafficAI {
 }
 
 // ---------------------------------------------------------------- manager
-const TYPES: [CarType, number][] = [['sedan', 34], ['suv', 18], ['pickup', 14], ['taxi', 14], ['sports', 10], ['police', 5]];
+const TYPES: [CarType, number][] = [['sedan', 34], ['suv', 18], ['pickup', 12], ['taxi', 14], ['sports', 10], ['van', 9], ['bus', 4], ['police', 5]];
 function randomType(): CarType {
   const tot = TYPES.reduce((a, b) => a + b[1], 0);
   let r = Math.random() * tot;
@@ -321,7 +337,7 @@ export class Traffic {
           let clear = true;
           for (const u of g.vehicles) if (Math.abs(u.pos.x - s.x) < 5 && Math.abs(u.pos.z - s.z) < 5) { clear = false; break; }
           if (!clear) continue;
-          const type: CarType = s.region === 'downtown' ? pick(['sedan', 'sports', 'suv', 'taxi'] as CarType[]) : s.region === 'swamp' ? pick(['pickup', 'pickup', 'suv'] as CarType[]) : pick(['sedan', 'suv', 'pickup', 'sports', 'sedan'] as CarType[]);
+          const type: CarType = s.region === 'downtown' ? pick(['sedan', 'sports', 'suv', 'taxi', 'van'] as CarType[]) : s.region === 'swamp' ? pick(['pickup', 'pickup', 'suv'] as CarType[]) : pick(['sedan', 'suv', 'pickup', 'sports', 'sedan', 'van'] as CarType[]);
           const v = new Vehicle(type);
           v.place(s.x, s.z, s.h);
           g.addVehicle(v);

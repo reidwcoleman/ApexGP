@@ -23,6 +23,7 @@ const BODY: Record<string, { L: number; W: number; H: number; wb: number; r: num
   muscle: { L: 4.92, W: 1.96, H: 1.34, wb: 2.86, r: 0.36 },
   police: { L: 5.1, W: 1.9, H: 1.48, wb: 3.05, r: 0.35 },
   policeSuv: { L: 5.05, W: 2.0, H: 1.8, wb: 3.02, r: 0.38 },
+  bus: { L: 11.5, W: 2.55, H: 3.1, wb: 6.4, r: 0.5 },
 };
 
 export const VARIANTS: Partial<Record<CarType, string[]>> = {
@@ -32,9 +33,11 @@ export const VARIANTS: Partial<Record<CarType, string[]>> = {
   pickup: ['pickup'],
   taxi: ['sedan'],
   police: ['police', 'policeSuv'],
+  van: ['van'],
+  bus: ['bus'],
 };
 
-type Parts = { body: THREE.BufferGeometry; glass: THREE.BufferGeometry; heads: THREE.BufferGeometry; tails: THREE.BufferGeometry };
+type Parts = { body: THREE.BufferGeometry; glass: THREE.BufferGeometry; heads: THREE.BufferGeometry; tails: THREE.BufferGeometry; trim?: THREE.BufferGeometry };
 const kit = new Map<string, Parts>();
 
 export async function loadCarKit(): Promise<void> {
@@ -53,6 +56,60 @@ export async function loadCarKit(): Promise<void> {
   } catch (e) {
     console.warn('palmera: cars.glb failed, using the blocky cars', e);
   }
+  // the van's own size, measured
+  const van = kit.get('van');
+  if (van) {
+    van.body.computeBoundingBox();
+    const bb = van.body.boundingBox!;
+    const L = bb.max.z - bb.min.z;
+    BODY.van = { L, W: bb.max.x - bb.min.x, H: bb.max.y, wb: L * 0.58, r: 0.37 };
+  }
+  kit.set('bus', busParts());
+}
+
+/** a city bus, built here: low floor, a long glass band, a destination sign over the windscreen */
+function busParts(): Parts {
+  const L = 11.5, W = 2.55, H = 3.1;
+  const body: THREE.BufferGeometry[] = [], trim: THREE.BufferGeometry[] = [], glass: THREE.BufferGeometry[] = [], heads: THREE.BufferGeometry[] = [], tails: THREE.BufferGeometry[] = [];
+  const at = (list: THREE.BufferGeometry[], w: number, h: number, d: number, x: number, y: number, z: number, c: [number, number, number]) => {
+    const g = new THREE.BoxGeometry(w, h, d);
+    g.translate(x, y, z);
+    list.push(withColor(g, c));
+  };
+  const paint: [number, number, number] = [1, 1, 1], dark: [number, number, number] = [0.07, 0.07, 0.08], white: [number, number, number] = [0.9, 0.9, 0.89];
+  // the painted lower body, with arches over the wheels (axles at +-3.2)
+  const yb = 0.3, yt = 1.35, ya = 1.15;
+  const seg = (z0: number, z1: number, y0: number) => at(body, W, yt - y0, z1 - z0, 0, (y0 + yt) / 2, (z0 + z1) / 2, paint);
+  seg(-L / 2, -4.0, yb);
+  seg(-2.4, 2.4, yb);
+  seg(4.0, L / 2, yb);
+  seg(-4.0, -2.4, ya);
+  seg(2.4, 4.0, ya);
+  // inside the arches
+  for (const z of [3.2, -3.2]) at(trim, W - 0.5, ya - yb, 1.6, 0, (ya + yb) / 2, z, dark);
+  // pale upper body, roof and its housings, a dark skirt line
+  at(trim, W, 1.7, L - 0.1, 0, yt + 0.85, -0.05, white);
+  at(trim, W - 0.1, 0.06, L - 0.3, 0, H - 0.02, 0, [0.82, 0.82, 0.81]);
+  at(trim, 1.6, 0.32, 2.6, 0, H + 0.14, -L * 0.25, [0.78, 0.78, 0.78]);
+  at(trim, 1.4, 0.26, 1.6, 0, H + 0.12, L * 0.12, [0.78, 0.78, 0.78]);
+  at(trim, W + 0.02, 0.08, L, 0, yt, 0, dark);
+  // windows: a long band each side with pillars, the door on the right, windscreen, rear window
+  for (const s of [-1, 1]) {
+    at(glass, 0.04, 1.1, L - 3.4, s * (W / 2 + 0.01), 2.05, -0.8, [0.02, 0.025, 0.03]);
+    for (let k = 0; k < 6; k++) at(trim, 0.05, 1.12, 0.1, s * (W / 2 + 0.02), 2.05, -L / 2 + 1.0 + k * 1.62, dark);
+  }
+  at(glass, 0.05, 2.3, 1.0, -(W / 2 + 0.02), 1.5, L / 2 - 1.4, [0.02, 0.025, 0.03]);
+  at(glass, W - 0.15, 1.75, 0.04, 0, 1.8, L / 2 + 0.01, [0.02, 0.025, 0.03]);
+  at(glass, W - 0.4, 0.9, 0.04, 0, 2.25, -L / 2 - 0.01, [0.02, 0.025, 0.03]);
+  // the destination sign, lamps, bumpers
+  at(heads, W - 0.6, 0.28, 0.05, 0, H - 0.3, L / 2 + 0.02, [1, 0.62, 0.12]);
+  for (const s of [-1, 1]) {
+    at(heads, 0.42, 0.18, 0.05, s * (W / 2 - 0.35), 0.62, L / 2 + 0.03, [1, 0.96, 0.88]);
+    at(tails, 0.22, 0.42, 0.05, s * (W / 2 - 0.2), 0.95, -L / 2 - 0.03, [0.85, 0.03, 0.02]);
+  }
+  at(trim, W, 0.3, 0.2, 0, 0.4, L / 2 + 0.05, dark);
+  at(trim, W, 0.3, 0.2, 0, 0.4, -L / 2 - 0.05, dark);
+  return { body: mergeColored(body), trim: mergeColored(trim), glass: mergeColored(glass), heads: mergeColored(heads), tails: mergeColored(tails) };
 }
 
 export function hasKit(type: CarType): boolean {
@@ -184,7 +241,7 @@ export function kitModel(type: CarType, spec: CarSpec, variant: number): KitMode
   boxAt(cw, 0.14, 0.4, 0, belt + 0.02, b.L * 0.16, [0.03, 0.03, 0.032]);
   for (const sx of [-1, 1]) boxAt(cw * 0.38, 0.62, 0.12, sx * cw * 0.25, belt + 0.12, -b.L * 0.05, [0.09, 0.08, 0.075]);
   boxAt(cw * 0.92, 0.04, b.L * 0.34, 0, b.H - 0.08, -b.L * 0.06, [0.42, 0.41, 0.39]);
-  const detail = mergeColored(cab);
+  const detail = id === 'bus' && p.trim ? p.trim : p.trim ? mergeColored([...cab, p.trim]) : mergeColored(cab);
   const groups = [body, detail, lamps, glass] as (THREE.BufferGeometry | null)[];
   const geo = new THREE.BufferGeometry();
   const pos: number[] = [], nor: number[] = [], col: number[] = [];
@@ -207,7 +264,8 @@ export function kitModel(type: CarType, spec: CarSpec, variant: number): KitMode
   geo.computeBoundingSphere();
   const wx = (b.W / 2 - 0.12) * sx, wz = (b.wb / 2) * sz, r = b.r * sy;
   const wheels = [new THREE.Vector3(wx, r, wz), new THREE.Vector3(-wx, r, wz), new THREE.Vector3(wx, r, -wz), new THREE.Vector3(-wx, r, -wz)];
-  const out = { geo, wheels, wheelR: r, roofY: b.H * sy, seat: new THREE.Vector3(b.W * 0.2 * sx, b.H * sy - 1.36, -b.L * 0.07 * sz) };
+  const seat = id === 'bus' ? new THREE.Vector3(0.7, 1.05, b.L / 2 - 1.5) : new THREE.Vector3(b.W * 0.2 * sx, b.H * sy - 1.36, -b.L * 0.07 * sz);
+  const out = { geo, wheels, wheelR: r, roofY: b.H * sy, seat };
   cache.set(key, out);
   return out;
 }
