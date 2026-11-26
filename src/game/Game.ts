@@ -4289,7 +4289,7 @@ export class Game {
     const fast = THREE.MathUtils.smoothstep(kmh, 140, 320);
     // (Low: no motion blur — its velocity buffer and gather are two full-screen passes a slow GPU can't spare)
     const lowGfx = g.qualityLevel === 'low';
-    g.motionBlur = live && !lowGfx ? MOTION_SHUTTER[this.menu.settings.motionBlur ?? 'cinematic'] * (1 + MOTION_SPEED_GAIN * fast) : 0;
+    g.motionBlur = live && !lowGfx ? MOTION_SHUTTER[this.menu.settings.motionBlur ?? 'subtle'] * (1 + MOTION_SPEED_GAIN * fast) : 0;
     const eye = (st === 'race' || st === 'intro' || st === 'flashback' || st === 'paused') && INSIDE_CAR[this.cams.view];
     g.onboardCar = eye ? (this.rigs.get(this.race.player.entry)?.root ?? null) : null;
     // (its steering wheel turns inside it: the TAA and the motion blur follow the wheel's own turn)
@@ -4336,7 +4336,7 @@ export class Game {
     const k = chaseCam ? Math.max(0, Math.min(1, (kmh - 190) / 150)) : 0;
     // (Low: neither the radial blur nor the colour fringe — each is a full-screen pass of its own)
     const lowGfx = this.gfx.qualityLevel === 'low';
-    const radial = (this.menu.settings.motionBlur ?? 'cinematic') === 'off' && !lowGfx;
+    const radial = (this.menu.settings.motionBlur ?? 'subtle') === 'off' && !lowGfx;
     this.gfx.setSpeedBlur(radial ? k * k * 0.006 + (chaseCam && car.ersDeploying ? 0.001 : 0) : 0);
     this.gfx.setAberration(lowGfx ? 0 : k * 0.0004);
     // rain on the lens for the onboard cameras, plus spray thrown up by the car ahead

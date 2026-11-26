@@ -1481,8 +1481,8 @@ export class Menu {
         st.quality = QUALITY[j - 1];
       }
     }, true);
-    this.opt(p, 'Motion blur', () => MOTION_BLUR_LABEL[st.motionBlur ?? 'cinematic'], (d) => {
-      const i = MOTION_BLUR.indexOf(st.motionBlur ?? 'cinematic');
+    this.opt(p, 'Motion blur', () => MOTION_BLUR_LABEL[st.motionBlur ?? 'subtle'], (d) => {
+      const i = MOTION_BLUR.indexOf(st.motionBlur ?? 'subtle');
       st.motionBlur = MOTION_BLUR[(i + d + MOTION_BLUR.length) % MOTION_BLUR.length];
     }, true);
     this.opt(p, 'Camera', () => CAMERA_LABEL[st.camera], (d) => {

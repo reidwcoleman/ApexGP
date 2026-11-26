@@ -371,7 +371,7 @@ const LEAF_LIGHT = /* glsl */ `
 // (2026-11-10: was (1.04, 1.12, 0.84) with a 0.62 yellow transmission — back-lit crowns came out a
 // neon lime no camera records. Still a full summer green, but a leaf's own: deeper, less yellow)
 // (2026-11-11: a shade deeper again — sunlit crowns close to the camera still ran to lime)
-const vec3 FOLIAGE_TINT = vec3( 0.86, 0.9, 0.8 );
+const vec3 FOLIAGE_TINT = vec3( 0.78, 0.9, 0.8 );
 varying float vLeafL;
 varying float vAOL;
 varying float vSunOcc;

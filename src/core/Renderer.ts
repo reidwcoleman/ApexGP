@@ -1090,7 +1090,8 @@ export class GradeEffect extends Effect {
 }
 
 /** the CAS sharpen's base strength at full resolution (Assetto Corsa footage holds ~30 % more fine detail than 0.4 gave) */
-const SHARP_BASE = 0.58;
+// (0.58 → 0.66, 2026-11-26: AC's onboards hold the detail into the distance; ours measured ~25 % softer)
+const SHARP_BASE = 0.66;
 
 export class Renderer {
   readonly renderer: THREE.WebGLRenderer;

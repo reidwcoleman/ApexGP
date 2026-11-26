@@ -255,7 +255,7 @@ ${CAR_WAKE_GLSL}`,
   // every blade its own shade, a few dead straw ones in the lawn
   // (lifted with the verge shader's lush lawn — trackside/materials.ts GRASS_FRAG — or the blades stand
   // darker than the ground they grow from)
-  vGC = col * vec3( 1.06, 1.18, 0.78 ) * ( 0.8 + 0.5 * fract( rnd * 5.3 ) );
+  vGC = col * vec3( 0.95, 1.04, 0.84 ) * ( 0.8 + 0.5 * fract( rnd * 5.3 ) );
   vGC = mix( vGC, uStrawC * 0.9, step( 0.93, fract( rnd * 11.7 ) ) * 0.7 );
   // ...and the sward varies field by field: blue-green rye in the hollows, yellower on the crowns
   {
@@ -291,7 +291,7 @@ reflectedLight.indirectDiffuse *= mix( mix( 0.85, 0.45, gNear ), 1.0, vGH );
 reflectedLight.directDiffuse *= mix( mix( 0.92, 0.7, gNear ), 1.0, vGH );`,
       );
   };
-  mat.customProgramCacheKey = () => 'apex-grass-v9';
+  mat.customProgramCacheKey = () => 'apex-grass-v10';
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'grass_blades';
   mesh.frustumCulled = false;

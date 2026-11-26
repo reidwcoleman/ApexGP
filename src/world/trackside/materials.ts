@@ -1248,9 +1248,9 @@ float gStripe = 0.0;
   vec4 mB = texture2D(uMacro, vTrk * (1.0 / 24.0) + vec2(0.61, 0.17));
   float clump = texture2D(uMacro, vTrk / 6.0 + vec2(0.7, 0.2)).b;
   col *= (0.78 + 0.42 * mA.r) * (0.8 + 0.4 * clump);
-  // (a lush, sunlit, well-kept verge: the bright yellow-green of a sim's circuit lawn — Assetto Corsa
-  // Monza — rather than the dull green of compressed TV footage)
-  col *= vec3(1.0, 1.12, 0.64);
+  // (a well-kept verge; 2026-11-26: AC's Monza footage measured side by side is a deeper, cooler green
+  // than the old ×(1, 1.12, 0.64) — that one glowed lime next to the trees and the asphalt)
+  col *= vec3(0.9, 0.98, 0.74);
   // drier, yellower patches (fewer when it rains)
   float dry = (smoothstep(0.5 - 0.3 * uVergeDry, 0.85, mB.b) * 0.6 + smoothstep(0.55 - 0.35 * uVergeDry, 0.9, mA.a) * 0.4) * (1.0 - 0.6 * uWetness);
   col = mix(col, col * vec3(1.45, 1.2, 0.62), dry * (0.6 + 0.3 * uVergeDry));
@@ -1362,7 +1362,7 @@ export function grassMaterial(t: GroundTextures, opts: { desert?: boolean; dry?:
     roughness: 0.95,
     metalness: 0,
   });
-  patchGround(m, opts.desert ? 'apex-ts-grass-10-desert' : 'apex-ts-grass-10', t, (opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG) + snowGround('vA1.y'), (sh) => {
+  patchGround(m, opts.desert ? 'apex-ts-grass-11-desert' : 'apex-ts-grass-11', t, (opts.desert ? GRASS_FRAG + DESERT_FRAG : GRASS_FRAG) + snowGround('vA1.y'), (sh) => {
     sh.uniforms.uVergeDry = { value: opts.dry ?? 0.1 };
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uVergeDry;');
     // mown-stripe sheen: blades laid one way look lighter from one side, darker from the other
