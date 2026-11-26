@@ -80,11 +80,11 @@ export class Peds {
       const d = Math.hypot(h.pos.x - p.x, h.pos.z - p.z);
       if ((d > 170 && !g.inView(h.pos.x, h.pos.y + 1, h.pos.z)) || d > 260 || (h.dead && h.deadT > 40)) g.removeNpc(h);
     }
-    const target = g.sky.night > 0.6 ? 28 : 58;
+    const target = g.sky.night > 0.6 ? 40 : 88;
     this.spawnT -= dt;
     if (this.spawnT <= 0 && this.count < target) {
       this.spawnT = g.settled ? 0.05 : 0;
-      this.spawn(g.settled ? 55 : 6, 140);
+      this.spawn(g.settled ? 40 : 6, 140);
     }
     for (const h of g.npcs) if (h.kind === 'ped') this.think(h, dt);
   }

@@ -289,8 +289,8 @@ function randomType(): CarType {
 }
 
 export class Traffic {
-  maxCars = 34;
-  radius = 230;
+  maxCars = 46;
+  radius = 210;
   private parked = new Map<number, Vehicle>();
   private parkT = 0;
   private lightT = 0;
@@ -362,8 +362,9 @@ export class Traffic {
     // spawn moving traffic
     let moving = 0;
     for (const v of g.vehicles) if (v.ai instanceof TrafficAI && !v.police) moving++;
-    const target = Math.round(this.maxCars * (g.sky.night > 0.6 ? 0.6 : 1));
-    if (moving < target) this.spawnOnRoad(g.settled ? 110 : 25, this.radius);
+    const target = Math.round(this.maxCars * (g.sky.night > 0.6 ? 0.7 : 1));
+    // close in, but never in view within 160 m (spawnOnRoad skips those)
+    if (moving < target) this.spawnOnRoad(g.settled ? 60 : 25, this.radius);
     // parked cars
     this.parkT -= dt;
     if (this.parkT <= 0) {
