@@ -23,6 +23,8 @@ import { Weapons, emptyLoadout, type Loadout } from './weapons';
 import { Post } from '../render/post';
 import { SkinnedCrowd } from '../entities/skinned';
 import { Shop } from './shop';
+import { Life } from './life';
+import { Ambient } from '../world/ambient';
 
 export type Mode = 'title' | 'play' | 'paused';
 
@@ -78,6 +80,9 @@ export class Game {
   post: Post;
   skinned: SkinnedCrowd;
   shop!: Shop;
+  life!: Life;
+  ambient!: Ambient;
+  private ambLight = new THREE.Color();
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, stencil: false, depth: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
@@ -111,6 +116,8 @@ export class Game {
     this.wanted = new Wanted(this);
     this.weapons = new Weapons(this);
     this.shop = new Shop(this);
+    this.life = new Life(this);
+    this.ambient = new Ambient(this.scene);
     this.missions = new Missions(this);
     this.hud = new Hud(this);
 
@@ -817,6 +824,7 @@ export class Game {
 
     this.traffic.update(sdt);
     this.peds.update(sdt);
+    this.life.update(sdt);
     if (this.mode === 'play') this.wanted.update(sdt);
     this.stepVehicles(sdt);
     this.stepHumans(sdt);
@@ -846,7 +854,10 @@ export class Game {
     this.water.update(this.elapsed, this.sky, cam);
     this.city.update(cam, this.sky.night, this.elapsed);
     this.effects.update(sdt, this.renderer.domElement.height, this.camera.fov);
+    const dl = 0.08 + 0.92 * this.sky.day;
+    this.ambient.update(sdt, this.elapsed, this.focus, this.sky.day, this.ambLight.setRGB(dl, dl, dl * 0.97));
     this.skinned.update(dt, this.humans, cam);
+    this.skinned.updateDrivers(dt, this.vehicles, cam, this.player);
     this.humanR.render(this.humans, cam, 150, this.skinned.taken);
     if (this.mode === 'play') {
       this.hud.update(dt);

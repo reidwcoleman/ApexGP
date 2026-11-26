@@ -78,6 +78,9 @@ export class Vehicle {
   age = 0;
 
   private sirenPos: THREE.Vector3[] | null = null;
+  /** the driver's seat in the car's frame (null: nobody shown) */
+  seat: THREE.Vector3 | null = null;
+  vid = Math.floor(Math.random() * 1e9);
 
   constructor(type: CarType, color?: number) {
     this.type = type;
@@ -91,6 +94,7 @@ export class Vehicle {
     this.body.castShadow = true;
     this.body.receiveShadow = true;
     this.root.add(this.body);
+    if (kitM) this.seat = kitM.seat;
     if (kitM) {
       model.sirenRed && (this.sirenPos = [new THREE.Vector3(-0.3, kitM.roofY + 0.07, -0.25), new THREE.Vector3(0.3, kitM.roofY + 0.07, -0.25)]);
     }

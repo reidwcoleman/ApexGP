@@ -145,6 +145,8 @@ export interface KitModel {
   wheels: THREE.Vector3[];
   wheelR: number;
   roofY: number;
+  /** where the driver sits (passenger: mirror x) */
+  seat: THREE.Vector3;
 }
 
 const cache = new Map<string, KitModel>();
@@ -170,7 +172,20 @@ export function kitModel(type: CarType, spec: CarSpec, variant: number): KitMode
     extra.push(withColor(sign, [1, 0.88, 0.45]));
   }
   const lamps = extra.length ? mergeColored([heads, tails, ...extra]) : mergeColored([heads, tails]);
-  const groups = [body, null, lamps, glass] as (THREE.BufferGeometry | null)[];
+  // a cabin behind the glass: tub, dash, seat backs, headlining (so the see-through glass shows a car, not a hollow shell)
+  const cab: THREE.BufferGeometry[] = [];
+  const cw = b.W * 0.8, belt = b.H * 0.6;
+  const boxAt = (w: number, h: number, d: number, x: number, y: number, z: number, c: [number, number, number]) => {
+    const q = new THREE.BoxGeometry(w, h, d);
+    q.translate(x, y, z);
+    cab.push(withColor(q, c));
+  };
+  boxAt(cw, belt - 0.3, b.L * 0.42, 0, 0.3 + (belt - 0.3) / 2, -b.L * 0.06, [0.05, 0.05, 0.055]);
+  boxAt(cw, 0.14, 0.4, 0, belt + 0.02, b.L * 0.16, [0.03, 0.03, 0.032]);
+  for (const sx of [-1, 1]) boxAt(cw * 0.38, 0.62, 0.12, sx * cw * 0.25, belt + 0.12, -b.L * 0.05, [0.09, 0.08, 0.075]);
+  boxAt(cw * 0.92, 0.04, b.L * 0.34, 0, b.H - 0.08, -b.L * 0.06, [0.42, 0.41, 0.39]);
+  const detail = mergeColored(cab);
+  const groups = [body, detail, lamps, glass] as (THREE.BufferGeometry | null)[];
   const geo = new THREE.BufferGeometry();
   const pos: number[] = [], nor: number[] = [], col: number[] = [];
   let start = 0;
@@ -192,7 +207,7 @@ export function kitModel(type: CarType, spec: CarSpec, variant: number): KitMode
   geo.computeBoundingSphere();
   const wx = (b.W / 2 - 0.12) * sx, wz = (b.wb / 2) * sz, r = b.r * sy;
   const wheels = [new THREE.Vector3(wx, r, wz), new THREE.Vector3(-wx, r, wz), new THREE.Vector3(wx, r, -wz), new THREE.Vector3(-wx, r, -wz)];
-  const out = { geo, wheels, wheelR: r, roofY: b.H * sy };
+  const out = { geo, wheels, wheelR: r, roofY: b.H * sy, seat: new THREE.Vector3(b.W * 0.2 * sx, b.H * sy - 1.36, -b.L * 0.07 * sz) };
   cache.set(key, out);
   return out;
 }

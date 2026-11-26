@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Person, loadPeople, setPeopleCore, setPeopleRest, type Look, type PeopleKit } from '../../people/Humans.ts';
 import { LONG_GUNS, type Human, type WeaponId } from './humans';
+import type { Vehicle } from './vehicle';
 
 /**
  * The people up close: Rocketbox scans (the same kit ApexGP's garages use), animated by their own
@@ -66,7 +67,7 @@ export class SkinnedCrowd {
   private slots = new Map<number, Slot>();
   private t = 0;
   private reassignT = 0;
-  private readonly max = 22;
+  private readonly max = 30;
   private readonly v1 = new THREE.Vector3();
   private readonly v2 = new THREE.Vector3();
   private readonly q1 = new THREE.Quaternion();
@@ -77,6 +78,54 @@ export class SkinnedCrowd {
 
   get ready() {
     return !!kit;
+  }
+
+  /** people sitting in the cars near you: the driver (you, too), and two officers in a cruiser */
+  private seated = new Map<Vehicle, { p: Person[]; key: string }>();
+  private seatT = 0;
+
+  updateDrivers(dt: number, vehicles: Vehicle[], cam: THREE.Vector3, player: Human) {
+    if (!kit) return;
+    this.seatT -= dt;
+    if (this.seatT <= 0) {
+      this.seatT = 0.3;
+      const cands = vehicles
+        .filter((v) => v.seat && !v.wrecked && !v.isBoat && (v.driver === 'npc' || v.driver === 'player' || v.occupants > 0))
+        .map((v) => ({ v, d: (v.pos.x - cam.x) ** 2 + (v.pos.z - cam.z) ** 2 }))
+        .filter((c) => c.d < 55 * 55 || c.v.driver === 'player')
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 10);
+      const keep = new Map(cands.map((c) => [c.v, (c.v.driver === 'player' ? 'P' : c.v.police ? 'C' : 'N') + (c.v.police && c.v.occupants > 1 ? '2' : '1')]));
+      for (const [v, s] of this.seated) {
+        if (keep.get(v) !== s.key) {
+          for (const p of s.p) {
+            v.root.remove(p.root);
+            p.dispose();
+          }
+          this.seated.delete(v);
+        }
+      }
+      for (const [v, key] of keep) {
+        if (this.seated.has(v)) continue;
+        const ps: Person[] = [];
+        const n = key.endsWith('2') ? 2 : 1;
+        for (let i = 0; i < n; i++) {
+          const fake = { kind: key[0] === 'P' ? 'player' : key[0] === 'C' ? 'cop' : 'ped', id: v.vid + i * 7, shirt: key[0] === 'P' ? player.shirt : new THREE.Color().setHSL(((v.vid + i) % 97) / 97, 0.45, 0.5), pants: new THREE.Color(0x2d3f63) } as unknown as Human;
+          const p = new Person(kit, this.lookFor(fake));
+          p.root.traverse((o) => {
+            const m = o as THREE.Mesh;
+            if (m.isMesh) m.castShadow = false;
+          });
+          p.root.position.copy(v.seat!);
+          if (i === 1) p.root.position.x *= -1;
+          p.play('sit', { offset: (v.vid % 100) / 100 });
+          v.root.add(p.root);
+          ps.push(p);
+        }
+        this.seated.set(v, { p: ps, key });
+      }
+    }
+    for (const s of this.seated.values()) for (const p of s.p) p.update(dt);
   }
 
   private lookFor(h: Human): Look {
@@ -163,7 +212,7 @@ export class SkinnedCrowd {
     const h = s.h, p = s.p;
     p.root.visible = true;
     const sp = h.animSpeed;
-    let a = sp < 0.25 ? 'idle' : sp < 2.1 ? 'walk' : sp < 4.6 ? 'jog' : 'run';
+    let a = sp < 0.25 ? h.clip || 'idle' : sp < 2.1 ? 'walk' : sp < 4.6 ? 'jog' : 'run';
     if (!h.onGround && !h.swimming) a = 'jog';
     if (a !== s.anim) {
       p.play(a, { fade: 0.25, offset: (h.id * 0.31) % 1 });
@@ -175,8 +224,9 @@ export class SkinnedCrowd {
       if (act) act.timeScale = THREE.MathUtils.clamp(sp / clipSpeed, 0.5, 1.6);
     }
     const lie = h.fall;
-    p.root.position.set(h.pos.x, h.pos.y + lie * 0.12 + (h.swimming ? -1.1 : 0), h.pos.z);
-    p.root.rotation.set(-lie * 1.5, h.yaw, 0, 'YXZ');
+    const lounge = h.state === 'lounge' ? 1 : 0;
+    p.root.position.set(h.pos.x - Math.sin(h.yaw) * lounge * 0.25, h.pos.y + lie * 0.12 + (h.swimming ? -1.15 : 0) + lounge * 0.38, h.pos.z - Math.cos(h.yaw) * lounge * 0.25);
+    p.root.rotation.set(-lie * 1.5 - lounge * 0.75, h.yaw, 0, 'YXZ');
     p.update(dt);
     // the arm on the aim, or thrown in a punch (or a swing of the bat)
     const gunHeld = h.weapon !== 'fist' && h.weapon !== 'bat' && h.weapon !== 'grenade';

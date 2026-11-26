@@ -44,6 +44,8 @@ export class Human {
   hidden = false;
   // AI scratch
   state = 'walk';
+  /** an animation to play while standing still (talk, listen, sit, dance...) */
+  clip = '';
   stateT = 0;
   target = new THREE.Vector3();
   fleeFrom = new THREE.Vector3();

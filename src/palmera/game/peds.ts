@@ -78,7 +78,7 @@ export class Peds {
       const d = Math.hypot(h.pos.x - p.x, h.pos.z - p.z);
       if ((d > 170 && !g.inView(h.pos.x, h.pos.y + 1, h.pos.z)) || d > 260 || (h.dead && h.deadT > 40)) g.removeNpc(h);
     }
-    const target = g.sky.night > 0.6 ? 20 : 36;
+    const target = g.sky.night > 0.6 ? 28 : 58;
     this.spawnT -= dt;
     if (this.spawnT <= 0 && this.count < target) {
       this.spawnT = g.settled ? 0.05 : 0;
@@ -91,6 +91,8 @@ export class Peds {
   scare(h: Human, x: number, z: number, t = 8) {
     if (h.dead || h.kind !== 'ped') return;
     h.state = 'flee';
+    h.clip = '';
+    h.swimming = false;
     h.stateT = t + Math.random() * 4;
     h.fleeFrom.set(x, 0, z);
   }
@@ -108,6 +110,8 @@ export class Peds {
       if (h.down <= 0 && h.state !== 'flee') this.scare(h, h.pos.x - Math.sin(h.yaw), h.pos.z - Math.cos(h.yaw));
       return;
     }
+    if (g.life.think(h, dt)) return;
+    if (h.clip && h.state !== 'flee') h.clip = '';
     if (h.state === 'flee') {
       h.stateT -= dt;
       let dx = h.pos.x - h.fleeFrom.x, dz = h.pos.z - h.fleeFrom.z;

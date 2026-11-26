@@ -199,7 +199,7 @@ function randomType(): CarType {
 }
 
 export class Traffic {
-  maxCars = 22;
+  maxCars = 34;
   radius = 230;
   private parked = new Map<number, Vehicle>();
   private parkT = 0;

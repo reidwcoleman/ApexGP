@@ -222,7 +222,7 @@ export function carModel(type: CarType): CarModel {
 // shared materials
 export const carMats = {
   detail: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.32, metalness: 0.35 }),
-  glass: new THREE.MeshPhysicalMaterial({ vertexColors: true, color: 0xffffff, roughness: 0.04, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.6 }),
+  glass: new THREE.MeshPhysicalMaterial({ vertexColors: true, color: 0xffffff, roughness: 0.04, metalness: 0.0, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.8, transparent: true, opacity: 0.55, depthWrite: false }),
   lamps: new THREE.MeshBasicMaterial({ vertexColors: true }),
   wheel: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.3, side: THREE.DoubleSide }),
   burnt: new THREE.MeshStandardMaterial({ color: 0x1e1b19, roughness: 1, metalness: 0 }),
