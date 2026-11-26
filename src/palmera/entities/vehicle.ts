@@ -165,6 +165,108 @@ export class Vehicle {
     this.crumple = 0;
     this.health = this.spec.health;
     this.smokeT = 0;
+    this.bumpers = [0, 0];
+    this.bumperTris = [null, null];
+  }
+
+  /** front and rear bumper: 0 on, 1 hanging off one end, 2 gone */
+  bumpers = [0, 0];
+  private bumperTris: (number[] | null)[] = [null, null];
+
+  private ensureOwnGeometry() {
+    if (!this.dented) {
+      this.baseGeo = this.body.geometry;
+      this.body.geometry = this.body.geometry.clone();
+      this.dented = true;
+    }
+  }
+
+  /** the triangles of a bumper (end 0 front +z, 1 rear): the low band across the very end */
+  private bumperTriangles(end: number): number[] {
+    const cached = this.bumperTris[end];
+    if (cached) return cached;
+    const pos = this.body.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const box = this.body.geometry.boundingBox ?? (this.body.geometry.computeBoundingBox(), this.body.geometry.boundingBox!);
+    const zEdge = end === 0 ? box.max.z - 0.42 : box.min.z + 0.42;
+    const yTop = box.min.y + (box.max.y - box.min.y) * 0.42;
+    const out: number[] = [];
+    for (let t = 0; t < pos.count / 3; t++) {
+      const i = t * 3;
+      const cz = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3;
+      const cy = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3;
+      if (cy < yTop && (end === 0 ? cz > zEdge : cz < zEdge)) out.push(t);
+    }
+    this.bumperTris[end] = out;
+    return out;
+  }
+
+  /** a hard knock on an end: the bumper drops at one corner and hangs */
+  sagBumper(end: number, side: number) {
+    if (this.isBoat || this.type === 'bike' || this.bumpers[end] !== 0) return;
+    this.ensureOwnGeometry();
+    const tris = this.bumperTriangles(end);
+    if (tris.length < 6) return;
+    const pos = this.body.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const box = this.body.geometry.boundingBox!;
+    // pivot at the corner that held on; the other end swings down
+    const px = side > 0 ? box.min.x + 0.2 : box.max.x - 0.2;
+    const py = box.min.y + (box.max.y - box.min.y) * 0.4;
+    const a = 0.22 * (side > 0 ? -1 : 1);
+    const c = Math.cos(a), sn = Math.sin(a);
+    for (const t of tris)
+      for (let k = 0; k < 3; k++) {
+        const i = t * 3 + k;
+        const x = pos.getX(i) - px, y = pos.getY(i) - py;
+        pos.setXY(i, px + x * c - y * sn, Math.max(box.min.y - 0.05, py + x * sn + y * c));
+      }
+    pos.needsUpdate = true;
+    this.bumpers[end] = 1;
+  }
+
+  /** the bumper comes away: its triangles leave the body and come back as a loose piece (local geometry, centred) */
+  detachBumper(end: number): { geo: THREE.BufferGeometry; at: THREE.Vector3 } | null {
+    if (this.isBoat || this.type === 'bike' || this.bumpers[end] === 2) return null;
+    this.ensureOwnGeometry();
+    const tris = this.bumperTriangles(end);
+    if (tris.length < 6) return null;
+    const src = this.body.geometry;
+    const groups = src.groups;
+    const matOf = (vi: number) => {
+      for (const gr of groups) if (vi >= gr.start && vi < gr.start + gr.count) return gr.materialIndex ?? 0;
+      return 0;
+    };
+    const order = tris.map((t) => ({ t, m: matOf(t * 3) })).sort((a, b) => a.m - b.m);
+    const geo = new THREE.BufferGeometry();
+    const names = Object.keys(src.attributes);
+    for (const n of names) {
+      const at = src.getAttribute(n) as THREE.BufferAttribute;
+      const arr = new Float32Array(order.length * 3 * at.itemSize);
+      let o = 0;
+      for (const { t } of order)
+        for (let k = 0; k < 3; k++)
+          for (let c = 0; c < at.itemSize; c++) arr[o++] = at.array[(t * 3 + k) * at.itemSize + c];
+      geo.setAttribute(n, new THREE.BufferAttribute(arr, at.itemSize, at.normalized));
+    }
+    let start = 0;
+    for (let i = 0; i <= order.length; i++)
+      if (i === order.length || (i > 0 && order[i].m !== order[i - 1].m)) {
+        geo.addGroup(start * 3, (i - start) * 3, order[i - 1].m);
+        start = i;
+      }
+    geo.computeBoundingBox();
+    const ctr = geo.boundingBox!.getCenter(new THREE.Vector3());
+    geo.translate(-ctr.x, -ctr.y, -ctr.z);
+    geo.computeBoundingSphere();
+    // gone from the body: collapse each triangle to a point
+    const pos = src.getAttribute('position') as THREE.BufferAttribute;
+    for (const t of tris) {
+      const i = t * 3;
+      for (let k = 1; k < 3; k++) pos.setXYZ(i + k, pos.getX(i), pos.getY(i), pos.getZ(i));
+    }
+    pos.needsUpdate = true;
+    this.bumpers[end] = 2;
+    this.body.updateWorldMatrix(true, false);
+    return { geo, at: this.body.localToWorld(ctr.clone()) };
   }
   /** total crumple so far (glass breaks, the bonnet gives) */
   crumple = 0;
