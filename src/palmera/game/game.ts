@@ -42,6 +42,7 @@ import { Parts } from './parts';
 import { Garages } from './garage';
 import { StreetEvents } from './events';
 import { PhotoMode } from './photo';
+import { Club } from './club';
 import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
@@ -119,6 +120,7 @@ export class Game {
   street!: StreetEvents;
   private speedBlurW = 0;
   photo!: PhotoMode;
+  club!: Club;
   interiors!: Interiors;
   saveGame!: SaveGame;
   phone!: Phone;
@@ -178,6 +180,7 @@ export class Game {
     this.garages = new Garages(this);
     Marker.camera = this.camera;
     this.photo = new PhotoMode(this);
+    this.club = new Club(this);
     this.street = new StreetEvents(this);
     this.interiors = new Interiors(this);
     this.saveGame = new SaveGame(this);
@@ -958,6 +961,7 @@ export class Game {
       this.parts.update(sdt);
       this.garages.update(sdt);
       this.street.update(sdt);
+      this.club.update(sdt);
       this.reactions.update(sdt);
       this.activities.update(sdt);
       this.robbery.update(sdt);
@@ -996,7 +1000,7 @@ export class Game {
     detailUniforms.dWet.value = this.wet;
     this.post.wet = this.wet;
     this.audio.setRain(this.sky.rain);
-    this.audio.radio.setOn(!!this.player.vehicle && this.mode === 'play' && !this.player.dead);
+    this.audio.radio.setOn((!!this.player.vehicle || !!this.club?.inside) && this.mode === 'play' && !this.player.dead);
     const dl = (0.08 + 0.92 * this.sky.day) * (1 - 0.4 * this.sky.rain);
     this.ambient.update(sdt, this.elapsed, this.focus, this.sky.day, this.ambLight.setRGB(dl, dl, dl * 0.97));
     this.skinned.update(dt, this.humans, cam, this.camera.getWorldDirection(this.tmpFwd));

@@ -643,6 +643,7 @@ export class Missions {
     if (this.game.skyTours) out.push(...this.game.skyTours.blips);
     if (this.game.garages) out.push(...this.game.garages.blips);
     if (this.game.street) out.push(...this.game.street.blips);
+    if (this.game.club) out.push(...this.game.club.blips);
     for (const d of MISSIONS) if (!this.done.has(d.id)) out.push({ x: d.start.x, z: d.start.z, color: d.color, label: String(d.id + 1), kind: 'mission' });
     return out;
   }

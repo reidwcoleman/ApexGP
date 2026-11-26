@@ -120,7 +120,7 @@ function inside(k: { x0: number; z0: number; x1: number; z1: number }, b: Buildi
 }
 
 /** the side of the building facing its block's edge (the street), and a spot just outside it */
-function front(map: Game['map'], b: BuildingSpec): { p: THREE.Vector3; yaw: number } | null {
+export function front(map: Game['map'], b: BuildingSpec): { p: THREE.Vector3; yaw: number } | null {
   const k = map.blocks.find((q) => inside(q, b));
   if (!k) return null;
   const sides = [
