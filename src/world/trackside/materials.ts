@@ -1574,10 +1574,13 @@ export function fenceMaterial(tex: THREE.Texture): THREE.MeshStandardMaterial {
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
-    roughness: 0.55,
-    metalness: 0.35,
+    // (2026-11-26, AC realism: galvanised mesh is a light grey that catches the sky — the darker metal
+    // with a 0.4 veil past 45 m vanished against the trees, where AC's Monza fences read clearly)
+    roughness: 0.62,
+    metalness: 0.15,
     alphaTest: 0.01,
   });
+  m.color.setScalar(1.25);
   m.forceSinglePass = true;
   // thin wires all but vanish with distance: thin the mip-averaged coverage so fences read as a light veil
   m.onBeforeCompile = (sh) => {
@@ -1588,12 +1591,12 @@ export function fenceMaterial(tex: THREE.Texture): THREE.MeshStandardMaterial {
         '#include <map_fragment>',
         // (seen edge-on down a straight the mesh piles up into a solid grey sheet that mirrored the sky like
         // glass: thin it and take the sheen off at grazing angles — a real catch fence is a faint haze there)
-        '#include <map_fragment>\n  float fNdv = abs(dot(normalize(vNormal), normalize(vViewPosition)));\n  float fGraze = 1.0 - smoothstep(0.04, 0.45, fNdv);\n  diffuseColor.a *= mix(1.0, 0.4, smoothstep(6.0, 45.0, length(vViewPosition))) * (1.0 - 0.6 * fGraze * smoothstep(4.0, 25.0, length(vViewPosition)));\n  diffuseColor.rgb *= 1.0 - 0.25 * uWetness;',
+        '#include <map_fragment>\n  float fNdv = abs(dot(normalize(vNormal), normalize(vViewPosition)));\n  float fGraze = 1.0 - smoothstep(0.04, 0.45, fNdv);\n  diffuseColor.a *= mix(1.0, 0.72, smoothstep(6.0, 45.0, length(vViewPosition))) * (1.0 - 0.4 * fGraze * smoothstep(4.0, 25.0, length(vViewPosition)));\n  diffuseColor.rgb *= 1.0 - 0.25 * uWetness;',
       )
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.9, fGraze);')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n  metalnessFactor = mix(metalnessFactor, 0.1, fGraze);');
   };
-  m.customProgramCacheKey = () => 'apex-ts-fence-4';
+  m.customProgramCacheKey = () => 'apex-ts-fence-5';
   return m;
 }
 
