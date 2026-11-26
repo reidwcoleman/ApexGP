@@ -148,6 +148,8 @@ export class Vehicle {
       for (const w of kitM ? kitM.wheels : model.wheels) {
         const m = new THREE.Mesh(wheelGeo, carMats.wheel);
         m.position.copy(w);
+        // a modelled wheel has its face on +x: mirror the ones on the left so the hub faces out
+        if (kitM?.wheelGeo && w.x < 0) m.scale.x = -1;
         m.castShadow = true;
         this.body.add(m);
         this.wheels.push(m);

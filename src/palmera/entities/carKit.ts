@@ -71,29 +71,35 @@ export async function loadCarKit(): Promise<void> {
   }
   kit.set('bus', busParts());
   kit.set('bike', bikeParts());
-  // the motorbike modelled in Blender (tools/palmera/bike.py): bodywork, trim, lamps and its own wheel
+  // vehicles modelled whole in Blender (tools/palmera/bike.py, bus.py): bodywork, trim, lamps, glass
+  // and a wheel of their own; the built versions above stay as the fallback
+  await Promise.all(['bike', 'bus'].map((id) => loadOwnModel(id)));
+}
+
+async function loadOwnModel(id: string) {
   try {
-    const gl = await new GLTFLoader().loadAsync(BASE + 'bike.glb');
+    const gl = await new GLTFLoader().loadAsync(BASE + id + '.glb');
     gl.scene.updateMatrixWorld(true);
     const got: Record<string, THREE.BufferGeometry> = {};
+    const re = new RegExp('^' + id + '_(body|trim|glass|heads|tails|wheel)$');
     gl.scene.traverse((o) => {
       const m = o as THREE.Mesh;
-      const r = /^bike_(body|trim|glass|heads|tails|wheel)$/.exec(o.name);
+      const r = re.exec(o.name);
       if (!m.isMesh || !r) return;
       const g = m.geometry.clone();
       g.applyMatrix4(m.matrixWorld);
       got[r[1]] = withColor(g, null);
     });
     if (got.body && got.trim && got.wheel) {
-      kit.set('bike', { body: got.body, trim: got.trim, glass: got.glass ?? got.body.clone(), heads: got.heads, tails: got.tails });
-      bikeWheel = got.wheel;
+      kit.set(id, { body: got.body, trim: got.trim, glass: got.glass ?? got.body.clone(), heads: got.heads, tails: got.tails });
+      ownWheel.set(id, got.wheel);
     }
   } catch (e) {
-    console.warn('palmera: bike.glb failed, using the built bike', e);
+    console.warn('palmera: ' + id + '.glb failed, using the built one', e);
   }
 }
 
-let bikeWheel: THREE.BufferGeometry | null = null;
+const ownWheel = new Map<string, THREE.BufferGeometry>();
 
 /** a sport bike, built here: tank, fairing and tail in paint; frame, forks, engine, seat in trim */
 function bikeParts(): Parts {
@@ -433,7 +439,8 @@ export function kitModel(type: CarType, spec: CarSpec, variant: number): KitMode
     if (Number.isFinite(tb.min.y)) tail = { y: ((tb.min.y + tb.max.y) / 2) * sy, x: Math.max(0.2, (tb.max.x - (tb.max.x - Math.max(0, tb.min.x)) * 0.25) * sx * 0.92), z: tb.min.z * sz };
   }
   const out: KitModel = { geo, wheels, wheelR: r, roofY: b.H * sy, seat, tail };
-  if (id === 'bike' && bikeWheel) out.wheelGeo = bikeWheel;
+  const ow = ownWheel.get(id);
+  if (ow) out.wheelGeo = ow;
   cache.set(key, out);
   return out;
 }
