@@ -10,7 +10,7 @@ import {
 import {
   PC, TC, WC, paintCellUV, trimUV, wheelCellUV, rectUV,
   R_FLAP, R_MAIN, R_FWING, R_EP_OL, R_EP_OR, R_EP_IN, R_FIN_L, R_FIN_R,
-  R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_TCAM_NUM, R_CODE_L, R_CODE_R, R_HALO_SPON, R_HALO_ARM_L, R_HALO_ARM_R, DRV_W, DRV_H,
+  R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_TCAM_NUM, R_CODE_L, R_CODE_R, R_HALO_SPON, R_HALO_ARM_L, R_HALO_ARM_R, R_DECK_SPON, DRV_W, DRV_H,
   DC, drvCellUV, TRIM_W, TRIM_H, R_SIDEWALL, R_TREAD, R_RIMFACE, WHEEL_TEX_W, WHEEL_TEX_H,
   WHEEL_R, RIM_R, TYRE_W_F, TYRE_W_R, TRACK_F, TRACK_R, Z_FRONT_AXLE, Z_REAR_AXLE, SIDEWALL_R0, SIDEWALL_R1,
   DASH_W, DASH_H, R_SCREEN, R_SHIFT, SHIFT_N, SHIFT_CELL, SCREEN_W, SCREEN_H, SCREEN_CY, faceUV, WHEEL_BUTTONS, WHEEL_ROTARIES,
@@ -1254,6 +1254,10 @@ function decals(mb: MB) {
   // Near the tip of the short 2026 nose, 15 cm across × 20 cm along it: the 2:1 sheet cell is
   // stretched ~2.7× along z, which driverTexture (carTextures.ts) pre-squashes so digits read upright.
   patch(2.64, 2.44, -0.075, 0.075, 6, 4, (a, b) => drvUV(R_NUM_NOSE, a, b));
+  // the title sponsor down the nose top (2026-11-26, after AC's T-cam and the real cars: the nose the
+  // onboards look along is branded). Read from behind, rear → front; the letters' tops toward +X (the
+  // car's left, the left of a camera behind it). 64 cm × 13 cm ≈ 5:1 on the cell's 4:1 (pre-stretched)
+  patch(0.86, 1.5, -0.065, 0.065, 3, 12, (a, b) => drvUV(R_DECK_SPON, b, a), 0.003);
 
   // fin numbers (both faces)
   const FZc = -1.2;

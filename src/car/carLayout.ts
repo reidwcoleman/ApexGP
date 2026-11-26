@@ -278,7 +278,7 @@ export const SIDEWALL_R1 = WHEEL_R - 0.018;
 
 // ---------------------------------------------------------------- driver texture (per driver, 512×256)
 export const DRV_W = 512;
-export const DRV_H = 352;
+export const DRV_H = 416;
 export const R_HELMET: Rect = { x: 0, y: 0, w: 256, h: 256 };
 export const R_NUM_NOSE: Rect = { x: 256, y: 0, w: 128, h: 64 };
 export const R_NUM_FIN_L: Rect = { x: 384, y: 0, w: 128, h: 64 };
@@ -294,6 +294,8 @@ export const R_HALO_SPON: Rect = { x: 0, y: 256, w: 512, h: 32 };
 /** partner wordmarks along the top of the halo's side arms (left, right), what the T-cam looks down on */
 export const R_HALO_ARM_L: Rect = { x: 0, y: 288, w: 512, h: 32 };
 export const R_HALO_ARM_R: Rect = { x: 0, y: 320, w: 512, h: 32 };
+/** the title sponsor across the chassis top in front of the cockpit, read from behind (T-cam, cockpit) */
+export const R_DECK_SPON: Rect = { x: 0, y: 352, w: 256, h: 64 };
 /** flat colour cells in the driver sheet (16×16 at y = 224) */
 export const DC = { visor: 0, suit: 1, suit2: 2, hans: 3, glove: 4, belts: 5 } as const;
 export function drvCellUV(i: number): V2 {
