@@ -917,6 +917,7 @@ export class Game {
     this.rain.update(this.elapsed, cam, this.sky.rain, 0.2 + 0.8 * this.sky.day);
     this.wet += ((this.sky.rain > 0.15 ? 1 : 0) - this.wet) * Math.min(1, sdt * (this.sky.rain > 0.15 ? 0.15 : 0.02));
     detailUniforms.dWet.value = this.wet;
+    this.post.wet = this.wet;
     this.audio.setRain(this.sky.rain);
     this.audio.radio.setOn(!!this.player.vehicle && this.mode === 'play' && !this.player.dead);
     const dl = (0.08 + 0.92 * this.sky.day) * (1 - 0.4 * this.sky.rain);

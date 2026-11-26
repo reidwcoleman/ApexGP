@@ -115,7 +115,105 @@ class ShaftsEffect extends Effect {
   }
 }
 
+/**
+ * Wet ground reflections: on a rainy street every ground pixel reflects the view ray off the road
+ * (flat, normal up), marches it through the depth buffer and picks up whatever it meets: lit windows,
+ * neon, lamps and headlights smear across the tarmac. Puddles reflect fully, the rest of the road
+ * a little; Fresnel makes it strongest at a glancing angle.
+ */
+class WetReflectEffect extends Effect {
+  constructor() {
+    super(
+      'PalmeraWet',
+      /* glsl */ `
+      uniform float uWet;
+      uniform float uT;
+      uniform mat4 uProj;
+      uniform mat4 uProjInv;
+      uniform mat4 uView;
+      uniform mat4 uViewInv;
+      float wh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float wn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(wh(i), wh(i + vec2(1, 0)), f.x), mix(wh(i + vec2(0, 1)), wh(i + vec2(1, 1)), f.x), f.y); }
+      void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+        outputColor = inputColor;
+        if (uWet < 0.02) return;
+        float vz = -getViewZ(depth);
+        if (vz > 260.0) return;
+        vec4 cp = uProjInv * vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+        vec3 vp = cp.xyz / cp.w;
+        vec3 wp = (uViewInv * vec4(vp, 1.0)).xyz;
+        if (wp.y > 0.2 || wp.y < -0.3) return;
+        // not the beach, not lawns: tarmac, paving and concrete
+        if (wp.x > 676.0) return;
+        if (inputColor.g > inputColor.r * 1.12 && inputColor.g > inputColor.b * 1.1) return;
+        vec3 cam = (uViewInv * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+        vec3 V = normalize(wp - cam);
+        // a touch of ripple so the reflection isn't a perfect mirror
+        vec2 rp = wp.xz * 3.0;
+        vec3 N = normalize(vec3((wn(rp) - 0.5) * 0.05, 1.0, (wn(rp + 9.1) - 0.5) * 0.05));
+        vec3 R = reflect(V, N);
+        float pud = mix(0.4, 1.0, smoothstep(0.52, 0.7, wn(wp.xz * 0.12 + 7.0)));
+        float t = 0.4;
+        float j = fract(wh(floor(uv * resolution)) + uT * 0.618034);
+        vec3 hit = vec3(0.0);
+        float found = 0.0;
+        for (int i = 0; i < 26; i++) {
+          vec3 sp = wp + R * t * (1.0 + j * 0.25);
+          vec4 cs = uProj * uView * vec4(sp, 1.0);
+          if (cs.w <= 0.0) break;
+          vec2 suv = cs.xy / cs.w * 0.5 + 0.5;
+          if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0) break;
+          float sz = -getViewZ(readDepth(suv));
+          float dz = cs.w - sz;
+          if (dz > 0.05 && dz < 0.6 + t * 0.12) {
+            // refine between the last miss and this hit
+            float a = t / 1.28, b = t;
+            for (int k = 0; k < 5; k++) {
+              float m = (a + b) * 0.5;
+              vec4 mc = uProj * uView * vec4(wp + R * m * (1.0 + j * 0.25), 1.0);
+              vec2 muv = mc.xy / mc.w * 0.5 + 0.5;
+              if (mc.w - -getViewZ(readDepth(muv)) > 0.0) { b = m; suv = muv; } else a = m;
+            }
+            hit = texture2D(inputBuffer, suv).rgb;
+            // fade toward the screen edges, where the reflected thing would be cut off
+            vec2 e = smoothstep(vec2(0.0), vec2(0.08), suv) * smoothstep(vec2(0.0), vec2(0.08), 1.0 - suv);
+            found = e.x * e.y * (1.0 - float(i) / 26.0 * 0.5);
+            break;
+          }
+          t *= 1.28;
+        }
+        if (found <= 0.0) return;
+        float fres = 0.04 + 0.96 * pow(1.0 - max(dot(-V, vec3(0.0, 1.0, 0.0)), 0.0), 5.0);
+        float k = clamp(fres * 1.4, 0.0, 1.0) * uWet * pud * found * (1.0 - smoothstep(150.0, 260.0, vz));
+        outputColor = vec4(mix(inputColor.rgb, hit, k * 0.85) + hit * k * 0.15, inputColor.a);
+      }`,
+      {
+        attributes: EffectAttribute.DEPTH,
+        uniforms: new Map<string, THREE.Uniform>([
+          ['uWet', new THREE.Uniform(0)],
+          ['uT', new THREE.Uniform(0)],
+          ['uProj', new THREE.Uniform(new THREE.Matrix4())],
+          ['uProjInv', new THREE.Uniform(new THREE.Matrix4())],
+          ['uView', new THREE.Uniform(new THREE.Matrix4())],
+          ['uViewInv', new THREE.Uniform(new THREE.Matrix4())],
+        ]),
+      },
+    );
+  }
+  private frame = 0;
+  set(camera: THREE.PerspectiveCamera, wet: number) {
+    this.uniforms.get('uWet')!.value = wet;
+    this.uniforms.get('uT')!.value = this.frame++ % 64;
+    (this.uniforms.get('uProj')!.value as THREE.Matrix4).copy(camera.projectionMatrix);
+    (this.uniforms.get('uProjInv')!.value as THREE.Matrix4).copy(camera.projectionMatrixInverse);
+    (this.uniforms.get('uView')!.value as THREE.Matrix4).copy(camera.matrixWorldInverse);
+    (this.uniforms.get('uViewInv')!.value as THREE.Matrix4).copy(camera.matrixWorld);
+  }
+}
+
 export class Post {
+  readonly wetRefl = new WetReflectEffect();
   readonly shafts = new ShaftsEffect();
   readonly exposure = new ExposureEffect();
   readonly composer: EffectComposer;
@@ -124,6 +222,7 @@ export class Post {
   readonly grade = new GradeEffect();
   readonly bloom: BloomEffect;
   private readonly size = new THREE.Vector2();
+  wet = 0;
 
   constructor(readonly renderer: THREE.WebGLRenderer, scene: THREE.Scene, readonly camera: THREE.PerspectiveCamera) {
     const c = (this.composer = new EffectComposer(renderer, { frameBufferType: THREE.HalfFloatType, multisampling: 0 }));
@@ -143,7 +242,7 @@ export class Post {
     c.addPass((this.taa = new TAAPass()));
     this.bloom = new BloomEffect({ mipmapBlur: true, levels: 6, luminanceThreshold: 2.2, luminanceSmoothing: 0.6, intensity: 0.45, radius: 0.6 });
     const tone = new ToneMappingEffect({ mode: ToneMappingMode.AGX });
-    c.addPass(new EffectPass(camera, this.shafts, this.exposure, this.bloom, tone, this.grade, new VignetteEffect({ darkness: 0.34, offset: 0.3 })));
+    c.addPass(new EffectPass(camera, this.wetRefl, this.shafts, this.exposure, this.bloom, tone, this.grade, new VignetteEffect({ darkness: 0.34, offset: 0.3 })));
   }
 
   setSize(w: number, h: number) {
@@ -154,6 +253,7 @@ export class Post {
     this.grade.set(t, night);
     this.exposure.value = exposure;
     this.camera.updateMatrixWorld();
+    this.wetRefl.set(this.camera, this.wet);
     this.renderer.getDrawingBufferSize(this.size);
     this.taa.begin(this.camera, this.size.x, this.size.y, []);
     this.composer.render();
