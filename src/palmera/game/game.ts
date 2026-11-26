@@ -33,6 +33,7 @@ import { Interiors } from './interiors';
 import { SaveGame } from './save';
 import { BodyShop } from './bodyshop';
 import { Wardrobe } from './wardrobe';
+import { Pigeons } from './pigeons';
 import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
@@ -100,6 +101,7 @@ export class Game {
   robbery!: Robbery;
   bodyShop!: BodyShop;
   wardrobe!: Wardrobe;
+  pigeons!: Pigeons;
   interiors!: Interiors;
   saveGame!: SaveGame;
   phone!: Phone;
@@ -150,6 +152,7 @@ export class Game {
     this.robbery = new Robbery(this);
     this.bodyShop = new BodyShop(this);
     this.wardrobe = new Wardrobe(this);
+    this.pigeons = new Pigeons(this);
     this.interiors = new Interiors(this);
     this.saveGame = new SaveGame(this);
     this.phone = new Phone(this);
@@ -913,6 +916,7 @@ export class Game {
       this.robbery.update(sdt);
       this.bodyShop.update(sdt);
       this.wardrobe.update(sdt);
+      this.pigeons.update(sdt);
       this.saveGame.update(sdt);
       this.interiors.update(sdt);
       this.phone.update();
