@@ -956,6 +956,7 @@ export class Game {
   }
 
   private render() {
+    this.post.shafts.set(this.camera, this.sky.sunDir, this.sky.sunColor, this.sky.day, this.sky.sunset);
     this.post.render(this.elapsed, this.sky.night, this.sky.exposure);
   }
 

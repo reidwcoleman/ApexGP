@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BloomEffect, BlendFunction, Effect, EffectComposer, EffectPass, RenderPass, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
+import { BloomEffect, BlendFunction, Effect, EffectAttribute, EffectComposer, EffectPass, RenderPass, ToneMappingEffect, ToneMappingMode, VignetteEffect } from 'postprocessing';
 import { N8AOPostPass } from 'n8ao';
 import { TAAPass } from '../../marbles/post-taa.ts';
 
@@ -50,7 +50,73 @@ class ExposureEffect extends Effect {
   }
 }
 
+/**
+ * Light shafts: from each pixel march toward the sun on screen and count the open sky (depth at the
+ * far plane) along the way; sunlight is added in proportion, so rays fan out through palm fronds and
+ * between towers. Strongest with a low sun in front of you.
+ */
+class ShaftsEffect extends Effect {
+  constructor() {
+    super(
+      'PalmeraShafts',
+      /* glsl */ `
+      uniform vec2 uSun;
+      uniform vec3 uSunCol;
+      uniform float uStrength;
+      void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+        if (uStrength <= 0.001) { outputColor = inputColor; return; }
+        vec2 d = uSun - uv;
+        const int N = 28;
+        vec2 st = d / float(N) * 0.9;
+        float j = fract(sin(dot(uv * 931.7, vec2(12.9898, 78.233))) * 43758.5453);
+        vec2 p = uv + st * j;
+        vec3 acc = vec3(0.0);
+        float w = 1.0, wsum = 0.0;
+        for (int i = 0; i < N; i++) {
+          p += st;
+          vec2 q = clamp(p, vec2(0.001), vec2(0.999));
+          float sky = step(1500.0, -getViewZ(readDepth(q)));
+          vec3 c = texture2D(inputBuffer, q).rgb;
+          // the brighter the sky there (the glow round the sun), the more it carries
+          float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+          acc += (c * smoothstep(0.0, 1.0, lum) + uSunCol * 1.6) * sky * w;
+          wsum += w;
+          w *= 0.955;
+        }
+        acc /= wsum;
+        float r = length(d * vec2(1.0, 0.6));
+        float fall = exp(-r * 1.6);
+        vec3 add = acc * mix(vec3(1.0), uSunCol, 0.6) * fall * uStrength;
+        // the shafts show in the air in front of things, not as a glow on open sky
+        add *= mix(1.0, 0.35, step(1500.0, -getViewZ(depth)));
+        outputColor = vec4(inputColor.rgb + add, inputColor.a);
+      }`,
+      {
+        attributes: EffectAttribute.DEPTH,
+        uniforms: new Map<string, THREE.Uniform>([
+          ['uSun', new THREE.Uniform(new THREE.Vector2(0.5, 0.5))],
+          ['uSunCol', new THREE.Uniform(new THREE.Color(1, 0.8, 0.5))],
+          ['uStrength', new THREE.Uniform(0)],
+        ]),
+      },
+    );
+  }
+  private readonly v = new THREE.Vector3();
+  set(camera: THREE.PerspectiveCamera, sunDir: THREE.Vector3, sunCol: THREE.Color, day: number, sunset: number) {
+    const v = this.v.copy(camera.position).addScaledVector(sunDir, 1000).project(camera);
+    const camFwd = new THREE.Vector3();
+    camera.getWorldDirection(camFwd);
+    const facing = THREE.MathUtils.smoothstep(camFwd.dot(sunDir), 0.05, 0.6);
+    const onScreen = 1 - THREE.MathUtils.smoothstep(Math.max(Math.abs(v.x), Math.abs(v.y)), 1.1, 1.9);
+    (this.uniforms.get('uSun')!.value as THREE.Vector2).set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5);
+    (this.uniforms.get('uSunCol')!.value as THREE.Color).copy(sunCol);
+    const lowSun = THREE.MathUtils.smoothstep(sunDir.y, -0.02, 0.06) * (1 - THREE.MathUtils.smoothstep(sunDir.y, 0.35, 0.8));
+    this.uniforms.get('uStrength')!.value = 1.1 * day * facing * onScreen * (0.35 + 0.65 * Math.max(lowSun, sunset));
+  }
+}
+
 export class Post {
+  readonly shafts = new ShaftsEffect();
   readonly exposure = new ExposureEffect();
   readonly composer: EffectComposer;
   readonly ao: N8AOPostPass;
@@ -77,7 +143,7 @@ export class Post {
     c.addPass((this.taa = new TAAPass()));
     this.bloom = new BloomEffect({ mipmapBlur: true, levels: 6, luminanceThreshold: 2.2, luminanceSmoothing: 0.6, intensity: 0.45, radius: 0.6 });
     const tone = new ToneMappingEffect({ mode: ToneMappingMode.AGX });
-    c.addPass(new EffectPass(camera, this.exposure, this.bloom, tone, this.grade, new VignetteEffect({ darkness: 0.34, offset: 0.3 })));
+    c.addPass(new EffectPass(camera, this.shafts, this.exposure, this.bloom, tone, this.grade, new VignetteEffect({ darkness: 0.34, offset: 0.3 })));
   }
 
   setSize(w: number, h: number) {
