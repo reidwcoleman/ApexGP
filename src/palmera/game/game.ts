@@ -40,6 +40,7 @@ import { Dogs } from './dogs';
 import { SkyTours } from './skytours';
 import { Parts } from './parts';
 import { Garages } from './garage';
+import { Properties } from './properties';
 import { StreetEvents } from './events';
 import { PhotoMode } from './photo';
 import { Club } from './club';
@@ -127,6 +128,7 @@ export class Game {
   skyTours!: SkyTours;
   parts!: Parts;
   garages!: Garages;
+  properties!: Properties;
   street!: StreetEvents;
   private speedBlurW = 0;
   photo!: PhotoMode;
@@ -202,6 +204,7 @@ export class Game {
     this.skyTours = new SkyTours(this);
     this.parts = new Parts(this);
     this.garages = new Garages(this);
+    this.properties = new Properties(this);
     Marker.camera = this.camera;
     this.photo = new PhotoMode(this);
     this.club = new Club(this);
@@ -1068,6 +1071,7 @@ export class Game {
       this.skyTours.update(sdt);
       this.parts.update(sdt);
       this.garages.update(sdt);
+      this.properties.update(sdt);
       this.street.update(sdt);
       this.club.update(sdt);
       this.wakes.update(sdt);

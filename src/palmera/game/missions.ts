@@ -41,13 +41,15 @@ export class Marker {
   static camera: THREE.Camera | null = null;
   group = new THREE.Group();
   private wall: THREE.MeshBasicMaterial;
+  private ringMat: THREE.MeshBasicMaterial;
   constructor(scene: THREE.Scene, color: number, radius: number, height = 6) {
     const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
     this.wall = mat;
     Marker.all.add(this);
     const cyl = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, 28, 1, true), mat);
     cyl.position.y = height / 2;
-    const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 0.8, radius, 32), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+    this.ringMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 0.8, radius, 32), this.ringMat);
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.15;
     this.group.add(cyl, ring);
@@ -59,6 +61,10 @@ export class Marker {
   }
   set visible(v: boolean) {
     this.group.visible = v;
+  }
+  setColor(c: number) {
+    this.wall.color.setHex(c);
+    this.ringMat.color.setHex(c);
   }
   spin(t: number) {
     this.group.rotation.y = t;
@@ -779,6 +785,7 @@ export class Missions {
     if (this.game.exports) out.push(...this.game.exports.blips);
     if (this.game.skyTours) out.push(...this.game.skyTours.blips);
     if (this.game.garages) out.push(...this.game.garages.blips);
+    if (this.game.properties) out.push(...this.game.properties.blips);
     if (this.game.street) out.push(...this.game.street.blips);
     if (this.game.club) out.push(...this.game.club.blips);
     if (this.game.patrol) out.push(...this.game.patrol.blips);
