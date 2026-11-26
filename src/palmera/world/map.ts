@@ -128,6 +128,12 @@ export interface Ramp {
 }
 export const ramps: Ramp[] = [];
 
+/** a repeatable 0..1 from a position (for details that mustn't shift the map's random sequence) */
+function hash2(x: number, z: number): number {
+  const s = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+  return s - Math.floor(s);
+}
+
 export function groundAt(x: number, z: number, refY = 1e9): number {
   let g = groundBase(x, z);
   if (x < -470) g += pondDip(x, z);
@@ -404,6 +410,10 @@ export class CityMap {
   buildings: BuildingSpec[] = [];
   props: PropSpec[] = [];
   parking: ParkingSpot[] = [];
+  /** suburban houses: centre, half sizes along the street (hw) and back from it (hd), the way the front faces (n), along the street (a), a driveway beside it */
+  /** paved ground the grass shouldn't come up through (driveways, paths) */
+  paved: { x0: number; z0: number; x1: number; z1: number }[] = [];
+  houses: { x: number; z: number; hw: number; hd: number; nx: number; nz: number; ax: number; az: number; drive: boolean; seed: number }[] = [];
   flats: PoolSpec[] = [];
   colliders = new ColliderGrid();
   docks: Platform[] = [];
@@ -680,8 +690,10 @@ export class CityMap {
             const col = rng.pick(houseCols);
             if (horiz) this.addBuilding(a, c, hw, hd, h, col, 2, rng, 1, rng.pick(roofCols));
             else this.addBuilding(c, a, hd, hw, h, col, 2, rng, 1, rng.pick(roofCols));
+            const car = rng.chance(0.28);
+            this.houses.push({ x: horiz ? a : c, z: horiz ? c : a, hw: hw / 2, hd: hd / 2, nx: horiz ? 0 : -dir, nz: horiz ? -dir : 0, ax: horiz ? 1 : 0, az: horiz ? 0 : 1, drive: car || hash2(a, c) < 0.45, seed: hash2(c * 1.7, a * 0.3) });
             // driveway car
-            if (rng.chance(0.28)) {
+            if (car) {
               const dc = fixed + dir * 2.6;
               const da = a + hw / 2 + 2.2;
               if (horiz) this.parking.push({ x: da, z: dc, h: dir > 0 ? 0 : Math.PI, region: 'suburb' });

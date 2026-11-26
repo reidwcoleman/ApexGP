@@ -51,6 +51,7 @@ import { Herons } from './herons';
 import { Stunts } from './stunts';
 import { MarshPlants } from '../world/marsh';
 import { Pier } from '../world/pier';
+import { buildHouseFronts } from '../world/houses';
 import { Fireworks } from './fireworks';
 import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
@@ -139,6 +140,7 @@ export class Game {
   marsh!: MarshPlants;
   pier!: Pier;
   fireworks!: Fireworks;
+  houseFronts!: ReturnType<typeof buildHouseFronts>;
   /** real seconds of slow motion left (a stunt jump) */
   slowmo = 0;
   interiors!: Interiors;
@@ -161,6 +163,8 @@ export class Game {
     this.scene.add(this.camera);
 
     this.map = new CityMap();
+    // before the city: the grass map leaves out the driveways and paths it lays down
+    this.houseFronts = buildHouseFronts(this.scene, this.map);
     this.city = new City(this.scene, this.map);
     this.sky = new SkySystem(this.scene, this.renderer);
     this.post = new Post(this.renderer, this.scene, this.camera);
@@ -1072,6 +1076,7 @@ export class Game {
       this.marsh.update(this.camera.position);
       this.pier.update(sdt, this.sky.night, this);
       this.fireworks.update(sdt);
+      this.houseFronts.update(this.camera.position);
       this.herons.update(sdt);
       this.stunts.update(sdt, dt);
       this.reactions.update(sdt);

@@ -38,6 +38,7 @@ function grassMask(map: CityMap): THREE.Texture {
   }
   for (const b of map.buildings) rect(b.x - b.w / 2 - 0.5, b.z - b.d / 2 - 0.5, b.x + b.w / 2 + 0.5, b.z + b.d / 2 + 0.5);
   for (const p of map.parking) rect(p.x - 3.2, p.z - 3.2, p.x + 3.2, p.z + 3.2);
+  for (const r of map.paved) rect(r.x0 - 0.4, r.z0 - 0.4, r.x1 + 0.4, r.z1 + 0.4);
   // swamp roads
   c.strokeStyle = '#000';
   c.lineWidth = 11;
