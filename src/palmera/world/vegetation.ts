@@ -170,7 +170,7 @@ function lobed(lobes: number, seed: number, cols: [number, number]): THREE.Buffe
   const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
   const lo = new THREE.Color(cols[0]), hi = new THREE.Color(cols[1]);
   for (let i = 0; i < lobes; i++) {
-    const g = new THREE.IcosahedronGeometry(0.32 + r() * 0.2, 2).toNonIndexed();
+    const g = new THREE.IcosahedronGeometry(0.32 + r() * 0.2, 1).toNonIndexed();
     const a = (i / lobes) * Math.PI * 2 * 2.3 + r();
     const d = i === 0 ? 0 : 0.25 + r() * 0.45;
     g.translate(Math.cos(a) * d, 0.35 + r() * 0.45 + (i === 0 ? 0.3 : 0) - d * 0.3, Math.sin(a) * d);
@@ -196,18 +196,22 @@ function lobed(lobes: number, seed: number, cols: [number, number]): THREE.Buffe
 }
 
 export function shrubGeometry(): THREE.BufferGeometry {
-  return lobed(11, 7, [0x172a0e, 0x4f6e26]);
+  return lobed(7, 7, [0x172a0e, 0x4f6e26]);
 }
 export function hedgeGeometry(): THREE.BufferGeometry {
-  return lobed(8, 19, [0x15260c, 0x3f5e1e]);
+  return lobed(5, 19, [0x15260c, 0x3f5e1e]);
 }
 /** a cluster of blossoms (white, tinted per instance) that sits on a small mound */
+/** the low mound under a flower bed */
+export function moundGeometry(): THREE.BufferGeometry {
+  return lobed(3, 23, [0x15260c, 0x3f5e1e]);
+}
 export function blossomGeometry(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   let s = 3;
   const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 46; i++) {
-    const g = new THREE.IcosahedronGeometry(0.035 + r() * 0.03, 0).toNonIndexed();
+  for (let i = 0; i < 30; i++) {
+    const g = new THREE.OctahedronGeometry(0.04 + r() * 0.03, 0).toNonIndexed();
     g.deleteAttribute('uv');
     g.scale(1, 0.55, 1);
     const a = r() * Math.PI * 2, d = Math.sqrt(r()) * 0.5;
@@ -285,4 +289,153 @@ export function placePlants(map: CityMap): { shrubs: PlantInst[]; hedges: PlantI
     }
   }
   return { shrubs, hedges, mounds, blossoms };
+}
+
+// ---------------------------------------------------------------- broadleaf trees
+/** a square of leaves on transparent ground: many small rotated leaves, a dense middle */
+export function leafTexture(): THREE.Texture {
+  const S = 256;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const c = cv.getContext('2d')!;
+  let s = 11;
+  const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const leaf = (x: number, y: number, len: number, a: number, l: number) => {
+    c.save();
+    c.translate(x, y);
+    c.rotate(a);
+    const g = Math.floor(95 + l * 90), rr = Math.floor(45 + l * 45), b = Math.floor(25 + l * 25);
+    c.fillStyle = `rgb(${rr},${g},${b})`;
+    c.beginPath();
+    c.moveTo(0, 0);
+    c.quadraticCurveTo(len * 0.5, -len * 0.32, len, 0);
+    c.quadraticCurveTo(len * 0.5, len * 0.32, 0, 0);
+    c.fill();
+    c.strokeStyle = `rgba(20,40,10,0.35)`;
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(0, 0);
+    c.lineTo(len, 0);
+    c.stroke();
+    c.restore();
+  };
+  // twigs
+  c.strokeStyle = 'rgb(70,55,38)';
+  c.lineWidth = 2;
+  for (let i = 0; i < 6; i++) {
+    c.beginPath();
+    c.moveTo(S / 2, S / 2);
+    const a = r() * Math.PI * 2;
+    c.lineTo(S / 2 + Math.cos(a) * S * 0.4, S / 2 + Math.sin(a) * S * 0.4);
+    c.stroke();
+  }
+  for (let i = 0; i < 260; i++) {
+    const a = r() * Math.PI * 2, d = Math.pow(r(), 0.7) * S * 0.44;
+    const x = S / 2 + Math.cos(a) * d, y = S / 2 + Math.sin(a) * d;
+    leaf(x, y, 16 + r() * 16, a + (r() - 0.5) * 1.4, r());
+  }
+  // a solid core so the filler (uv 0.5,0.5) is opaque
+  for (let i = 0; i < 30; i++) leaf(S / 2 + (r() - 0.5) * 20, S / 2 + (r() - 0.5) * 20, 18, r() * 6.3, r());
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+interface CrownOpts {
+  cy: number;
+  rx: number;
+  ry: number;
+  cards: number;
+  size: number;
+  seed: number;
+  tint: number;
+  filler: boolean;
+}
+
+/** a canopy of leaf cards facing out from an ellipsoid, normals bent outward for soft round shading */
+export function crownGeometry(o: CrownOpts): THREE.BufferGeometry {
+  let s = o.seed;
+  const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const pos: number[] = [], nor: number[] = [], uv: number[] = [], col: number[] = [], idx: number[] = [];
+  const tint = new THREE.Color(o.tint);
+  const up = new THREE.Vector3(0, 1, 0), n = new THREE.Vector3(), rt = new THREE.Vector3(), u2 = new THREE.Vector3(), cpos = new THREE.Vector3(), sn = new THREE.Vector3();
+  for (let i = 0; i < o.cards; i++) {
+    // a point in the outer shell, biased upward
+    const th = r() * Math.PI * 2, ph = Math.acos(1 - 2 * Math.pow(r(), 0.8));
+    const k = 0.55 + r() * 0.45;
+    n.set(Math.sin(ph) * Math.cos(th), Math.cos(ph), Math.sin(ph) * Math.sin(th));
+    cpos.set(n.x * o.rx * k, o.cy + n.y * o.ry * k, n.z * o.rx * k);
+    // facing outward with a twist
+    sn.copy(n).add(new THREE.Vector3((r() - 0.5) * 0.8, (r() - 0.2) * 0.6, (r() - 0.5) * 0.8)).normalize();
+    rt.crossVectors(up, sn);
+    if (rt.lengthSq() < 1e-3) rt.set(1, 0, 0);
+    rt.normalize();
+    u2.crossVectors(sn, rt).normalize();
+    const tw = r() * Math.PI * 2, cs = Math.cos(tw), si = Math.sin(tw);
+    const a = rt.clone().multiplyScalar(cs).addScaledVector(u2, si), b = rt.clone().multiplyScalar(-si).addScaledVector(u2, cs);
+    const h = o.size * (0.75 + r() * 0.5) * 0.5;
+    const base = pos.length / 3;
+    const shade = 0.82 + 0.3 * (k - 0.55) / 0.45 + 0.12 * n.y;
+    const hv = 0.9 + r() * 0.2;
+    const sh = new THREE.Vector3(n.x * 0.75, n.y * 0.75 + 0.35, n.z * 0.75).normalize();
+    for (const [p, q] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      pos.push(cpos.x + (a.x * p + b.x * q) * h, cpos.y + (a.y * p + b.y * q) * h, cpos.z + (a.z * p + b.z * q) * h);
+      nor.push(sh.x, sh.y, sh.z);
+      uv.push((p + 1) / 2, (q + 1) / 2);
+      col.push(tint.r * shade * hv, tint.g * shade, tint.b * shade * (2 - hv));
+    }
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  if (!o.filler) return g;
+  // a dark core so the canopy doesn't look hollow
+  const f = new THREE.IcosahedronGeometry(1, 1);
+  f.scale(o.rx * 0.62, o.ry * 0.6, o.rx * 0.62);
+  f.translate(0, o.cy, 0);
+  const fu = f.getAttribute('uv') as THREE.BufferAttribute;
+  for (let i = 0; i < fu.count; i++) fu.setXY(i, 0.5, 0.5);
+  const fc = new Float32Array(fu.count * 3);
+  for (let i = 0; i < fu.count; i++) fc.set([tint.r * 0.6, tint.g * 0.6, tint.b * 0.6], i * 3);
+  f.setAttribute('color', new THREE.BufferAttribute(fc, 3));
+  return mergeGeometries([g.toNonIndexed(), f.index ? f.toNonIndexed() : f])!;
+}
+
+/** a trunk splitting into branches that reach up into the canopy */
+export function trunkGeometry(h: number, r0: number, branches: number, seed: number, crownY: number, crownR: number, color = 0x5b4634): THREE.BufferGeometry {
+  let s = seed;
+  const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const parts: THREE.BufferGeometry[] = [];
+  const seg = (a: THREE.Vector3, b: THREE.Vector3, ra: number, rb: number) => {
+    const d = b.clone().sub(a);
+    const g = new THREE.CylinderGeometry(rb, ra, d.length(), 7, 2);
+    g.translate(0, d.length() / 2, 0);
+    g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize()));
+    g.translate(a.x, a.y, a.z);
+    g.deleteAttribute('uv');
+    parts.push(g.toNonIndexed());
+  };
+  const top = new THREE.Vector3((r() - 0.5) * 0.3, h, (r() - 0.5) * 0.3);
+  seg(new THREE.Vector3(0, -0.2, 0), top, r0, r0 * 0.7);
+  seg(top, new THREE.Vector3(top.x * 1.3, crownY + 0.5, top.z * 1.3), r0 * 0.7, r0 * 0.3);
+  for (let i = 0; i < branches; i++) {
+    const a = (i / branches) * Math.PI * 2 + r();
+    const from = new THREE.Vector3(top.x * (0.6 + r() * 0.4), h * (0.75 + r() * 0.3), top.z * (0.6 + r() * 0.4));
+    const to = new THREE.Vector3(Math.cos(a) * crownR * (0.5 + r() * 0.3), crownY + (r() - 0.3) * 0.8, Math.sin(a) * crownR * (0.5 + r() * 0.3));
+    seg(from, to, r0 * 0.42, r0 * 0.12);
+  }
+  const g = mergeGeometries(parts)!;
+  const p = g.getAttribute('position') as THREE.BufferAttribute;
+  const c = new Float32Array(p.count * 3), bc = new THREE.Color(color);
+  for (let i = 0; i < p.count; i++) {
+    const v = 0.8 + 0.25 * Math.sin(p.getY(i) * 9 + p.getX(i) * 13);
+    c.set([bc.r * v, bc.g * v, bc.b * v], i * 3);
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  return g;
 }

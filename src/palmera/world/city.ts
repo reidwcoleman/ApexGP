@@ -1,5 +1,6 @@
 // Builds all static city meshes from the CityMap: ground, roads, buildings, props, bridge and docks.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { box, cyl, merge, prep } from '../core/geo';
 import { Rng, clamp } from '../core/math';
 import {
@@ -9,7 +10,7 @@ import {
 import * as T from './textures';
 import { addDetail as D } from '../render/detail';
 import { palmKit } from './palms';
-import { Grass, blossomGeometry, hedgeGeometry, placePlants, shrubGeometry } from './vegetation';
+import { Grass, moundGeometry, crownGeometry, leafTexture, trunkGeometry, blossomGeometry, hedgeGeometry, placePlants, shrubGeometry } from './vegetation';
 import { furnitureGeometry, placeFurniture, type FurnitureKind } from './furniture';
 
 // ------------------------------------------------------------ simple mesh builder
@@ -906,15 +907,32 @@ export class City {
     chunked(this.scene, this.chunks, palms, pk.trunk, tm, { far: 520, shadow: true, lodGeo: pk.trunkLo, lodDist: 140 });
     chunked(this.scene, this.chunks, palms, pk.crown, [fm, dm] as unknown as THREE.Material, { far: 520, shadow: true, lodGeo: pk.crownLo, lodDist: 140 });
     void palmMat;
-    chunked(this.scene, this.chunks, groups.get('tree') ?? [], treeGeometry(true), std(), { far: 420, shadow: true, lodGeo: treeGeometry(false), lodDist: 120 });
-    chunked(this.scene, this.chunks, groups.get('cypress') ?? [], cypressGeometry(), std(), { far: 420, shadow: true });
+    // broadleaf trees and swamp cypress: branching trunks under canopies of leaf cards
+    const leafTex = leafTexture();
+    const leafMat = () => swayMaterial(std({ map: leafTex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.8 }), 6);
+    const tLeaf = leafMat(), cLeaf = leafMat();
+    this.palmMats.push(tLeaf, cLeaf);
+    const trees = groups.get('tree') ?? [], cyp = groups.get('cypress') ?? [];
+    chunked(this.scene, this.chunks, trees, trunkGeometry(2.6, 0.22, 4, 5, 4.2, 2.4), std({ roughness: 0.95 }), { far: 420, shadow: true });
+    chunked(this.scene, this.chunks, trees, crownGeometry({ cy: 4.5, rx: 2.7, ry: 1.9, cards: 70, size: 1.7, seed: 9, tint: 0xd8ecc0, filler: true }), tLeaf, { far: 420, shadow: true, lodGeo: crownGeometry({ cy: 4.5, rx: 2.6, ry: 1.8, cards: 18, size: 2.6, seed: 9, tint: 0xd8ecc0, filler: true }), lodDist: 110 });
+    chunked(this.scene, this.chunks, cyp, trunkGeometry(5.5, 0.3, 5, 21, 7.2, 1.6, 0x6a5c4b), std({ roughness: 0.95 }), { far: 420, shadow: true });
+    const cypCrown = () => {
+      const parts = [crownGeometry({ cy: 6.6, rx: 1.7, ry: 1.6, cards: 34, size: 1.4, seed: 31, tint: 0xc4d4a4, filler: true }), crownGeometry({ cy: 8.6, rx: 1.3, ry: 1.4, cards: 26, size: 1.3, seed: 57, tint: 0xc4d4a4, filler: true })];
+      const side = crownGeometry({ cy: 6.0, rx: 1.0, ry: 0.9, cards: 14, size: 1.2, seed: 83, tint: 0xc4d4a4, filler: false }).toNonIndexed();
+      side.translate(1.3, 0, 0.4);
+      parts.push(side);
+      return mergeGeometries(parts)!;
+    };
+    chunked(this.scene, this.chunks, cyp, cypCrown(), cLeaf, { far: 420, shadow: true });
+    void treeGeometry;
+    void cypressGeometry;
     chunked(this.scene, this.chunks, groups.get('bush') ?? [], shrubGeometry(), std(), { far: 250, shadow: false });
     // shrubs, hedges and flower beds round houses and parks; the grass field
     const pl = placePlants(this.map);
-    chunked(this.scene, this.chunks, pl.shrubs, shrubGeometry(), std({ roughness: 0.9 }), { far: 260, shadow: true, lodGeo: bushGeometry(), lodDist: 90 });
-    chunked(this.scene, this.chunks, pl.hedges, hedgeGeometry(), std({ roughness: 0.9 }), { far: 220, shadow: true });
-    chunked(this.scene, this.chunks, pl.mounds, hedgeGeometry(), std({ roughness: 0.9 }), { far: 140, shadow: false });
-    chunked(this.scene, this.chunks, pl.blossoms, blossomGeometry(), new THREE.MeshStandardMaterial({ roughness: 0.7 }), { far: 140, shadow: false });
+    chunked(this.scene, this.chunks, pl.shrubs, shrubGeometry(), std({ roughness: 0.9 }), { far: 170, shadow: false, lodGeo: bushGeometry(), lodDist: 45 });
+    chunked(this.scene, this.chunks, pl.hedges, hedgeGeometry(), std({ roughness: 0.9 }), { far: 150, shadow: false, lodGeo: bushGeometry(), lodDist: 45 });
+    chunked(this.scene, this.chunks, pl.mounds, moundGeometry(), std({ roughness: 0.9 }), { far: 90, shadow: false });
+    chunked(this.scene, this.chunks, pl.blossoms, blossomGeometry(), new THREE.MeshStandardMaterial({ roughness: 0.7 }), { far: 90, shadow: false });
     this.grass = new Grass(this.scene, this.map);
     chunked(this.scene, this.chunks, groups.get('lamp') ?? [], lampGeometry(), std({ roughness: 0.5, metalness: 0.5 }), { far: 380, shadow: true });
     chunked(this.scene, this.chunks, lampHeads, new THREE.BoxGeometry(1, 1, 1), this.lampHeadMat, { far: 600, shadow: false, receive: false });
