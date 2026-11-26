@@ -366,13 +366,18 @@ export class Weapons {
   /** NPC (police) shot at a target with an accuracy 0..1. */
   npcFire(shooter: Human, target: THREE.Vector3, accuracy: number) {
     const g = this.game;
+    // the player in cover is hard to hit: down behind it, and still harder than in the open when peeking
+    const p = g.player;
+    const atCover = p.inCover && target.distanceToSquared(p.pos) < 9;
+    if (atCover) accuracy *= p.aim > 0.5 ? 0.6 : 0.12;
     const w = shooter.weapon === 'fist' || shooter.weapon === 'bat' || shooter.weapon === 'grenade' ? 'pistol' : shooter.weapon;
     const def = WEAPONS[w];
     const muzzle = HumanRenderer.muzzle(shooter, this.v1);
     for (let k = 0; k < (def.pellets ? 5 : 1); k++) {
       this.dir.subVectors(target, muzzle).normalize();
       const miss = Math.random() > accuracy;
-      this.jitter(this.dir, miss ? 0.09 : def.pellets ? 0.04 : 0.01);
+      // a miss at someone in cover goes into the cover (well wide), not just a little off
+      this.jitter(this.dir, miss ? (atCover ? 0.3 : 0.09) : def.pellets ? 0.04 : 0.01);
       const hit = this.trace(muzzle, this.dir, 90, shooter);
       this.applyHit(hit, w === 'rifle' ? 11 : w === 'smg' ? 7 : 8, shooter, muzzle, k === 0);
     }

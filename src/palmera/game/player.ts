@@ -74,6 +74,37 @@ export class PlayerController {
     if (g.elapsed - this.lastDamage > TUNING.healthRegenDelay && p.health < p.maxHealth && !p.dead) p.health = Math.min(p.maxHealth, p.health + TUNING.healthRegenRate * dt);
   }
 
+  /** the wall (or car) you're crouched behind: its normal points out toward you */
+  private cover: { nx: number; nz: number; car: import('../entities/vehicle').Vehicle | null } | null = null;
+  private coverScanT = 0;
+  private coverHint = false;
+  private coverW = 0;
+
+  /** the nearest thing to hide behind within reach: a wall (ray) or a vehicle */
+  private findCover(p: { pos: THREE.Vector3 }, reach: number) {
+    const g = this.game;
+    let best: { d: number; nx: number; nz: number; car: import('../entities/vehicle').Vehicle | null } | null = null;
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      const dx = Math.sin(a), dz = Math.cos(a);
+      const hit = g.map.colliders.raycast(p.pos.x, p.pos.y + 0.9, p.pos.z, dx, 0, dz, reach);
+      if (hit && (!best || hit.t < best.d)) best = { d: hit.t, nx: -dx, nz: -dz, car: null };
+    }
+    for (const v of g.vehicles) {
+      if (v.isBoat || v.driver === 'player') continue;
+      const ox = v.pos.x - p.pos.x, oz = v.pos.z - p.pos.z, d = Math.hypot(ox, oz);
+      const surf = d - Math.min(v.spec.wid, v.spec.len) * 0.6;
+      if (d < 0.01 || surf > reach) continue;
+      if (!best || surf < best.d) best = { d: Math.max(0, surf), nx: -ox / d, nz: -oz / d, car: v };
+    }
+    return best;
+  }
+
+  private leaveCover() {
+    this.cover = null;
+    this.game.player.inCover = false;
+  }
+
   private onFoot(dt: number) {
     const g = this.game;
     const inp = g.input;
@@ -100,16 +131,57 @@ export class PlayerController {
     }
     const fw = (inp.down('KeyW') ? 1 : 0) - (inp.down('KeyS') ? 1 : 0);
     const st = (inp.down('KeyD') ? 1 : 0) - (inp.down('KeyA') ? 1 : 0);
-    this.aiming = inp.aim && !p.swimming;
+    // cover: X to get down behind the nearest wall or car (when there's a fight on), X again to leave
+    const fight = g.wanted.level > 0 || p.weapon !== 'fist';
+    this.coverScanT -= dt;
+    if (!this.cover && fight && this.coverScanT <= 0 && !p.swimming) {
+      this.coverScanT = 0.25;
+      this.coverHint = !!this.findCover(p, 1.8);
+    }
+    if (!this.cover && this.coverHint && fight) g.hud.prompt('<kbd>X</kbd> Take cover');
+    if (inp.hit('KeyX') && !p.swimming) {
+      if (this.cover) this.leaveCover();
+      else {
+        const c = this.findCover(p, 2.2);
+        if (c) {
+          this.cover = { nx: c.nx, nz: c.nz, car: c.car };
+          p.inCover = true;
+          // back up against it
+          const gap = Math.max(0, c.d - 0.45);
+          p.pos.x -= c.nx * gap;
+          p.pos.z -= c.nz * gap;
+          p.vx = p.vz = 0;
+        }
+      }
+    }
+    if (this.cover) {
+      const c = this.cover;
+      const run = p.sprint || inp.hit('Space') || p.down > 0 || (c.car && (c.car.speed > 1.5 || c.car.driver === 'player'));
+      // pull away from it (S relative to the wall) and you're out
+      const sx0 = Math.sin(this.camYaw), sz0 = Math.cos(this.camYaw);
+      const away = (sx0 * fw) * c.nx + (sz0 * fw) * c.nz;
+      if (run || away > 0.6) this.leaveCover();
+    }
     this.aimW = damp(this.aimW, this.aiming ? 1 : 0, 14, dt);
     p.aim = p.weapon !== 'fist' ? this.aimW : 0;
     p.aimPitch = -this.camPitch * 0.9 + 0.05;
     const sx = Math.sin(this.camYaw), sz = Math.cos(this.camYaw);
     const rx = -sz, rz = sx;
     let mx = sx * fw + rx * st, mz = sz * fw + rz * st;
+    if (this.cover) {
+      // in cover you slide along it (A/D relative to the camera), and stop at its edge
+      const tx = -this.cover.nz, tz = this.cover.nx;
+      const side = (rx * tx + rz * tz) >= 0 ? st : -st;
+      mx = tx * side;
+      mz = tz * side;
+      if (side !== 0 && !this.cover.car) {
+        const ahead = g.map.colliders.raycast(p.pos.x + tx * side * 0.5, p.pos.y + 0.9, p.pos.z + tz * side * 0.5, -this.cover.nx, 0, -this.cover.nz, 1.0);
+        if (!ahead) mx = mz = 0;
+      }
+    }
     const ml = Math.hypot(mx, mz);
     p.sprint = inp.down('ShiftLeft') || inp.down('ShiftRight');
-    let speed = p.swimming ? TUNING.swimSpeed : this.aiming ? TUNING.aimWalkSpeed : p.sprint ? TUNING.sprintSpeed : TUNING.runSpeed;
+    let speed = p.swimming ? TUNING.swimSpeed : this.cover ? 1.7 : this.aiming ? TUNING.aimWalkSpeed : p.sprint ? TUNING.sprintSpeed : TUNING.runSpeed;
     if (ml > 0) {
       mx /= ml;
       mz /= ml;
@@ -117,9 +189,10 @@ export class PlayerController {
     g.setDesired(p, mx * speed, mz * speed);
     // facing
     if (this.aiming || (p.weapon !== 'fist' && inp.fire)) p.yaw = this.camYaw;
+    else if (this.cover) p.yaw += wrapAngle(Math.atan2(-this.cover.nx, -this.cover.nz) + Math.PI - p.yaw) * clamp(10 * dt, 0, 1);
     else if (ml > 0) p.yaw += wrapAngle(Math.atan2(mx, mz) - p.yaw) * clamp(12 * dt, 0, 1);
     // jump
-    if (inp.hit('Space') && p.onGround && !p.swimming) {
+    if (inp.hit('Space') && p.onGround && !p.swimming && !p.inCover) {
       p.vy = TUNING.jumpVel;
       p.onGround = false;
       g.audio.whoosh();
@@ -266,8 +339,11 @@ export class PlayerController {
     } else {
       const aim = this.aimW;
       dist = lerp(TUNING.camDistFoot, TUNING.camDistAim, aim);
-      side = lerp(0.35, 0.75, aim);
-      height = lerp(1.55, 1.62, aim);
+      // crouched in cover: a lower, wider shoulder view that rises when you peek to aim
+      this.coverW = damp(this.coverW, p.inCover ? 1 - aim : 0, 8, dt);
+      side = lerp(lerp(0.35, 0.75, aim), 0.85, this.coverW);
+      height = lerp(lerp(1.55, 1.62, aim), 1.05, this.coverW);
+      dist += this.coverW * 0.6;
       const scoped = p.weapon === 'sniper' && aim > 0.5;
       fov = scoped ? 14 : lerp(TUNING.fovFoot, TUNING.fovAim, aim) + (p.sprint && Math.hypot(p.vx, p.vz) > 6 ? 4 : 0);
       if (scoped) dist = 0.4;

@@ -33,6 +33,8 @@ export class Human {
   post: THREE.Vector3 | null = null;
   /** the player's clothes (Threadline) */
   outfit: import('../game/wardrobe').Outfit | null = null;
+  /** crouched behind something (the player, in a gunfight) */
+  inCover = false;
   armor = 0;
   dead = false;
   down = 0; // seconds left lying down

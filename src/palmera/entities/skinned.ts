@@ -241,6 +241,8 @@ export class SkinnedCrowd {
     p.root.visible = true;
     const sp = h.animSpeed;
     let a = sp < 0.25 ? h.clip || 'idle' : sp < 2.1 ? 'walk' : sp < 4.6 ? 'jog' : 'run';
+    // in cover: down behind it, standing only to aim
+    if (h.inCover && h.aim < 0.5 && sp < 2.4) a = 'crouch';
     if (!h.onGround && !h.swimming) a = 'jog';
     if (a !== s.anim) {
       p.play(a, { fade: 0.25, offset: (h.id * 0.31) % 1 });
