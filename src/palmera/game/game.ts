@@ -47,6 +47,7 @@ import { Wakes } from './wakes';
 import { Patrol } from './patrol';
 import { Parachute } from './parachute';
 import { Gators } from './gators';
+import { Herons } from './herons';
 import { Phone } from '../ui/phone';
 import { Rain } from '../world/rain';
 import { detailUniforms } from '../render/detail';
@@ -129,6 +130,7 @@ export class Game {
   patrol!: Patrol;
   chute!: Parachute;
   gators!: Gators;
+  herons!: Herons;
   interiors!: Interiors;
   saveGame!: SaveGame;
   phone!: Phone;
@@ -193,6 +195,7 @@ export class Game {
     this.patrol = new Patrol(this);
     this.chute = new Parachute(this);
     this.gators = new Gators(this);
+    this.herons = new Herons(this);
     this.street = new StreetEvents(this);
     this.interiors = new Interiors(this);
     this.saveGame = new SaveGame(this);
@@ -1048,6 +1051,7 @@ export class Game {
       this.wakes.update(sdt);
       this.patrol.update(sdt);
       this.gators.update(sdt);
+      this.herons.update(sdt);
       this.reactions.update(sdt);
       this.activities.update(sdt);
       this.robbery.update(sdt);
