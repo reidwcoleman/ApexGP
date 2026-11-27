@@ -498,11 +498,14 @@ if (bn.y > 0.5) {
   litCol = r < 0.06 ? vec3(0.55, 0.75, 1.0) : (r < 0.16 ? vec3(1.0, 0.85, 0.6) : vec3(1.0, 0.66, 0.34));
   // the room behind the window
   if (wmask > 0.5) {
-    vec3 T = sideX ? vec3(0.0, 0.0, sign(bn.x)) : vec3(-sign(bn.z), 0.0, 0.0);
+    // along the facade the way u runs, so the ray and its entry point agree (rays meet at the eye: straight edges)
+    vec3 T = sideX ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
     vec3 V = normalize(vBW - cameraPosition);
     vec3 rd = vec3(dot(V, T), dot(V, vec3(0.0, 1.0, 0.0)), -dot(V, bn));
     rd.z = max(rd.z, 0.05);
-    vec2 pin = (f - (0.5 - hw)) / (2.0 * hw);
+    // the room is 1.6x the opening, the opening centred in its front wall: the entry point in true metres
+    vec2 wq = (f - (0.5 - hw)) / (2.0 * hw);
+    vec2 pin = 0.5 + (wq - 0.5) / 1.6;
     float tHit;
     float office = shop ? 2.0 : bStyle < 0.5 ? 1.0 : 0.0;
     float lampK;
@@ -510,7 +513,7 @@ if (bn.y > 0.5) {
     bLamp = lampK;
     // blinds: some windows half shut
     float blind = step(0.55, fract(r * 13.3)) * (0.25 + 0.6 * fract(r * 5.1));
-    if (!shop && pin.y > 1.0 - blind) room = mix(vec3(0.85, 0.8, 0.68), vec3(0.6, 0.66, 0.7), step(0.7, fract(r * 3.3))) * (0.7 + 0.12 * step(0.5, fract(pin.y * 18.0)));
+    if (!shop && wq.y > 1.0 - blind) room = mix(vec3(0.85, 0.8, 0.68), vec3(0.6, 0.66, 0.7), step(0.7, fract(r * 3.3))) * (0.7 + 0.12 * step(0.5, fract(wq.y * 18.0)));
     bInterior = room;
   }
   vec3 glassCol = bStyle < 0.5 ? vec3(0.06, 0.1, 0.12) : vec3(0.02, 0.025, 0.03);
@@ -534,6 +537,10 @@ if (bn.y > 0.5) {
     wmask = max(wmask, band * inCols * 0.85);
   }
   diffuseColor.rgb = mix(diffuseColor.rgb, glassCol, wmask);
+  // glass is smooth: no plaster bump on the panes (it sparkled across the room behind)
+  #ifdef P_DETAIL
+  dOn *= 1.0 - step(0.5, wmask);
+  #endif
   diffuseColor.rgb = mix(diffuseColor.rgb, frameCol, bFrame);
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93, 0.92, 0.88), sill);
   // the opening's reveal: a shadow along the top and one side of each window
