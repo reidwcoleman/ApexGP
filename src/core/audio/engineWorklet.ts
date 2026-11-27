@@ -215,7 +215,9 @@ class ApexEngine extends AudioWorkletProcessor {
       if (!full) {
         var inp = rasp * raspAmt * 2.2 + pop * 0.5;
         svL += fS * svB; var hp = inp - svL - qS * svB; svB += fS * hp;
-        o0[i] = (h * 0.9 + svB * 0.9) * og;
+        // (rasp 0.9 → 0.4, 2026-11-27: the other cars heard from trackside measured 43 % of their energy in
+        // 1.25–2.5 kHz against Assetto Corsa's 9 % — the field is heard by its exhaust body, not its fizz)
+        o0[i] = (h * 0.9 + svB * 0.4) * og;
       } else {
         o0[i] = h * og;
         o1[i] = rasp * og;
