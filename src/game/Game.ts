@@ -26,7 +26,7 @@ import { Engineer } from '../race/Engineer.ts';
 import { AIDriver } from '../sim/AIDriver.ts';
 import { PIT_RACE_LAPS, Race, aiQualifyingTime, aiPace, type Competitor } from '../race/Race.ts';
 import { CarView } from './CarView.ts';
-import { Cameras, CAMERA_LABEL, ONBOARD, INSIDE_CAR, ALL_CAMERAS, DEFAULT_CAM, isRemoteCam, type CameraMode } from './Cameras.ts';
+import { Cameras, CAMERA_LABEL, ONBOARD, INSIDE_CAR, ALL_CAMERAS, DEFAULT_CAM, DRIVER_EYE, isRemoteCam, type CameraMode } from './Cameras.ts';
 import { ReplayBuffer, RF, type ReplayEvent } from './Replay.ts';
 import { Director, type FieldCar } from './Director.ts';
 import { Sightlines } from './Sightlines.ts';
@@ -4292,6 +4292,7 @@ export class Game {
     g.motionBlur = live && !lowGfx ? MOTION_SHUTTER[this.menu.settings.motionBlur ?? 'subtle'] * (1 + MOTION_SPEED_GAIN * fast) : 0;
     const eye = (st === 'race' || st === 'intro' || st === 'flashback' || st === 'paused') && INSIDE_CAR[this.cams.view];
     g.onboardCar = eye ? (this.rigs.get(this.race.player.entry)?.root ?? null) : null;
+    g.onboardShade = this.cams.view === 'eye' ? DRIVER_EYE.shade : 1;
     // (its steering wheel turns inside it: the TAA and the motion blur follow the wheel's own turn)
     g.onboardWheel = eye ? (this.rigs.get(this.race.player.entry)?.wheel ?? null) : null;
     // the look (Renderer.broadcast): the cameras you drive with see the sim's clean image (ACC); the

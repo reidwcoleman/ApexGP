@@ -1789,7 +1789,7 @@ export class Renderer {
     // the cockpit: footage shades it hard and defocuses it (a lens exposed for the outside, focused far);
     // the sim's eye sees it in shade but readable and sharp, as ACC's cockpit view does
     const ou = this.onboard.uniforms;
-    ou.get('shade')!.value = THREE.MathUtils.lerp(0.5, 1, b);
+    this.lookShade = THREE.MathUtils.lerp(0.5, 1, b);
     ou.get('outside')!.value = THREE.MathUtils.lerp(1.0, 1.12, b);
     ou.get('defocus')!.value = THREE.MathUtils.lerp(0.0105 * 0.25, 0.0105, b);
     ou.get('obVig')!.value = THREE.MathUtils.lerp(0.12, 0.5, b);
@@ -1927,6 +1927,9 @@ export class Renderer {
 
   /** the car an onboard camera rides in (null = not onboard): its own cockpit is shaded and defocused */
   onboardCar: THREE.Object3D | null = null;
+  /** how much of the look's cockpit shade this eye camera gets (1 = all; the 'Driver eye' sim view less) */
+  onboardShade = 1;
+  private lookShade = 1;
   /** the steering wheel in it (CarRig.wheel; null when not onboard or not at the nearest detail) */
   onboardWheel: THREE.Object3D | null = null;
   private updateOnboard() {
@@ -1934,6 +1937,7 @@ export class Renderer {
     this.onboardPass.enabled = own !== null;
     if (!own) return;
     const u = this.onboard.uniforms;
+    u.get('shade')!.value = this.lookShade * this.onboardShade;
     this.onboard.setCamera(this.camera);
     (u.get('projInv')!.value as THREE.Matrix4).copy(this.camera.projectionMatrixInverse);
     (u.get('camWorld')!.value as THREE.Matrix4).copy(this.camera.matrixWorld);
