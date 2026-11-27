@@ -178,13 +178,14 @@ const MOUNTS: Partial<Record<CameraMode, Mount>> = {
   // (shell, visor peak, spoiler, livery) at the bottom, the halo's ring round it, the nose running
   // out under the hoop between the front tyres, the mirrors at the sides; a slightly wide lens
   // (~95° across on 16:9, the real pod's small wide-angle block), the whole car rolling with it
-  // (F1 25's TV pod sits a touch higher than the real pod and tips down a little less, so the helmet
-  // takes the bottom fifth of the picture and the road ahead the rest)
-  tcam: { pos: [0, 1.07, -0.2], dir: [0, -0.125, 1], fov: 61, shake: 0.65, prof: 'tcam', flex: 22, level: 0.1, dyn: 4 },
+  // (2026-11-27: was F1 25's framing, tipped ~7° down with the horizon 40 % from the top; matched to the
+  // real T-cam (Norris's 2025 Spa pole lap): ~15° down, a touch higher — horizon ~28 % from the top, the
+  // halo's ring across the middle, the front tyres' tops above it, the helmet below)
+  tcam: { pos: [0, 1.1, -0.2], dir: [0, -0.27, 1], fov: 61, shake: 0.65, prof: 'tcam', flex: 22, level: 0.1, dyn: 4 },
   // the TV pod offset: the lens in the left end of the T-bar, as the broadcast's second onboard —
   // the helmet and the halo's hoop off to the right of the picture, the left front tyre and the
   // road ahead in the clear
-  tcamoff: { pos: [0.24, 1.05, -0.22], dir: [-0.012, -0.115, 1], fov: 61, shake: 0.65, prof: 'tcam', flex: 22, level: 0.1, dyn: 4 },
+  tcamoff: { pos: [0.24, 1.08, -0.22], dir: [-0.012, -0.25, 1], fov: 61, shake: 0.65, prof: 'tcam', flex: 22, level: 0.1, dyn: 4 },
   // the pod's rear-facing lens: the engine cover's spine and fin, the rear wing, whoever is behind above
   tcamrev: { pos: [0, 1.05, -0.3], dir: [0, -0.16, -1], fov: 58, shake: 0.6, prof: 'tcam', flex: 22, level: 0.1, dyn: 2 },
   // the broadcast halo camera: low in the tub in front of the driver, bolted to the chassis (no neck
