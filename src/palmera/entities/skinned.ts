@@ -188,6 +188,7 @@ export class SkinnedCrowd {
     }
     if (h.kind === 'cop') {
       const female = r() < 0.25;
+      if (h.guard) return { female, tone: r(), top: 'polo', topColor: 0x6a6e74, top2: 0x6a6e74, accent: 0x0d0e10, bottom: 'trousers', bottomColor: 0x23252a, shoeColor: 0x0b0b0c, cap: 0x15161a, hair: 'none', hairColor: 0x1a120c };
       return { female, tone: r(), top: 'polo', topColor: 0x2c4a78, top2: 0x2c4a78, accent: 0x0d0e10, bottom: 'trousers', bottomColor: 0x1d2433, shoeColor: 0x0b0b0c, cap: 0x1d2433, hair: 'none', hairColor: 0x1a120c };
     }
     const names = STREET.filter((n) => n !== 'Male_Adult_08');

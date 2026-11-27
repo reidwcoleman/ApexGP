@@ -43,6 +43,7 @@ import { Garages } from './garage';
 import { Properties } from './properties';
 import { Delivery } from './delivery';
 import { Fishing } from './fishing';
+import { CashVan } from './cashvan';
 import { StreetEvents } from './events';
 import { PhotoMode } from './photo';
 import { Club } from './club';
@@ -133,6 +134,7 @@ export class Game {
   properties!: Properties;
   delivery!: Delivery;
   fishing!: Fishing;
+  cashVan!: CashVan;
   street!: StreetEvents;
   private speedBlurW = 0;
   photo!: PhotoMode;
@@ -213,6 +215,7 @@ export class Game {
     this.properties = new Properties(this);
     this.delivery = new Delivery(this);
     this.fishing = new Fishing(this);
+    this.cashVan = new CashVan(this);
     Marker.camera = this.camera;
     this.photo = new PhotoMode(this);
     this.club = new Club(this);
@@ -1083,6 +1086,7 @@ export class Game {
       this.properties.update(sdt);
       this.delivery.update(sdt);
       this.fishing.update(sdt);
+      this.cashVan.update(sdt);
       this.street.update(sdt);
       this.club.update(sdt);
       this.wakes.update(sdt);

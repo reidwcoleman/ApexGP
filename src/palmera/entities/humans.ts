@@ -29,6 +29,8 @@ export class Human {
   texting = false;
   /** holding a fishing rod (game/fishing.ts): both hands forward at the hip */
   fishing = false;
+  /** a cop-kind security guard (grey uniform) */
+  guard = false;
   /** down on the pavement waiting for an ambulance */
   injured = false;
   /** a spot to hold (officers at a roadblock) */

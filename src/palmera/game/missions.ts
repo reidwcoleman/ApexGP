@@ -791,6 +791,7 @@ export class Missions {
       out.push(...this.game.delivery.blips);
     }
     if (this.game.street) out.push(...this.game.street.blips);
+    if (this.game.cashVan) out.push(...this.game.cashVan.blips);
     if (this.game.club) out.push(...this.game.club.blips);
     if (this.game.patrol) out.push(...this.game.patrol.blips);
     if (this.game.stunts) out.push(...this.game.stunts.blips);
