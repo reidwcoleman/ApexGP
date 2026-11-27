@@ -312,7 +312,7 @@ export function tempGrip(T: number, opt: number): number {
  * shed heat 25% faster. Calibrated so a hard-pushed lap at Monza sits in the
  * window (~100 °C) and the tyres cool on the long straights.
  */
-const TYRE_HEAT_SLIP = 0.000515;
+const TYRE_HEAT_SLIP = 0.00046; // (0.000515 → 0.00046 with the 2026-11-27 downforce: the fronts ran ~8 °C hotter on the same laps)
 const TYRE_HEAT_ROLL = 0.000002;
 const TYRE_COOL_0 = 0.012;
 const TYRE_COOL_V = 0.00042;
