@@ -30,7 +30,7 @@ import { beepSound, CarFx, type CarFxMix, Crowd, impactSound, explosionSound, ra
 import { DistantField, type FarCar, TreeWind, WallReflections } from './audio/ambience.ts';
 import { LofiMusic } from './audio/music.ts';
 
-export type AudioView = 'chase' | 'cockpit' | 'tv';
+export type AudioView = 'chase' | 'cockpit' | 'pod' | 'tv';
 
 export interface PlayerAudioState {
   /** engine rpm (≈4000–12500; < 300 = engine off) */
@@ -103,7 +103,36 @@ interface ViewMix extends EngineMix, CarFxMix {
   reverb: number;
   /** low-shelf dB on near layers (chassis/helmet boom) */
   body: number;
+  /** high-shelf dB on near layers above ~650 Hz (an open microphone's edge; the helmet takes it off) */
+  presence?: number;
+  /** a broadcast onboard microphone driven into saturation (0 = clean): adds the harmonics a pure firing tone lacks */
+  drive?: number;
+  /** high-pass on near layers (Hz; none by default): the pod's microphone hears little of the half-order rumble */
+  hp?: number;
+  /** peaking dB at ~1.8 kHz on near layers (the pod mic's upper harmonics) */
+  edge?: number;
   opponents: number;
+}
+
+/**
+ * The onboard microphone's distortion as a level-independent curve: x + d·|x| (the rectified part puts a
+ * second harmonic under every tone whatever its level — a driven, asymmetric mic capsule), scaled back to
+ * the same peak; the DC it adds is taken out by the high-pass after it. d = 0 is a straight line.
+ */
+const driveCurves = new Map<number, Float32Array<ArrayBuffer>>();
+function driveCurve(d: number): Float32Array<ArrayBuffer> | null {
+  // (none: a WaveShaper with no curve passes the signal untouched, where even a straight line clips at ±1)
+  if (d <= 0) return null;
+  let c = driveCurves.get(d);
+  if (c) return c;
+  const n = 2049;
+  c = new Float32Array(new ArrayBuffer(n * 4));
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    c[i] = (x + d * Math.abs(x)) / (1 + d);
+  }
+  driveCurves.set(d, c);
+  return c;
 }
 
 const VIEWS: Record<AudioView, ViewMix> = {
@@ -116,6 +145,14 @@ const VIEWS: Record<AudioView, ViewMix> = {
   cockpit: {
     exhaust: 1.0, rasp: 0.4, pops: 0.5, intake: 0.32, roar: 0.42, mech: 0.36, whistle: 0.7, gear: 0.7, ers: 1.0,
     tyres: 1.25, wind: 1.9, buffet: 2.0, nearDirect: 1, outsideLP: 1900, reverb: 0.03, body: 4, opponents: 0.7,
+  },
+  // the TV pod's microphone on the roll hoop, over the airbox: the intake's roar and the exhaust's edge
+  // straight into it, no helmet or tub round it (2026-11-27: the real T-cam audio of Norris's 2025 Spa
+  // pole lap and AC's own T-cam both centre at ~1200–1350 Hz, half the energy in 630 Hz–2.5 kHz; the
+  // cockpit mix the pod cameras used sat at ~665)
+  pod: {
+    exhaust: 0.72, rasp: 0.32, pops: 0.6, intake: 0.54, roar: 0.22, mech: 0.25, whistle: 0.75, gear: 0.5, ers: 0.8,
+    tyres: 0.9, wind: 1.1, buffet: 0.7, nearDirect: 1, outsideLP: 3600, reverb: 0.04, body: 0, presence: 5, drive: 1, hp: 380, edge: 13, opponents: 0.8,
   },
   // (outside, the footage is still dark and heavy: the exhaust's body, not its fizz — the air and the
   // distance take the top off, the wind and the road fill the bottom)
@@ -156,6 +193,11 @@ export class GameAudio {
   private uiBus!: GainNode;
   private nearIn!: GainNode;
   private nearBody!: BiquadFilterNode;
+  private nearPresence!: BiquadFilterNode;
+  private nearDrive!: WaveShaperNode;
+  private nearHP!: BiquadFilterNode;
+  private nearHP2!: BiquadFilterNode;
+  private nearEdge!: BiquadFilterNode;
   private nearAtt!: GainNode;
   private nearPan!: StereoPannerNode;
   private nearDirect!: GainNode;
@@ -284,11 +326,17 @@ export class GameAudio {
     // --- player buses
     this.nearIn = gainNode(ctx, 1);
     this.nearBody = biquad(ctx, 'lowshelf', 140, 0.7, v.body);
+    this.nearPresence = biquad(ctx, 'highshelf', 650, 0.7, v.presence ?? 0);
+    this.nearHP = biquad(ctx, 'highpass', v.hp ?? 10, 0.7);
+    this.nearHP2 = biquad(ctx, 'highpass', v.hp ?? 10, 0.7);
+    this.nearEdge = biquad(ctx, 'peaking', 2000, 0.8, v.edge ?? 0);
+    this.nearDrive = new WaveShaperNode(ctx, { oversample: '2x' });
+    this.nearDrive.curve = driveCurve(v.drive ?? 0);
     this.nearAtt = gainNode(ctx, 1);
     this.nearPan = new StereoPannerNode(ctx, { pan: 0 });
     this.nearDirect = gainNode(ctx, v.nearDirect);
     this.nearOut = gainNode(ctx, 1 - v.nearDirect);
-    chain(this.nearIn, this.nearBody, this.nearAtt, this.nearPan);
+    chain(this.nearIn, this.nearBody, this.nearDrive, this.nearHP, this.nearHP2, this.nearEdge, this.nearPresence, this.nearAtt, this.nearPan);
     this.nearPan.connect(this.nearDirect).connect(this.direct);
     this.nearPan.connect(this.nearOut).connect(this.outside);
     const farIn = gainNode(ctx, 1);
@@ -436,7 +484,7 @@ export class GameAudio {
     setT(this.master.gain, this.vol, this.now(), 0.03);
   }
 
-  setView(v: 'chase' | 'cockpit' | 'tv'): void {
+  setView(v: AudioView): void {
     if (v === this.view) return;
     this.view = v;
     if (v === 'tv') this.tv.x = -(80 + Math.random() * 60);
@@ -451,6 +499,11 @@ export class GameAudio {
     setT(this.outsideLP.frequency, v.outsideLP, now, 0.08);
     setT(this.revSend.gain, v.reverb, now, 0.1);
     setT(this.nearBody.gain, v.body, now, 0.1);
+    setT(this.nearPresence.gain, v.presence ?? 0, now, 0.1);
+    this.nearDrive.curve = driveCurve(v.drive ?? 0);
+    setT(this.nearHP.frequency, v.hp ?? 10, now, 0.1);
+    setT(this.nearHP2.frequency, v.hp ?? 10, now, 0.1);
+    setT(this.nearEdge.gain, v.edge ?? 0, now, 0.1);
     setT(this.oppBus.gain, v.opponents, now, 0.1);
     if (this.view !== 'tv') {
       this.dop = 1;

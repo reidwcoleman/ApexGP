@@ -4402,7 +4402,7 @@ export class Game {
     const watching = this.state === 'spectate' || replaying;
     const ours = watching ? (race.cars[this.focusId] ?? race.player) : race.player;
     const car = carOf(ours);
-    a.setView(ONBOARD[this.cams.view] ? 'cockpit' : isRemoteCam(this.cams.view) || this.cams.view === 'gtchase' ? 'tv' : 'chase');
+    a.setView(INSIDE_CAR[this.cams.view] ? 'cockpit' : ONBOARD[this.cams.view] ? 'pod' : isRemoteCam(this.cams.view) || this.cams.view === 'gtchase' ? 'tv' : 'chase');
     if (car.lastShift !== 0) a.shift(car.lastShift > 0);
     a.weather(w.rain, (car.wetW[2] + car.wetW[3]) / 2, Math.max(0, car.vx), w.lightning, Math.hypot(w.windX, w.windZ), w.strike, w.strikeKm);
     const slip = Math.max(0, Math.max(car.slipRear, car.slipFront) - 0.85) + car.lockup + car.wheelspin * 0.8;
