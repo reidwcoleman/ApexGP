@@ -442,11 +442,11 @@ npm run check    # tsc --noEmit
   Monza's skinny wings 0.8 of the downforce and 0.7 of the drag (`AERO_DRAG`), Spa and Montréal low, the
   Hungaroring high). The car is calibrated against the speed traces of seven 2024 pole laps (OpenF1
   `car_data`: Monza, Suzuka, Silverstone, Hungaroring, Bahrain, Melbourne, Mexico): corner minimum speeds
-  within ~8 % in the fast corners and ~3 % in the slow ones, the AI at its limit within ~±2 % of each pole
+  within ~5 % in the fast corners and ~2 % in the slow ones, the AI at its limit within ~±2 % of each pole
   (Suzuka 1:28.1 vs 1:28.2, Hungaroring 1:15.3 vs 1:15.2, Bahrain 1:29.0 vs 1:29.2), Monza's T1 337→84 km/h
   in 124 m (Brembo: 349→87 in 137 m).
-  Validated with `tools/handling.mjs`: 0–100 km/h 2.2 s, 0–200 4.2 s, 0–300 10.5 s, 300→80 km/h in 64 m at
-  6.3 g peak with ABS (69 m locked up without it), 2.0 g cornering at 100 km/h, 4.5 g at 200, ~6 g at 280, stable at full lock at any speed;
+  Validated with `tools/handling.mjs`: 0–100 km/h 2.2 s, 0–200 4.2 s, 0–300 10.8 s, 300→80 km/h in 63 m at
+  6.4 g peak with ABS (68 m locked up without it), 2.1 g cornering at 100 km/h, 4.8 g at 200, ~6.5 g at 280, stable at full lock at any speed;
   trail-braking rotates the car ~1.4× more than coasting into the same turn, full throttle at a 2nd-gear apex
   spins it with no assists, as a real F1 car without traction control would (≈6° on Standard), an exit kerb on the power at 200 km/h kicks
   the yaw rate ~13°/s, and the wet table drops cornering grip to ~63 % on slicks / ~78 % on inters at half-wet.

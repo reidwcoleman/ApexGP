@@ -131,14 +131,16 @@ export const F1_SPEC: CarSpec = {
   // (2026-11-27: 6.5 / 1.1, mu 2.05, loadSens 0.075, 735 kW → calibrated against seven real 2024 pole laps
   // (OpenF1 speed traces): the fast corners were 9–27 % slow and the straights too quick, cancelling out
   // in the lap time. More downforce, less raw tyre grip, more drag, less power: fast corners −8 %, slow
-  // −3 %, laps within ±2 %, ~4.3 g at 200 km/h)
-  clA: 11,
-  cdA: 1.2,
+  // −3 %, laps within ±2 %; then, with the braking capped by brakeTorque, clA 11 → 12.5, mu 1.72 → 1.68,
+  // cdA 1.2 → 1.22: fast corners −4.6 %, slow −2 %, 0–300 km/h 10.8 s, ~4.8 g at 200 km/h, top speeds
+  // ~10 km/h under the pole laps', which had DRS open on every straight)
+  clA: 12.5,
+  cdA: 1.22,
   aeroFront: 0.415,
   drsDrag: 0.24,
   drsLift: 0.34,
   pitchAero: 0.0015,
-  mu: 1.72,
+  mu: 1.68,
   loadSens: 0.025,
   slipAnglePeak: 0.1,
   slipAnglePeakRear: 0.082,
