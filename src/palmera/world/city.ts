@@ -1154,6 +1154,8 @@ export class City {
   /** where on each helipad roof the pad is painted */
   readonly padAt = new Map<BuildingSpec, { x: number; z: number }>();
   private ledges: Inst[] = [];
+  /** glass caps, wedges, lit crown edges built (for tests) */
+  crownStats = [0, 0, 0];
 
   private buildBuildingDetail() {
     const trim: Inst[] = [], balc: Inst[] = [], rail: Inst[] = [], plant: Inst[] = [], awn: Inst[] = [], signs: Inst[] = [];
@@ -1166,20 +1168,55 @@ export class City {
       list.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(sx, sy, sz)), c });
     const awnCols = [0x1f8a8a, 0xd8574a, 0x2b5fa8, 0xf2c14e, 0x3f8f5a, 0xe8e2d0, 0xc0477a];
     const white = new THREE.Color(0xf3f0ea), grey = new THREE.Color(0x9a9a96), dark = new THREE.Color(0x5a5c5e);
+    const caps: Inst[] = [], wedges: Inst[] = [], crownGlow: Inst[] = [];
+    const warmGlow = new THREE.Color(0xfff0d8), screenCol = new THREE.Color(0x56626e);
     for (const l of this.ledges) trim.push(l);
     for (const b of this.map.buildings) {
       if (this.landmarks.has(b)) continue;
       const top = b.y0 + b.h;
       const base = new THREE.Color(b.color);
       const light = base.clone().lerp(white, 0.75);
+      // office tower tops vary the skyline: a tall screen wall lit along its top edge, a glass hip
+      // cap or a slanted glass wedge (the last two only where nothing stands on the roof)
+      let crown = -1;
+      if (b.style === 0 && top > 30 && !b.roof && !this.helipads.has(b)) {
+        // a cap may go over the roof's plant sheds when it stands taller than them; never over a tier
+        const on = this.map.buildings.filter((o) => o !== b && Math.abs(o.y0 - top) < 0.5 && Math.abs(o.x - b.x) < (b.w + o.w) / 2 && Math.abs(o.z - b.z) < (b.d + o.d) / 2);
+        const under = (hMax: number) => on.every((o) => o.style === 4 && o.h < hMax && Math.abs(o.x - b.x) + o.w / 2 <= b.w * 0.32 && Math.abs(o.z - b.z) + o.d / 2 <= b.d * 0.32);
+        const m = Math.min(b.w, b.d);
+        const k = (b.seed * 7.31) % 1;
+        crown = k < 0.28 ? 0 : k < 0.6 && under(m * 0.5 * 0.4 - 0.05) ? 1 : k < 0.88 && under(m * 0.45 * 0.4 - 0.05) ? 2 : -1;
+      }
+      if (crown === 1 || crown === 2) {
+        put(trim, b.x, top - 0.25, b.z, b.w + 0.5, 0.42, b.d + 0.5, light);
+        const h = Math.min(b.w, b.d) * (crown === 1 ? 0.5 : 0.45);
+        if (crown === 1) put(caps, b.x, top, b.z, b.w - 0.4, h, b.d - 0.4, light);
+        else {
+          const turn = Math.floor(((b.seed * 13.7) % 1) * 4);
+          const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), (turn * Math.PI) / 2);
+          put(wedges, b.x, top, b.z, turn % 2 ? b.d - 0.4 : b.w - 0.4, h, turn % 2 ? b.w - 0.4 : b.d - 0.4, light, qy);
+        }
+        // a lit band where the glass meets the roof
+        put(crownGlow, b.x, top + 0.04, b.z, b.w - 0.2, 0.1, b.d - 0.2, warmGlow);
+        continue;
+      }
       if (!b.roof && b.style !== 2) {
         // cornice slab and a parapet round the roof
         put(trim, b.x, top - 0.25, b.z, b.w + 0.5, 0.42, b.d + 0.5, light);
-        const t = 0.25, ph = b.style === 0 ? 1.4 : 1.0;
-        put(trim, b.x, top + ph / 2, b.z - b.d / 2 + t / 2, b.w, ph, t, light);
-        put(trim, b.x, top + ph / 2, b.z + b.d / 2 - t / 2, b.w, ph, t, light);
-        put(trim, b.x - b.w / 2 + t / 2, top + ph / 2, b.z, t, ph, b.d - 2 * t, light);
-        put(trim, b.x + b.w / 2 - t / 2, top + ph / 2, b.z, t, ph, b.d - 2 * t, light);
+        const t = 0.25, ph = crown === 0 ? 5.5 : b.style === 0 ? 1.4 : 1.0;
+        const pc = crown === 0 ? screenCol : light;
+        if (crown === 0) {
+          // the screen's top edge lit at night (a thin frame just proud of the wall)
+          const y = top + ph + 0.06;
+          put(crownGlow, b.x, y, b.z - b.d / 2 + 0.05, b.w + 0.1, 0.12, 0.14, warmGlow);
+          put(crownGlow, b.x, y, b.z + b.d / 2 - 0.05, b.w + 0.1, 0.12, 0.14, warmGlow);
+          put(crownGlow, b.x - b.w / 2 + 0.05, y, b.z, 0.14, 0.12, b.d, warmGlow);
+          put(crownGlow, b.x + b.w / 2 - 0.05, y, b.z, 0.14, 0.12, b.d, warmGlow);
+        }
+        put(trim, b.x, top + ph / 2, b.z - b.d / 2 + t / 2, b.w, ph, t, pc);
+        put(trim, b.x, top + ph / 2, b.z + b.d / 2 - t / 2, b.w, ph, t, pc);
+        put(trim, b.x - b.w / 2 + t / 2, top + ph / 2, b.z, t, ph, b.d - 2 * t, pc);
+        put(trim, b.x + b.w / 2 - t / 2, top + ph / 2, b.z, t, ph, b.d - 2 * t, pc);
         // rooftop plant
         if (this.helipads.has(b)) {
           // the pad keeps the roof clear
@@ -1287,6 +1324,12 @@ export class City {
     chunked(this.scene, this.chunks, rail, box1, stucco, { far: 450, shadow: true });
     const metal = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.5 });
     chunked(this.scene, this.chunks, plant, box1, metal, { far: 900, shadow: true });
+    // tower crowns: glass caps and wedges, and the lit edges
+    const glass = crownGlassMaterial();
+    this.crownStats = [caps.length, wedges.length, crownGlow.length];
+    chunked(this.scene, this.chunks, caps, hipCapGeometry(), glass, { far: 2200, shadow: true });
+    chunked(this.scene, this.chunks, wedges, wedgeGeometry(), glass, { far: 2200, shadow: true });
+    chunked(this.scene, this.chunks, crownGlow, box1, this.neonMat, { far: 2200, shadow: false, receive: false });
     const kit = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.35 });
     // a city of rooftop AC units (1,500 in view from the suburbs): a plain box at range and for shadows
     const acBox = new THREE.BoxGeometry(1.4, 0.95, 1.0).translate(0, 0.48, 0);
@@ -1739,4 +1782,55 @@ function roofKitGeometry(kind: 'ac' | 'vent' | 'tank' | 'mast'): THREE.BufferGeo
     P.push(box(0.12, 0.12, 0.12, 0, 9.05, 0, 0xc81e1e));
   }
   return merge(P);
+}
+
+/** a glass hip cap on a unit square base, 1 high: four sloping faces to a short ridge-less flat top */
+function hipCapGeometry() {
+  const g = new THREE.CylinderGeometry(0.1 * Math.SQRT2, Math.SQRT1_2, 1, 4, 1);
+  g.rotateY(Math.PI / 4);
+  g.translate(0, 0.5, 0);
+  return g.toNonIndexed();
+}
+
+/** a wedge on a unit square base: 1 high along +z, sloping down to 0.4 high at the -z edge */
+function wedgeGeometry() {
+  const a = [-0.5, 0, -0.5], b = [0.5, 0, -0.5], c = [0.5, 0, 0.5], d = [-0.5, 0, 0.5], e = [-0.5, 1, 0.5], f = [0.5, 1, 0.5];
+  const a2 = [-0.5, 0.4, -0.5], b2 = [0.5, 0.4, -0.5];
+  // the low wall, the slope, the tall face, the two sides (each a quad and the triangle above it), the base
+  const tris = [a, b2, b, a, a2, b2, a2, f, b2, a2, e, f, d, c, f, d, f, e, a, d, e, a, e, a2, b, b2, f, b, f, c, a, b, c, a, c, d];
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(tris.flat(), 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+/** tower crown glass: panes between mullions (by world position), lit warm from inside after dark */
+function crownGlassMaterial() {
+  const m = new THREE.MeshStandardMaterial({ color: 0x9fb8cc, roughness: 0.1, metalness: 0.8, side: THREE.DoubleSide });
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uNight = cityUniforms.uNight;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vCW;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+vec4 cw4 = vec4(transformed, 1.0);
+#ifdef USE_INSTANCING
+cw4 = instanceMatrix * cw4;
+#endif
+vCW = (modelMatrix * cw4).xyz;`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vCW; uniform float uNight;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+vec3 cwA = abs(fract(vec3(vCW.x / 1.5, vCW.y / 1.25, vCW.z / 1.5)) - 0.5);
+vec3 cwN = abs(normalize(cross(dFdx(vCW), dFdy(vCW))));
+vec3 cwK = 1.0 - step(0.8, cwN); // no lines along the axis a face looks down
+float mull = max(max(step(0.46, cwA.x) * cwK.x, step(0.45, cwA.y) * cwK.y), step(0.46, cwA.z) * cwK.z);
+diffuseColor.rgb *= mix(1.0, 0.3, mull);`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+roughnessFactor = mix(roughnessFactor, 0.6, mull);`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+float cwRow = fract(sin(dot(floor(vCW.xz / 1.5) + floor(vCW.y / 1.25) * 7.0, vec2(12.9898, 78.233))) * 43758.5453);
+totalEmissiveRadiance += vec3(1.0, 0.74, 0.45) * uNight * (1.0 - mull) * (0.08 + 0.32 * step(0.6, cwRow));`);
+  };
+  m.customProgramCacheKey = () => 'palmera-crownglass-v1';
+  return m;
 }
