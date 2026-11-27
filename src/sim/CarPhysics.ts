@@ -128,27 +128,33 @@ export const F1_SPEC: CarSpec = {
   trackR: 1.55,
   wheelR: 0.36,
   wheelI: 1.1,
-  clA: 6.5,
-  cdA: 1.1,
+  // (2026-11-27: 6.5 / 1.1, mu 2.05, loadSens 0.075, 735 kW → calibrated against seven real 2024 pole laps
+  // (OpenF1 speed traces): the fast corners were 9–27 % slow and the straights too quick, cancelling out
+  // in the lap time. More downforce, less raw tyre grip, more drag, less power: fast corners −8 %, slow
+  // −3 %, laps within ±2 %, ~4.3 g at 200 km/h)
+  clA: 11,
+  cdA: 1.2,
   aeroFront: 0.415,
   drsDrag: 0.24,
   drsLift: 0.34,
   pitchAero: 0.0015,
-  mu: 2.05,
-  loadSens: 0.075,
+  mu: 1.72,
+  loadSens: 0.025,
   slipAnglePeak: 0.1,
   slipAnglePeakRear: 0.082,
   muRear: 1.12,
   slipRatioPeak: 0.09,
   tyreShape: 1.28,
   rollFront: 0.56,
-  power: 735_000,
+  power: 620_000,
   ersBoost: 90_000,
   rpmIdle: 4200,
   rpmPeak: 11200,
   rpmLimit: 12400,
   gears: [17.2, 14.0, 11.6, 9.75, 8.25, 7.0, 5.9, 4.86],
-  brakeTorque: 21000,
+  // (21000 → 16500 with the 2026-11-27 downforce: 300→80 km/h had gone to 58 m at a 7.8 g peak; real F1
+  // peaks ~5–6 g and Monza's T1 takes ~137 m from 349)
+  brakeTorque: 16500,
   brakeBias: 0.57,
   maxSteer: 0.42,
   halfLength: 2.7,
@@ -158,16 +164,23 @@ export const F1_SPEC: CarSpec = {
 /**
  * The aero package each circuit is run with, as a fraction of the medium-downforce F1_SPEC (2026-11-26,
  * realism after Assetto Corsa, where every circuit has its wing level): Monza's "skinny" wings trade
- * about a quarter of the downforce for ~15 % less drag (slower Lesmos and Parabolica, ~350 km/h in the
- * speed trap); Spa and Baku-like straights a lighter package; the twisty tracks a heavier one. Lap times
- * then line up with the real poles (tools: scratch laps.mjs, RacingProfile vs real pole laps).
+ * a fifth of the downforce for 30 % less drag (AERO_DRAG); Spa and Baku-like straights a lighter package;
+ * the twisty tracks a heavier one. Checked 2026-11-27 against the 2024 pole laps' speed traces (OpenF1
+ * car_data): Monza's Lesmos / Ascari / Parabolica 188 / 190 / 187 / 216 km/h against 207 / 190 / 194 / 215.
  */
-export const AERO_TRIM: Record<string, number> = { monza: 0.62, spa: 0.84, montreal: 0.82, suzuka: 0.9, interlagos: 0.93, sakhir: 0.95, mexico: 0.97, silverstone: 1.03, hungaroring: 1.05, melbourne: 1.03 };
+export const AERO_TRIM: Record<string, number> = { monza: 0.8, spa: 0.84, montreal: 0.82, suzuka: 0.9, interlagos: 0.93, sakhir: 0.95, mexico: 0.97, silverstone: 1.03, hungaroring: 1.05, melbourne: 1.03 };
+/**
+ * Drag where it doesn't follow the downforce: Monza's skinny wings shed far more drag than load, the floor
+ * keeping most of it (2026-11-27: at 0.62 / 0.85 the Lesmos, Ascari and Parabolica were 158-173 km/h
+ * against Norris's 2024 pole lap at ~190 / 194 / 215, and the AI's flying lap 1:21.2 against 1:19.3)
+ */
+export const AERO_DRAG: Record<string, number> = { monza: 0.7 };
 /** a spec trimmed to a circuit's aero package (downforce × k, drag less so: low wings keep the floor's) */
 export function circuitSpec(spec: CarSpec, circuit: string): CarSpec {
   const k = AERO_TRIM[circuit] ?? 1;
-  if (k === 1) return spec;
-  return { ...spec, gears: spec.gears.slice(), clA: spec.clA * k, cdA: spec.cdA * (0.6 + 0.4 * k) };
+  const d = AERO_DRAG[circuit] ?? 0.6 + 0.4 * k;
+  if (k === 1 && d === 1) return spec;
+  return { ...spec, gears: spec.gears.slice(), clA: spec.clA * k, cdA: spec.cdA * d };
 }
 
 

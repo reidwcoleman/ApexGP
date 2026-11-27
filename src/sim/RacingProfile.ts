@@ -24,7 +24,7 @@ export class RacingProfile {
   private static cache = new Map<string, RacingProfile>();
   /** shared profile per track + spec + grip settings (they take a few ms to build) */
   static for(track: Track, spec: CarSpec, grip = 0.94, brakeGrip = 0.8): RacingProfile {
-    const key = `${track.def.id}/${spec.mu}/${spec.clA}/${spec.mass}/${grip}/${brakeGrip}`;
+    const key = `${track.def.id}/${spec.mu}/${spec.clA}/${spec.cdA}/${spec.brakeTorque}/${spec.mass}/${grip}/${brakeGrip}`;
     let p = RacingProfile.cache.get(key);
     if (!p || p.n !== track.n) RacingProfile.cache.set(key, (p = new RacingProfile(track, spec, grip, brakeGrip)));
     return p;
@@ -112,7 +112,10 @@ export class RacingProfile {
         const nx = (i + 1) % n;
         const vn = v[nx];
         const Fz = m * g + kA * vn * vn;
-        const aBrake = (muAt(Fz) * brakeGrip * Fz * latLeft(vn, Math.abs(this.lineK[nx]), nx) + kD * vn * vn) / m;
+        // (the tyres' share, capped by what the discs can do: at 300 km/h the downforce would hold more
+        // than the brakes give — brakeTorque at the wheel radius)
+        const tyreB = muAt(Fz) * brakeGrip * Fz * latLeft(vn, Math.abs(this.lineK[nx]), nx);
+        const aBrake = (Math.min(tyreB, (brakeGrip * spec.brakeTorque) / spec.wheelR) + kD * vn * vn) / m;
         const lim = Math.sqrt(vn * vn + 2 * aBrake);
         if (v[i] > lim) v[i] = lim;
       }

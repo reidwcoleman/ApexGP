@@ -439,14 +439,17 @@ npm run check    # tsc --noEmit
   little overshoot) over each circuit's own fixed road relief (`roadBump`: rougher braking zones, Austin
   and Montreal bumpier than Monza), which also drives the cameras' vibration (`roadVel`, `strike`).
   Each circuit runs its own aero package like the real teams (`AERO_TRIM` / `circuitSpec` in CarPhysics.ts:
-  Monza's skinny wings ~0.62 of the downforce and ~355 km/h, Spa and Montréal low, the Hungaroring high),
-  so the perfect lap sits within ~±3 % of the real pole everywhere (AI at its limit: Monza 1:20.0, Spa
-  1:42.8, Montréal 1:11.6, Suzuka 1:28.7; race fastest laps Monza 1:20.9, Montréal 1:14.2).
-  Validated with `tools/handling.mjs`: 0–100 km/h 1.9 s, 0–200 3.7 s, top 336 (343 with DRS), 300→80 km/h in 68 m at
-  6.8 g peak with ABS (86 m locked up without it, 56 m with the assisted handling's brakes), 2.1 g cornering at 100 km/h up to ~5 g at 280 km/h, stable at full lock at any speed;
-  trail-braking rotates the car ~1.6× more than coasting into the same turn, full throttle at a 2nd-gear apex
-  steps the rear out ~27° with no assists (≈5° on Standard), an exit kerb on the power at 200 km/h kicks
-  the yaw rate ~15°/s, and the wet table drops cornering grip to ~63 % on slicks / ~78 % on inters at half-wet.
+  Monza's skinny wings 0.8 of the downforce and 0.7 of the drag (`AERO_DRAG`), Spa and Montréal low, the
+  Hungaroring high). The car is calibrated against the speed traces of seven 2024 pole laps (OpenF1
+  `car_data`: Monza, Suzuka, Silverstone, Hungaroring, Bahrain, Melbourne, Mexico): corner minimum speeds
+  within ~8 % in the fast corners and ~3 % in the slow ones, the AI at its limit within ~±2 % of each pole
+  (Suzuka 1:28.1 vs 1:28.2, Hungaroring 1:15.3 vs 1:15.2, Bahrain 1:29.0 vs 1:29.2), Monza's T1 337→84 km/h
+  in 124 m (Brembo: 349→87 in 137 m).
+  Validated with `tools/handling.mjs`: 0–100 km/h 2.2 s, 0–200 4.2 s, 0–300 10.5 s, 300→80 km/h in 64 m at
+  6.3 g peak with ABS (69 m locked up without it), 2.0 g cornering at 100 km/h, 4.5 g at 200, ~6 g at 280, stable at full lock at any speed;
+  trail-braking rotates the car ~1.4× more than coasting into the same turn, full throttle at a 2nd-gear apex
+  spins it with no assists, as a real F1 car without traction control would (≈6° on Standard), an exit kerb on the power at 200 km/h kicks
+  the yaw rate ~13°/s, and the wet table drops cornering grip to ~63 % on slicks / ~78 % on inters at half-wet.
   An AI flying lap of Monza is ~78.5 s dry (real pole ≈ 79 s), ~84 s on inters in a drizzle,
   ~88 s on wets in the rain.
 - **Driving like the F1 games** — full steering input maps to the front tyres' peak-grip angle at
