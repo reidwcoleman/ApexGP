@@ -492,7 +492,8 @@ export function weatherLook(w: WeatherState): WeatherLook {
   // is not a bright metered-up grey: mean L 0.26 against our 0.37, blacks at 0.04 not 0.09, a quarter of
   // the frame in real shade, warm-neutral mids and deep olive foliage. So overcast exposes down, holds
   // its contrast and colour, and loses the blue cast)
-  const dExposure = (1 - OVER_DIM * overK) * (1 + 0.04 * hazeK);
+  // (clear: −10 %, 2026-11-27 — against the real Spa pole-lap onboard in sun our ground sat ~0.1 brighter, mids 0.45 vs 0.32)
+  const dExposure = (1 - OVER_DIM * overK) * (1 + 0.04 * hazeK) * (1 - 0.1 * clearK);
   const dContrast = (1 + 0.06 * clearK + 0.08 * brokenK + 0.06 * windK) * (1 + OVER_CONTRAST * overK) * (1 - 0.08 * hazeK) * (1 + 0.07 * snowFall) * (1 - 0.08 * dust);
   const dSat = (1 + 0.1 * clearK + 0.07 * brokenK + 0.06 * windK) * (1 + OVER_SAT * overK) * (1 - 0.08 * hazeK) * (1 - 0.12 * snowK) * (1 - 0.12 * dust);
   // (a low sun is orange enough on its own: haze on top of it turned every grey olive)
