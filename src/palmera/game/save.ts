@@ -28,6 +28,7 @@ interface SaveData {
   garage?: (import('./garage').StoredCar | null)[];
   stunts?: number[];
   props?: { owned: boolean; till: number }[];
+  flamingos?: number[];
 }
 
 export class SaveGame {
@@ -81,6 +82,7 @@ export class SaveGame {
       exported: [...g.exports.delivered],
       garage: g.garages.slots.map((c) => (c ? { ...c, tune: { ...c.tune } } : null)),
       props: g.properties.state,
+      flamingos: g.flamingos.state,
     };
     try {
       localStorage.setItem(KEY, JSON.stringify(d));
@@ -126,6 +128,7 @@ export class SaveGame {
       g.exports.delivered = new Set((d.exported ?? []) as typeof g.exports.list);
     }
     if (d.props) g.properties.restore(d.props);
+    if (d.flamingos) g.flamingos.restore(d.flamingos);
     if (d.garage) d.garage.forEach((c, i) => (g.garages.slots[i] = c ? { ...c, tune: { ...c.tune } } : null));
     if (d.wearing) {
       g.wardrobe.wearing = d.wearing;
