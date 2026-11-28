@@ -2,15 +2,19 @@
 // shot and they go up in a clatter, wheel round and come down again somewhere down the street.
 // One instanced mesh; the wings only flap in the air (a per-bird attribute folds them on the ground).
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { groundAt } from '../world/map';
 import type { Game } from './game';
 
 const vert = /* glsl */ `
 attribute float aPhase;
 attribute float aFly;
+attribute vec3 aCol;
+attribute float aIri;
 uniform float uTime;
-varying float vShade;
 varying vec3 vCol;
+varying vec3 vN;
+varying float vIri;
 varying vec3 vW;
 void main() {
   vec3 p = position;
@@ -19,52 +23,99 @@ void main() {
   p.x = mix(p.x, p.x * 0.3, wing * (1.0 - aFly));
   float flap = sin(uTime * 16.0 + aPhase * 6.28) * 0.9 * aFly;
   p.y += abs(p.x) * flap * wing;
-  vShade = 0.72 + 0.28 * step(0.0, p.y + 0.02) ;
-  vCol = instanceColor;
+  // grey plumage tinted per bird (the instance colour is a mid grey-blue around 0.34)
+  vCol = aCol * instanceColor * 2.25;
+  vIri = aIri;
+  vN = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);
   vec4 w = modelMatrix * instanceMatrix * vec4(p, 1.0);
   vW = w.xyz;
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
 const frag = /* glsl */ `
 uniform vec3 uLight;
-varying float vShade;
 varying vec3 vCol;
+varying vec3 vN;
+varying float vIri;
 varying vec3 vW;
 void main() {
-  // faceted light from the triangle's own normal (the mesh has none)
-  vec3 n = normalize(cross(dFdx(vW), dFdy(vW)));
-  float lam = 0.38 + 0.62 * abs(dot(n, normalize(vec3(0.3, 1.0, 0.25))));
-  gl_FragColor = vec4(vCol * lam * (0.85 + 0.15 * vShade) * uLight, 1.0);
+  vec3 n = normalize(vN);
+  float lam = 0.42 + 0.58 * max(dot(n, normalize(vec3(0.3, 1.0, 0.25))), 0.0);
+  vec3 c = vCol;
+  // the neck patch shimmers green to purple as you move round the bird
+  if (vIri > 0.5) {
+    float f = abs(dot(n, normalize(cameraPosition - vW)));
+    c = mix(vec3(0.3, 0.21, 0.33), vec3(0.2, 0.36, 0.28), smoothstep(0.2, 0.8, f)) * 0.85;
+  }
+  gl_FragColor = vec4(c * lam * uLight, 1.0);
 }`;
 
-/** a pigeon about 32 cm long: plump body, head, tail, two wings (x), facing +z */
+/**
+ * a pigeon about 32 cm long, facing +z: a plump rounded body, neck and darker head with a beak and
+ * the iridescent neck patch, a fanned tail with a dark band, pink legs, and wings with two dark bars
+ * reaching out along x (beyond |x| 0.09 they fold in on the ground and flap in the air). It was 14 flat
+ * triangles, which read as folded paper
+ */
 function pigeonGeo(): THREE.BufferGeometry {
-  const v: number[] = [];
-  const tri = (a: number[], b: number[], c: number[]) => v.push(...a, ...b, ...c);
-  const body = [
-    [0, 0.13, 0.1], [-0.075, 0.08, 0.0], [0.075, 0.08, 0.0], [0, 0.02, 0.04], [0, 0.17, -0.05], [0, 0.06, -0.13],
-  ];
-  const [nose, l, r, belly, back, tail] = body;
-  tri(nose, l, back);
-  tri(nose, back, r);
-  tri(nose, belly, l);
-  tri(nose, r, belly);
-  tri(l, belly, tail);
-  tri(r, tail, belly);
-  tri(l, tail, back);
-  tri(r, back, tail);
-  // head
-  tri([0, 0.17, 0.12], [-0.03, 0.12, 0.1], [0.03, 0.12, 0.1]);
-  tri([0, 0.17, 0.12], [0, 0.13, 0.18], [-0.03, 0.12, 0.1]);
-  tri([0, 0.17, 0.12], [0.03, 0.12, 0.1], [0, 0.13, 0.18]);
-  // tail fan
-  tri([-0.04, 0.06, -0.1], [0.04, 0.06, -0.1], [0, 0.05, -0.22]);
-  // wings
-  tri([-0.06, 0.11, 0.05], [-0.3, 0.1, -0.04], [-0.06, 0.11, -0.08]);
-  tri([0.06, 0.11, 0.05], [0.06, 0.11, -0.08], [0.3, 0.1, -0.04]);
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
-  return g;
+  const parts: THREE.BufferGeometry[] = [];
+  const add = (g: THREE.BufferGeometry, col: [number, number, number], iri = 0, colAt?: (x: number, y: number, z: number) => [number, number, number]) => {
+    const ng = g.index ? g.toNonIndexed() : g;
+    ng.computeVertexNormals();
+    const n = ng.getAttribute('position').count;
+    const cols = new Float32Array(n * 3), ir = new Float32Array(n);
+    const pos = ng.getAttribute('position');
+    for (let i = 0; i < n; i++) {
+      const c = colAt ? colAt(pos.getX(i), pos.getY(i), pos.getZ(i)) : col;
+      cols.set(c, i * 3);
+      ir[i] = iri;
+    }
+    ng.setAttribute('aCol', new THREE.BufferAttribute(cols, 3));
+    ng.setAttribute('aIri', new THREE.BufferAttribute(ir, 1));
+    for (const k of Object.keys(ng.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'aCol' && k !== 'aIri') ng.deleteAttribute(k);
+    parts.push(ng);
+  };
+  const GREY: [number, number, number] = [0.74, 0.74, 0.77], DARK: [number, number, number] = [0.5, 0.5, 0.55];
+  // body: lighter on the back, the belly a little paler still
+  const body = new THREE.SphereGeometry(1, 12, 8);
+  body.scale(0.068, 0.062, 0.125).rotateX(0.22).translate(0, 0.1, -0.01);
+  add(body, GREY);
+  // neck (the shimmering patch) and head
+  const neck = new THREE.SphereGeometry(1, 10, 6);
+  neck.scale(0.042, 0.048, 0.045).translate(0, 0.145, 0.075);
+  add(neck, GREY, 1);
+  const head = new THREE.SphereGeometry(1, 10, 7);
+  head.scale(0.032, 0.033, 0.038).translate(0, 0.185, 0.1);
+  add(head, DARK);
+  const beak = new THREE.ConeGeometry(0.009, 0.03, 6);
+  beak.rotateX(Math.PI / 2).translate(0, 0.18, 0.148);
+  add(beak, [0.25, 0.22, 0.2]);
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.SphereGeometry(0.0065, 6, 4);
+    eye.translate(sx * 0.024, 0.19, 0.118);
+    add(eye, [0.95, 0.45, 0.2]);
+    // legs
+    const leg = new THREE.CylinderGeometry(0.005, 0.005, 0.055, 4);
+    leg.translate(sx * 0.022, 0.03, 0.005);
+    add(leg, [0.95, 0.42, 0.45]);
+    const foot = new THREE.BoxGeometry(0.012, 0.004, 0.04);
+    foot.translate(sx * 0.022, 0.003, 0.015);
+    add(foot, [0.95, 0.42, 0.45]);
+  }
+  // tail fan, its tip banded dark
+  const tail = new THREE.BoxGeometry(0.075, 0.012, 0.11, 2, 1, 3);
+  tail.translate(0, 0.085, -0.15).rotateX(-0.12);
+  add(tail, GREY, 0, (_x, _y, z) => (z < -0.18 ? [0.25, 0.26, 0.3] : GREY));
+  // wings: long flattened ovals out to the side, two dark bars across each
+  for (const sx of [-1, 1]) {
+    const wg = new THREE.SphereGeometry(1, 10, 5);
+    wg.scale(0.13, 0.012, 0.075).translate(sx * 0.17, 0.115, -0.03);
+    add(wg, GREY, 0, (x, _y, z) => {
+      const ax = Math.abs(x);
+      const bar = (z > -0.04 && z < -0.015) || (z > -0.075 && z < -0.05);
+      const tip = ax > 0.24;
+      return tip ? [0.3, 0.31, 0.36] : bar && ax < 0.2 ? [0.28, 0.29, 0.33] : [0.78, 0.8, 0.86];
+    });
+  }
+  return mergeGeometries(parts)!;
 }
 
 interface Bird {
