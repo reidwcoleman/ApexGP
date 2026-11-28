@@ -3,6 +3,7 @@
 // wheels and the world drops into slow motion while you fly; land far enough (and in one piece) and
 // it counts: $500 the first time, and the ramp's mark goes from amber to green. Original.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Rng, wrapAngle } from '../core/math';
 import { BEACH, ISLAND, ROAD_HALF, XS, ZS, groundBase, isWater, ramps, type Ramp } from '../world/map';
 import type { Game } from './game';
@@ -49,30 +50,71 @@ function hazardTex(): THREE.Texture {
   return t;
 }
 
-/** a wedge: the low edge at -len/2, the lip at +len/2, along +z (local) */
-function wedge(len: number, wid: number, ht: number): THREE.BufferGeometry {
-  const L = len / 2, W = wid / 2;
+/** the deck alone: the sloped plate (textured), its underside and the lip edge */
+function deck(len: number, wid: number, ht: number): THREE.BufferGeometry {
+  const L = len / 2, W = wid / 2, T = 0.07;
   const p: number[] = [], uv: number[] = [];
-  const tri = (a: number[], b: number[], c: number[], ua: number[], ub: number[], uc: number[]) => {
-    // wound counter-clockwise seen from outside
-    p.push(...a, ...c, ...b);
-    uv.push(...ua, ...uc, ...ub);
+  const quad = (a: number[], b: number[], c: number[], d: number[], ua: number[], ub: number[], uc: number[], ud: number[]) => {
+    p.push(...a, ...c, ...b, ...a, ...d, ...c);
+    uv.push(...ua, ...uc, ...ub, ...ua, ...ud, ...uc);
   };
-  const lowL = [-W, 0, -L], lowR = [W, 0, -L], topL = [-W, ht, L], topR = [W, ht, L], botL = [-W, 0, L], botR = [W, 0, L];
-  // the slope (uv v=1 at the lip)
-  tri(lowL, lowR, topR, [0, 0], [1, 0], [1, 1]);
-  tri(lowL, topR, topL, [0, 0], [1, 1], [0, 1]);
-  // the back and the sides (uv in the plain part of the texture)
   const g = [0.5, 0.5];
-  tri(botR, botL, topL, g, g, g);
-  tri(botR, topL, topR, g, g, g);
-  tri(lowR, botR, topR, g, g, g);
-  tri(lowL, topL, botL, g, g, g);
+  // the riding surface (v=1 at the lip), the underside a plate's thickness below, and the edges
+  quad([-W, 0, -L], [W, 0, -L], [W, ht, L], [-W, ht, L], [0, 0], [1, 0], [1, 1], [0, 1]);
+  quad([W, -T, -L], [-W, -T, -L], [-W, ht - T, L], [W, ht - T, L], g, g, g, g);
+  quad([-W, ht - T, L], [W, ht - T, L], [W, ht, L], [-W, ht, L], g, g, g, g);
+  quad([W, -T, -L], [W, ht - T, L], [W, ht, L], [W, 0, -L], g, g, g, g);
+  quad([-W, ht - T, L], [-W, -T, -L], [-W, 0, -L], [-W, ht, L], g, g, g, g);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   geo.computeVertexNormals();
   return geo;
+}
+
+/** the steel frame under a deck: side rails, posts rising with the slope, diagonals, cross members, X-braced lip */
+function frame(len: number, wid: number, ht: number): THREE.BufferGeometry {
+  const L = len / 2, W = wid / 2 - 0.12, T = 0.09;
+  const parts: THREE.BufferGeometry[] = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  const beam = (a: THREE.Vector3, b: THREE.Vector3, t = T) => {
+    const d = b.clone().sub(a);
+    const g = new THREE.BoxGeometry(t, d.length(), t);
+    g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(up, d.clone().normalize()));
+    g.translate((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+    parts.push(g);
+  };
+  const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+  const yAt = (z: number) => (ht * (z + L)) / len - 0.1;
+  const n = Math.max(3, Math.round(len / 2.2));
+  for (const sx of [-W, W]) {
+    beam(v(sx, 0.05, -L + 0.3), v(sx, 0.05, L));
+    beam(v(sx, yAt(-L + 0.5), -L + 0.5), v(sx, yAt(L), L));
+    let prev: THREE.Vector3 | null = null;
+    for (let i = 1; i <= n; i++) {
+      const z = -L + (len * i) / n;
+      const top = v(sx, yAt(z), z);
+      beam(v(sx, 0, z), top);
+      if (prev) beam(v(sx, 0.05, prev.z), top, T * 0.8);
+      prev = top;
+    }
+  }
+  // cross members under the deck at every post, and the X across the back of the lip
+  for (let i = 1; i <= n; i++) {
+    const z = -L + (len * i) / n;
+    beam(v(-W, yAt(z), z), v(W, yAt(z), z), T * 0.8);
+  }
+  beam(v(-W, 0.05, L), v(W, yAt(L), L), T * 0.8);
+  beam(v(W, 0.05, L), v(-W, yAt(L), L), T * 0.8);
+  beam(v(-W, 0.06, L), v(W, 0.06, L), T * 0.8);
+  // feet: steel pads under the posts
+  for (const sx of [-W, W]) for (let i = 0; i <= n; i++) {
+    const z = Math.max(-L + 0.3, -L + (len * i) / n);
+    const f = new THREE.BoxGeometry(0.34, 0.04, 0.34);
+    f.translate(sx, 0.02, z);
+    parts.push(f);
+  }
+  return mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)))!;
 }
 
 interface Jump {
@@ -97,16 +139,25 @@ export class Stunts {
   constructor(private game: Game) {
     this.place();
     const tex = hazardTex();
-    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55, metalness: 0.55 });
-    const geo = wedge(LEN, WID, HT);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55, metalness: 0.55, side: THREE.DoubleSide });
+    const geo = deck(LEN, WID, HT);
+    const fGeo = frame(LEN, WID, HT);
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x55595e, roughness: 0.55, metalness: 0.7 });
     const postMat = new THREE.MeshStandardMaterial({ color: 0x3a3c40, roughness: 0.5, metalness: 0.6 });
     ramps.forEach((r, i) => {
-      const m = new THREE.Mesh(r.len === LEN ? geo : wedge(r.len, r.wid, r.ht), mat);
+      const std = r.len === LEN && r.wid === WID && r.ht === HT;
+      const m = new THREE.Mesh(std ? geo : deck(r.len, r.wid, r.ht), mat);
       m.position.set(r.x, r.y0, r.z);
       m.rotation.y = r.h;
       m.castShadow = true;
       m.receiveShadow = true;
       game.scene.add(m);
+      const fr = new THREE.Mesh(std ? fGeo : frame(r.len, r.wid, r.ht), frameMat);
+      fr.position.copy(m.position);
+      fr.rotation.y = r.h;
+      fr.castShadow = true;
+      fr.receiveShadow = true;
+      game.scene.add(fr);
       // a small marker on a post beside the lip: amber until you've landed this one
       const mk = new THREE.Mesh(new THREE.OctahedronGeometry(0.35), this.markMat[0]);
       const sx = Math.cos(r.h), sz = -Math.sin(r.h);
