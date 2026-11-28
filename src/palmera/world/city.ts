@@ -906,6 +906,8 @@ export class City {
   chunks = new ChunkManager();
   lampHeadMat = new THREE.MeshBasicMaterial({ color: 0x999988 });
   poolMat: THREE.MeshBasicMaterial;
+  /** shop-window light spilling onto the pavement at night */
+  spillMat: THREE.MeshBasicMaterial;
   neonMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: true });
   signMat = neonSignMaterial();
   palmMats: THREE.MeshStandardMaterial[] = [];
@@ -913,6 +915,7 @@ export class City {
 
   constructor(private scene: THREE.Scene, public map: CityMap) {
     this.poolMat = new THREE.MeshBasicMaterial({ map: T.glowTexture(), color: 0xffa860, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.spillMat = new THREE.MeshBasicMaterial({ map: spillTexture(), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     this.buildGround();
     this.buildRoads();
     this.buildSidewalks();
@@ -1183,6 +1186,41 @@ export class City {
   /** glass caps, wedges, lit crown edges built (for tests) */
   crownStats = [0, 0, 0];
 
+  /**
+   * Light from the shop windows on the pavement: a soft fan in front of every street-floor shop
+   * window (the same 4.6 m bays the facade shader draws), warm mostly, cool for a few, on at night.
+   */
+  private buildSpill() {
+    const out: Inst[] = [];
+    const tmp: ReturnType<typeof this.map.colliders.query> = [];
+    const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
+    const warm = [new THREE.Color(0xffc483), new THREE.Color(0xffd9a8), new THREE.Color(0xffb36b)], cool = new THREE.Color(0xcfe2ff);
+    for (const b of this.map.buildings) {
+      if (b.y0 !== 0 || !(b.style === 1 || b.style === 3) || b.h < 4) continue;
+      for (const [nx, nz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const halfW = nx !== 0 ? b.d / 2 : b.w / 2;
+        const nCols = Math.max(Math.floor((2 * halfW - 1.2) / 4.6), 0);
+        const off = (2 * halfW - nCols * 4.6) / 2;
+        for (let i = 0; i < nCols; i++) {
+          const u = -halfW + off + (i + 0.5) * 4.6;
+          const fx = b.x + nx * (b.w / 2) + (nx !== 0 ? 0 : u), fz = b.z + nz * (b.d / 2) + (nx !== 0 ? u : 0);
+          const x = fx + nx * 1.85, z = fz + nz * 1.85;
+          const y = groundAt(x, z);
+          if (Math.abs(y - groundAt(fx + nx * 0.4, fz + nz * 0.4)) > 0.3) continue;
+          tmp.length = 0;
+          if (this.map.colliders.query(x - 0.6, z - 0.6, x + 0.6, z + 0.6, tmp).some((c) => c.y0 < y + 2 && c.y1 > y + 0.3)) continue;
+          q.setFromAxisAngle(up, Math.atan2(nx, nz));
+          const h = Math.abs(Math.sin(b.x * 12.9898 + b.z * 78.233 + i * 3.7 + nx * 5 + nz * 11) * 43758.5453) % 1;
+          out.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(x, y + 0.17, z), q, new THREE.Vector3(4.4, 1, 3.7)), c: h < 0.15 ? cool : warm[Math.floor(h * 30) % 3] });
+        }
+      }
+    }
+    const geo = new THREE.PlaneGeometry(1, 1);
+    geo.rotateX(-Math.PI / 2);
+    const sm = chunked(this.scene, this.chunks, out, geo, this.spillMat, { far: 240, shadow: false, receive: false });
+    sm.forEach((m) => (m.renderOrder = 2));
+  }
+
   private buildBuildingDetail() {
     const trim: Inst[] = [], balc: Inst[] = [], rail: Inst[] = [], plant: Inst[] = [], awn: Inst[] = [], signs: Inst[] = [];
     const tanks: Inst[] = [], acs: Inst[] = [], vents: Inst[] = [], masts: Inst[] = [];
@@ -1444,6 +1482,7 @@ export class City {
     const poolGeo = new THREE.PlaneGeometry(1, 1);
     const pm = chunked(this.scene, this.chunks, pools, poolGeo, this.poolMat, { far: 260, shadow: false, receive: false });
     pm.forEach((m) => (m.renderOrder = 2));
+    this.buildSpill();
     chunked(this.scene, this.chunks, groups.get('umbrella') ?? [], umbrellaGeometry(), std({ side: THREE.DoubleSide }), { far: 300, shadow: true });
     chunked(this.scene, this.chunks, groups.get('lounger') ?? [], loungerGeometry(), std(), { far: 160, shadow: false });
     chunked(this.scene, this.chunks, groups.get('tower') ?? [], lifeguardGeometry(), std(), { far: 600, shadow: true });
@@ -1639,6 +1678,7 @@ export class City {
     const k = 0.55 + night * 2.4;
     this.lampHeadMat.color.setRGB(k, k * 0.88, k * 0.66);
     this.poolMat.opacity = clamp(night * 0.32, 0, 0.32);
+    this.spillMat.opacity = clamp(night * 0.9, 0, 0.9);
     const n = 0.7 + night * 1.8;
     this.neonMat.color.setRGB(n, n, n);
     const sn = 0.55 + night * 3.2;
@@ -1859,4 +1899,31 @@ totalEmissiveRadiance += vec3(1.0, 0.74, 0.45) * uNight * (1.0 - mull) * (0.08 +
   };
   m.customProgramCacheKey = () => 'palmera-crownglass-v1';
   return m;
+}
+
+/** a window's light thrown on the ground: brightest at the glass (the top edge), widening and fading outward */
+function spillTexture(): THREE.CanvasTexture {
+  const W = 64, H = 128;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const x = c.getContext('2d')!;
+  const img = x.createImageData(W, H);
+  for (let j = 0; j < H; j++) {
+    const t = j / (H - 1);
+    const fall = Math.pow(1 - t, 1.7) * Math.min(1, t * 14 + 0.25);
+    const half = 0.4 + 0.12 * t;
+    for (let i = 0; i < W; i++) {
+      const d = Math.abs(i / (W - 1) - 0.5);
+      const side = 1 - Math.min(1, Math.max(0, (d - half + 0.12) / 0.12));
+      const v = Math.round(255 * fall * side * side);
+      const k = (j * W + i) * 4;
+      img.data[k] = img.data[k + 1] = img.data[k + 2] = v;
+      img.data[k + 3] = 255;
+    }
+  }
+  x.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
