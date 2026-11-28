@@ -136,12 +136,18 @@ export class Weapons {
   private pickupMesh(kind: PickupKind): THREE.Group {
     const g = new THREE.Group();
     const col = PICKUP_COL[kind];
-    const glowMat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending });
+    // the beam fades out as it rises (a uniform translucent tube read as a plastic pipe standing on the street)
+    const glowMat = new THREE.MeshBasicMaterial({ color: col, map: beamFade(), transparent: true, opacity: 1, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.05, 6, 24), new THREE.MeshBasicMaterial({ color: col }));
     ring.rotation.x = Math.PI / 2;
     ring.position.y = -0.9;
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 2.2, 16, 1, true), glowMat);
+    // a soft column of light turned to face you: faded at both sides and toward the top
+    const beam = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 2.2), glowMat);
     beam.position.y = 0.1;
+    beam.onBeforeRender = (_r, _s, cam) => {
+      beam.getWorldPosition(beamWp);
+      beam.lookAt(cam.position.x, beamWp.y, cam.position.z);
+    };
     let item: THREE.Mesh;
     const dark = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.6, roughness: 0.4, emissive: col, emissiveIntensity: 0.25 });
     if (kind === 'health' || kind === 'armor') {
@@ -549,4 +555,30 @@ export function rayVehicle(o: THREE.Vector3, d: THREE.Vector3, v: Vehicle, maxT:
   if (!slab(oz, dz, -s.len / 2, s.len / 2)) return null;
   if (!slab(oy, dy, y0, s.hgt)) return null;
   return tmin;
+}
+
+let fadeTex: THREE.CanvasTexture | null = null;
+const beamWp = new THREE.Vector3();
+/** bright at the foot, gone by the top (canvas top = the cylinder's top) */
+function beamFade(): THREE.CanvasTexture {
+  if (fadeTex) return fadeTex;
+  const W = 64, H = 128;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const x = c.getContext('2d')!;
+  const img = x.createImageData(W, H);
+  for (let j = 0; j < H; j++)
+    for (let i = 0; i < W; i++) {
+      const u = (i + 0.5) / W * 2 - 1, v = 1 - (j + 0.5) / H;
+      const side = Math.exp(-u * u * 5) * (1 - Math.abs(u) ** 6);
+      const up = Math.pow(1 - v, 1.6) * Math.min(1, v * 12);
+      const k = Math.round(255 * side * up);
+      const o = (j * W + i) * 4;
+      img.data[o] = img.data[o + 1] = img.data[o + 2] = k;
+      img.data[o + 3] = 255;
+    }
+  x.putImageData(img, 0, 0);
+  fadeTex = new THREE.CanvasTexture(c);
+  return fadeTex;
 }
