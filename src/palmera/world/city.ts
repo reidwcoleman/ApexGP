@@ -693,6 +693,20 @@ if (bn.y > 0.5) {
     // the ribs catch the light a little
     float rib = 0.94 + 0.06 * cos(u / 0.15 * 6.2832);
     diffuseColor.rgb *= t * 1.02 * mix(rib, 1.0, door * step(fv, 0.75));
+    // weathered by the salt air: every shed its own faded paint (off-white, sea-green, red oxide, pale
+    // blue, grey) bleached in big soft patches; rust run down the ribs from the fixings along each
+    // seam and the roof edge; grime kicked up along the foot; the roller doors bare steel. They were
+    // clean white boxes
+    float pk = fract(vStyle.y * 5.77);
+    vec3 pal = pk < 0.3 ? vec3(0.96, 0.95, 0.9) : pk < 0.48 ? vec3(0.6, 0.74, 0.7) : pk < 0.64 ? vec3(0.74, 0.42, 0.33) : pk < 0.82 ? vec3(0.64, 0.72, 0.82) : vec3(0.76, 0.76, 0.74);
+    float isDoor = door * step(fv, 0.75);
+    diffuseColor.rgb *= mix(pal, vec3(0.62, 0.66, 0.7), isDoor);
+    diffuseColor.rgb *= 0.9 + 0.1 * sin(u * 0.43 + v * 0.61 + vStyle.y * 17.0) * sin(u * 0.17 - v * 0.29 + 3.0);
+    float ribK = fract(sin(floor(u / 0.3) * 12.9898 + vStyle.y * 41.3) * 43758.5453);
+    float below = (1.0 - fv) * 4.0;
+    float run = step(0.66, ribK) * (1.0 - smoothstep(0.0, 0.6 + 2.4 * ribK * ribK, below)) * (0.55 + 0.45 * fract(ribK * 7.0));
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.5, 0.34), run * 0.75 * (1.0 - isDoor * 0.5));
+    diffuseColor.rgb *= mix(vec3(0.62, 0.6, 0.55), vec3(1.0), smoothstep(0.0, 0.7, v));
     // metal, not stucco: no scanned plaster bump on the siding
     #ifdef P_DETAIL
     dOn = 0.0;
@@ -744,7 +758,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v19';
+  mat.customProgramCacheKey = () => 'palmera-building-v20';
   return mat;
 }
 
