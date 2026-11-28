@@ -24,7 +24,8 @@ function grassMask(map: CityMap): THREE.Texture {
   c.fillStyle = 'rgb(200,190,0)';
   rect(MAIN.x0, MAIN.z0, -480, MAIN.z1);
   // lawns: suburban block interiors
-  c.fillStyle = 'rgb(235,40,0)';
+  // (B: mown - short, even turf; the parks and the swamp grow long)
+  c.fillStyle = 'rgb(250,0,255)';
   for (const b of map.blocks) if (b.region === 'suburb') rect(b.x0 + SIDEWALK + 0.4, b.z0 + SIDEWALK + 0.4, b.x1 - SIDEWALK - 0.4, b.z1 - SIDEWALK - 0.4);
   for (const f of map.flats) if (f.kind === 'grass') {
     c.fillStyle = 'rgb(255,30,0)';
@@ -124,16 +125,17 @@ varying float vH; varying vec3 vTint;`)
 vec2 cell = aOff + ${PATCH.toFixed(1)} * floor((uCam.xz - aOff) / ${PATCH.toFixed(1)} + 0.5);
 vec2 muv = (cell - uBox.xy) / uBox.zw;
 vec4 mk = (muv.x > 0.0 && muv.x < 1.0 && muv.y > 0.0 && muv.y < 1.0) ? textureLod(uMask, muv, 0.0) : vec4(0.0);
-float patchy = 0.75 + 0.25 * sin(cell.x * 0.21 + sin(cell.y * 0.17) * 2.0);
+float mown = step(0.5, mk.b);
+float patchy = mix(0.75 + 0.25 * sin(cell.x * 0.21 + sin(cell.y * 0.17) * 2.0), 1.0, mown);
 float keep = step(aRnd.x, mk.r * patchy);
 float dist = length(cell - uCam.xz);
 float fade = 1.0 - smoothstep(12.0, 37.0, dist);
 fade = fade * fade * (1.0 - mk.g * 0.35 * smoothstep(8.0, 30.0, dist));
-float hgt = mix(0.13, 0.3, aRnd.y) * (1.0 + mk.g * 3.2) * keep * fade;
+float hgt = mix(mix(0.13, 0.3, aRnd.y), mix(0.06, 0.11, aRnd.y), mown) * (1.0 + mk.g * 3.2) * keep * fade;
 float ang = aRnd.z * 6.2832;
 float cs = cos(ang), sn = sin(ang);
 vec3 transformed = position;
-transformed.xz *= keep * (0.6 + 0.5 * aRnd.y) * (1.0 + mk.g);
+transformed.xz *= keep * (0.6 + 0.5 * aRnd.y) * (1.0 + mk.g) * mix(1.0, 0.55, mown);
 transformed.y *= hgt;
 transformed.xz = vec2(cs * transformed.x - sn * transformed.z, sn * transformed.x + cs * transformed.z);
 float wind = sin(uTime * 1.7 + cell.x * 0.31 + cell.y * 0.23) * 0.6 + sin(uTime * 3.3 + cell.x * 1.7 + cell.y) * 0.25;
@@ -144,7 +146,9 @@ transformed.y += 0.02;
 vH = position.y;
 float dry = smoothstep(0.55, 0.95, sin(cell.x * 0.09 + 1.3) * sin(cell.y * 0.11) * 0.5 + 0.5 + aRnd.y * 0.25);
 vTint = mix(mix(vec3(0.85, 1.0, 0.85), vec3(1.08, 1.04, 0.8), aRnd.z), vec3(1.3, 1.05, 0.6), dry * 0.25);
-vTint = mix(vTint, vec3(0.95, 0.85, 0.5), mk.g * 0.75);`);
+vTint = mix(vTint, vec3(0.95, 0.85, 0.5), mk.g * 0.75);
+// mown turf: greener and even, the cut tips a touch paler
+vTint = mix(vTint, vec3(0.95, 1.05, 0.85) * (0.92 + 0.12 * aRnd.z), mown * 0.8);`);
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', '#include <common>\nvarying float vH; varying vec3 vTint;')
         .replace('vec4 diffuseColor = vec4( diffuse, opacity );', 'vec4 diffuseColor = vec4(mix(vec3(0.065, 0.14, 0.03), vec3(0.17, 0.33, 0.075), vH) * vTint, 1.0);')

@@ -1011,7 +1011,30 @@ export class City {
     const grass = T.grassTexture(), sand = T.sandTexture(), mud = T.mudTexture(), conc = T.concreteTexture();
     const g1 = new MB();
     g1.flat(-480, MAIN.z0, 80, MAIN.z1, 0, 24);
-    this.add(g1.geo(), D(new THREE.MeshStandardMaterial({ map: grass, roughness: 0.95 }), 'leafy_grass', { scale: 2.5, albedo: 0.9, normal: 0.9, rough: [0.75, 1] }));
+    // the suburbs' lawns are mown: faint light and dark stripes, laid one way or the other per yard
+    const lawn = new THREE.MeshStandardMaterial({ map: grass, roughness: 0.95 });
+    lawn.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vLawnW;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLawnW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vLawnW;')
+        .replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+{
+  vec2 lp = vLawnW.xz;
+  vec2 yc = floor(lp / vec2(17.0, 15.0));
+  float o = fract(sin(dot(yc, vec2(12.9898, 78.233))) * 43758.5453);
+  float a = (o < 0.5 ? lp.x : lp.y) / 1.3 + o * 7.0;
+  float fa = fwidth(a);
+  float st = smoothstep(-fa, fa, sin(a * 3.14159));
+  float k = 1.0 - smoothstep(0.15, 0.6, fa);
+  diffuseColor.rgb *= mix(1.0, mix(0.86, 1.1, st), k);
+}`,
+        );
+    };
+    this.add(g1.geo(), D(lawn, 'leafy_grass', { scale: 2.5, albedo: 0.9, normal: 0.9, rough: [0.75, 1] }));
     const g2 = new MB();
     g2.flat(80, MAIN.z0, MAIN.x1, MAIN.z1, 0, 8);
     g2.flat(ISLAND.x0, ISLAND.z0, BEACH.x0, ISLAND.z1, 0, 8);
