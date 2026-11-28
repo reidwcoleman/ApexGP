@@ -1146,7 +1146,7 @@ export class City {
     const kinds: Record<string, { mb: MB; mat: THREE.Material; y: number; rep: number }> = {
       pool: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ color: 0x38c6e6, roughness: 0.05, metalness: 0.1, emissive: 0x0a3a48 }), y: 0.07, rep: 4 },
       rim: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.8 }), y: 0.05, rep: 4 },
-      pond: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ color: 0x1c2213, roughness: 0.22, metalness: 0.2 }), y: 0.04, rep: 8 },
+      pond: { mb: new MB(), mat: pondMaterial(), y: 0.04, rep: 8 },
       court: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ map: T.courtTexture(), roughness: 0.9 }), y: 0.04, rep: 1 },
       lot: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.lotTexture(), roughness: 0.92  }), 'asphalt_02', { scale: 6, albedo: 0.7, normal: 0.9, rough: [0.55, 0.95] }), y: 0.03, rep: 10 },
       plaza: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.concreteTexture(), color: 0xf7e2c8, roughness: 0.85 }), 'terrazzo_tiles', { scale: 3, albedo: 0.8, normal: 0.6, rough: [0.3, 0.7] }), y: 0.04, rep: 3 },
@@ -2149,4 +2149,43 @@ function mossTexture(): THREE.Texture {
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
   return t;
+}
+
+/**
+ * Swamp pond water: tea-dark and nearly a mirror, so it shows the sky and the trees round it, broken by
+ * fine moving ripples; rafts of duckweed drift on it, matt green with no ripple. (It was a flat grey,
+ * half-metal sheet that read as plastic.)
+ */
+function pondMaterial(): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ color: 0x0b0f08, roughness: 0.06, metalness: 0, envMapIntensity: 1.15 });
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uT = cityUniforms.uTime;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vPondW;')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvPondW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vPondW; uniform float uT;
+float pdH(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float pdN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(pdH(i), pdH(i + vec2(1.0, 0.0)), f.x), mix(pdH(i + vec2(0.0, 1.0)), pdH(i + vec2(1.0, 1.0)), f.x), f.y); }
+float duckweed() { vec2 p = vPondW.xz; return smoothstep(0.6, 0.68, pdN(p * 0.18 + 3.0) * 0.7 + pdN(p * 0.9) * 0.3); }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+float dw = duckweed();
+diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.055, 0.1, 0.02) * (0.8 + 0.4 * pdN(vPondW.xz * 6.0)), dw);`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.85, dw);')
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+{
+  vec2 p = vPondW.xz;
+  float e = 0.15;
+  float h0 = pdN(p * 1.3 + vec2(uT * 0.25, uT * 0.12)) + 0.25 * pdN(p * 2.4 - vec2(uT * 0.4, -uT * 0.3));
+  float hx = pdN((p + vec2(e, 0.0)) * 1.3 + vec2(uT * 0.25, uT * 0.12)) + 0.25 * pdN((p + vec2(e, 0.0)) * 2.4 - vec2(uT * 0.4, -uT * 0.3));
+  float hz = pdN((p + vec2(0.0, e)) * 1.3 + vec2(uT * 0.25, uT * 0.12)) + 0.25 * pdN((p + vec2(0.0, e)) * 2.4 - vec2(uT * 0.4, -uT * 0.3));
+  vec3 wn = normalize(vec3(-(hx - h0) / e * 0.035, 1.0, -(hz - h0) / e * 0.035));
+  wn = normalize(mix(wn, vec3(0.0, 1.0, 0.0), duckweed()));
+  normal = normalize(mat3(viewMatrix) * wn);
+}`);
+  };
+  m.customProgramCacheKey = () => 'palmera-pond-v2';
+  return m;
 }
