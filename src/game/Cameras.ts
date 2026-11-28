@@ -181,7 +181,11 @@ const MOUNTS: Partial<Record<CameraMode, Mount>> = {
   // (2026-11-27: was F1 25's framing, tipped ~7° down with the horizon 40 % from the top; matched to the
   // real T-cam (Norris's 2025 Spa pole lap): ~15° down, a touch higher — horizon ~28 % from the top, the
   // halo's ring across the middle, the front tyres' tops above it, the helmet below)
-  tcam: { pos: [0, 1.1, -0.2], dir: [0, -0.27, 1], fov: 61, shake: 0.65, prof: 'tcam', flex: 22, level: 0.1, dyn: 4 },
+  // (2026-11-28: still too level and too low beside Verstappen's Monza, Norris's Spa and AC's Monza T-cams —
+  // horizon 11 … 20 % from the top, the helmet's crown low at the bottom with the cockpit and the wheel
+  // seen over it inside the halo's ring; ours had the horizon at 29 % and the helmet filling the ring.
+  // Now ~22° down from a touch higher: horizon ~15 %, the crown at ~85 %, the wheel above it)
+  tcam: { pos: [0, 1.19, -0.2], dir: [0, -0.41, 1], fov: 61, shake: 0.65, prof: 'tcam', flex: 22, level: 0.1, dyn: 4 },
   // the TV pod offset: the lens in the left end of the T-bar, as the broadcast's second onboard —
   // the helmet and the halo's hoop off to the right of the picture, the left front tyre and the
   // road ahead in the clear
