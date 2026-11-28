@@ -78,7 +78,7 @@ class ShaftsEffect extends Effect {
         float j = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
         vec2 p = uv + st * j;
         vec3 acc = vec3(0.0);
-        float w = 1.0, wsum = 0.0;
+        float w = 1.0, wsum = 0.0, skyN = 0.0;
         for (int i = 0; i < N; i++) {
           p += st;
           vec2 q = clamp(p, vec2(0.001), vec2(0.999));
@@ -87,11 +87,16 @@ class ShaftsEffect extends Effect {
           // the brighter the sky there (the glow round the sun), the more it carries
           float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
           acc += (c * smoothstep(0.0, 1.0, lum) + uSunCol * 1.6) * sky * w;
+          skyN += sky;
           wsum += w;
           w *= 0.965;
         }
         acc /= wsum;
         vec3 add = acc * mix(vec3(1.0), uSunCol, 0.6) * fall * uStrength;
+        // shafts are light broken up by things in the way; where the march toward the sun is open sky all
+        // the way there's nothing to break it up and the sum only laid a flat milky veil over the view
+        float f = skyN / float(N);
+        add *= mix(0.3, 1.0, clamp(4.0 * f * (1.0 - f) + (1.0 - f), 0.0, 1.0));
         // the shafts show in the air in front of things, not as a glow on open sky
         add *= mix(1.0, 0.35, step(1500.0, -getViewZ(depth)));
         outputColor = vec4(inputColor.rgb + add, inputColor.a);
@@ -115,7 +120,7 @@ class ShaftsEffect extends Effect {
     const onScreen = 1 - THREE.MathUtils.smoothstep(Math.max(Math.abs(v.x), Math.abs(v.y)), 1.1, 1.9);
     (this.uniforms.get('uSun')!.value as THREE.Vector2).set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5);
     (this.uniforms.get('uSunCol')!.value as THREE.Color).copy(sunCol);
-    const lowSun = THREE.MathUtils.smoothstep(sunDir.y, -0.02, 0.06) * (1 - THREE.MathUtils.smoothstep(sunDir.y, 0.35, 0.8));
+    const lowSun = THREE.MathUtils.smoothstep(sunDir.y, -0.02, 0.06) * (1 - THREE.MathUtils.smoothstep(sunDir.y, 0.12, 0.45));
     // shafts are a ground-level thing, broken up by buildings; from a roof or a helicopter they'd lay a
     // milky veil over the whole city, so they fade out with height
     const high = 1 / (1 + Math.max(0, camera.position.y - 15) / 20);
