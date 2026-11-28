@@ -576,6 +576,33 @@ export class CityMap {
   }
 
   // ---------------------------------------------------------- contents
+  /**
+   * cars in a lot's painted stalls: the lot texture is laid in world space, 2.5 m stalls along x in
+   * two rows (z 0-4 and 6-10 of every 10 m), so a spot goes in the middle of a stall, nose in; about
+   * 40% of the stalls are taken, at most 18 a lot
+   */
+  private fillLot(cx: number, cz: number, w: number, d: number, region: Region) {
+    // its own stream, so the rest of the map draws the same numbers as before
+    const rng = new Rng(Math.round(cx * 7.3 + cz * 13.1 + 9001));
+    const x0 = cx - w / 2 + 1, x1 = cx + w / 2 - 1, z0 = cz - d / 2 + 1, z1 = cz + d / 2 - 1;
+    const spots: ParkingSpot[] = [];
+    for (let zb = Math.floor(z0 / 10) * 10; zb < z1; zb += 10) {
+      for (const [zc, h] of [[zb + 2.03, Math.PI], [zb + 7.97, 0]] as const) {
+        if (zc - 2.2 < z0 || zc + 2.2 > z1) continue;
+        for (let xc = Math.floor(x0 / 2.5) * 2.5 + 1.25; xc < x1; xc += 2.5) {
+          if (xc - 1.1 < x0 || xc + 1.1 > x1) continue;
+          spots.push({ x: xc, z: zc, h: rng.next() < 0.85 ? h : h + Math.PI, region });
+        }
+      }
+    }
+    // a fair share taken, scattered
+    for (let i = spots.length - 1; i > 0; i--) {
+      const j = Math.floor(rng.next() * (i + 1));
+      [spots[i], spots[j]] = [spots[j], spots[i]];
+    }
+    this.parking.push(...spots.slice(0, Math.min(18, Math.round(spots.length * 0.4))));
+  }
+
   private addBuilding(x: number, z: number, w: number, d: number, h: number, color: number, style: number, rng: Rng, roof: 0 | 1 = 0, roofColor = 0x8a7a70, y0 = 0, collide = true) {
     rng.next(); // (still drawn, so everything generated after keeps its place)
     // the seed comes from the footprint's centre, so a tower and its set-back tiers share their glass
@@ -646,7 +673,7 @@ export class CityMap {
           this.addBuilding(cx - W / 4, cz - D / 4, W / 2 - 4, D / 2 - 4, rng.range(8, 12), rng.pick([0xf2f2ee, 0xcfe3ee, 0xe9dfc9]), 4, rng, 1, 0x6f8fa6);
           this.addBuilding(cx + W / 4, cz + D / 4, W / 2 - 4, D / 2 - 6, rng.range(5, 8), rng.pick([0x8fc1d4, 0xf2d0a4, 0xf2f2ee]), 3, rng);
           this.flats.push({ x: cx + W / 4, z: cz - D / 4, w: W / 2 - 2, d: D / 2 - 2, kind: 'lot' });
-          for (let i = 0; i < 5; i++) this.parking.push({ x: cx + W / 4 - 12 + i * 6, z: cz - D / 4, h: 0, region: 'marina' });
+          this.fillLot(cx + W / 4, cz - D / 4, W / 2 - 2, D / 2 - 2, 'marina');
           return;
         }
         const pastel = [0xf6c6b5, 0xf9e2ae, 0xbfe3d0, 0xc9d7f2, 0xf2b8c6, 0xffffff, 0xd8c8ee, 0xa9dfe0];
@@ -670,7 +697,7 @@ export class CityMap {
           }
         }
         this.flats.push({ x: cx, z: cz, w: W - depth * 2 - 2, d: D - depth * 2 - 2, kind: 'lot' });
-        this.parking.push({ x: cx - 6, z: cz, h: 0, region: b.region }, { x: cx + 6, z: cz, h: Math.PI, region: b.region });
+        this.fillLot(cx, cz, W - depth * 2 - 2, D - depth * 2 - 2, b.region);
         this.props.push({ x: cx, z: cz + 10, s: 1, r: rng.range(0, 6), kind: 'palm' });
         return;
       }

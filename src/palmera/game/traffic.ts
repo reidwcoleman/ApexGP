@@ -395,7 +395,8 @@ export class Traffic {
           }
         } else if (d < 150 && (d > 70 || !g.settled) && (!g.settled || !g.inView(s.x, 1, s.z))) {
           let clear = true;
-          for (const u of g.vehicles) if (Math.abs(u.pos.x - s.x) < 5 && Math.abs(u.pos.z - s.z) < 5) { clear = false; break; }
+          // stalls are 2.5 m apart: only a car actually in this one blocks it
+          for (const u of g.vehicles) if (Math.hypot(u.pos.x - s.x, u.pos.z - s.z) < 2.2) { clear = false; break; }
           if (!clear) continue;
           const type: CarType = s.region === 'downtown' ? pick(['sedan', 'sports', 'suv', 'taxi', 'van', 'bike'] as CarType[]) : s.region === 'swamp' ? pick(['pickup', 'pickup', 'suv'] as CarType[]) : pick(['sedan', 'suv', 'pickup', 'sports', 'sedan', 'van'] as CarType[]);
           const v = new Vehicle(type);
