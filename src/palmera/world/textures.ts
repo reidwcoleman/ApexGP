@@ -129,14 +129,54 @@ export function mudTexture(): THREE.CanvasTexture {
 }
 
 export function lotTexture(): THREE.CanvasTexture {
+  // a well-used lot: the same 4 stalls x 2 rows and aisle (512 px now), with oil dripped where the
+  // engines sit, the aisle darkened by tyres, hairline cracks, and stall lines in aged paint worn
+  // through in places. It was clean grey with crisp white lines
   const rng = new Rng(23);
-  const [c, ctx] = canvas(128, 128);
+  const N = 512, k = N / 128;
+  const [c, ctx] = canvas(N, N);
   ctx.fillStyle = '#6a6a6c';
-  ctx.fillRect(0, 0, 128, 128);
-  speckle(ctx, 128, 128, 2500, rng, ['#606062', '#727274', '#5a5a5c']);
-  ctx.fillStyle = '#e8e4d8';
-  for (let x = 0; x < 128; x += 32) ctx.fillRect(x, 0, 2, 52);
-  for (let x = 0; x < 128; x += 32) ctx.fillRect(x, 76, 2, 52);
+  ctx.fillRect(0, 0, N, N);
+  speckle(ctx, N, N, 26000, rng, ['#606062', '#727274', '#5a5a5c', '#68686a'], 2);
+  // tyre-polished lanes down the aisle
+  ctx.fillStyle = 'rgba(40,40,44,0.12)';
+  for (const y of [55, 62, 66, 73]) ctx.fillRect(0, y * k, N, 2.5 * k);
+  // oil: soft dark blots in each stall, toward the aisle where the engine sits
+  for (let row = 0; row < 2; row++)
+    for (let st = 0; st < 4; st++) {
+      if (rng.next() < 0.25) continue;
+      const cx = (st * 32 + 16 + (rng.next() - 0.5) * 6) * k;
+      const cy = (row === 0 ? 40 + rng.next() * 6 : 88 - rng.next() * 6) * k;
+      const r = (5 + rng.next() * 6) * k;
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      const a = 0.25 + rng.next() * 0.3;
+      g.addColorStop(0, `rgba(28,26,26,${a})`);
+      g.addColorStop(0.6, `rgba(32,30,30,${a * 0.5})`);
+      g.addColorStop(1, 'rgba(32,30,30,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.ellipse(cx, cy, r, r * (0.6 + rng.next() * 0.4), rng.next() * 3, 0, Math.PI * 2); ctx.fill();
+    }
+  // hairline cracks
+  ctx.strokeStyle = 'rgba(30,30,32,0.55)';
+  ctx.lineWidth = 1.2;
+  for (let i = 0; i < 7; i++) {
+    let x = rng.next() * N, y = rng.next() * N;
+    ctx.beginPath(); ctx.moveTo(x, y);
+    for (let j = 0; j < 8; j++) { x += (rng.next() - 0.5) * 40; y += (rng.next() - 0.3) * 30; ctx.lineTo(x, y); }
+    ctx.stroke();
+  }
+  // stall lines: aged cream, worn through in patches
+  for (let x = 0; x < 128; x += 32)
+    for (const [y0, y1] of [[0, 52], [76, 128]]) {
+      for (let y = y0 * k; y < y1 * k; ) {
+        const wear = rng.next(), len = wear > 0.05 ? 10 + rng.next() * 40 : 3 + rng.next() * 8;
+        if (wear > 0.05) {
+          ctx.fillStyle = `rgba(226,220,200,${0.6 + 0.35 * wear})`;
+          ctx.fillRect(x * k, y, 2 * k, Math.min(len, y1 * k - y));
+        }
+        y += len;
+      }
+    }
   return tex(c);
 }
 
