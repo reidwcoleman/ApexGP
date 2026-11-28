@@ -101,8 +101,22 @@ void main() {
   float md = dot(d, uMoonDir);
   // (behind cloud when it rains)
   float clear = 1.0 - smoothstep(0.15, 0.6, uGrey);
-  col += vec3(0.85, 0.9, 1.0) * smoothstep(0.99935, 0.9996, md) * 1.2 * uNight * clear;
-  col += vec3(0.3, 0.4, 0.7) * pow(max(md, 0.0), 200.0) * 0.06 * uNight * clear;
+  // a crisp disc about a degree across (it was a soft blob four times the size), with darker seas, a
+  // little limb darkening and a warm cast low over the horizon; faint by day, as a daytime moon is
+  if (md > 0.999) {
+    float R = 0.0088;
+    vec3 mu = normalize(cross(uMoonDir, vec3(0.0, 1.0, 0.0)));
+    vec3 mv = cross(mu, uMoonDir);
+    vec2 mp = vec2(dot(d, mu), dot(d, mv)) / R;
+    float mr = length(mp);
+    float disc = 1.0 - smoothstep(0.86, 1.0, mr);
+    float seas = smoothstep(0.35, 0.0, length(mp - vec2(-0.25, 0.3))) * 0.45 + smoothstep(0.3, 0.0, length(mp - vec2(0.2, 0.05))) * 0.3
+      + smoothstep(0.22, 0.0, length(mp - vec2(-0.05, -0.35))) * 0.25 + (h3(vec3(floor(mp * 9.0), 1.0)) - 0.5) * 0.12;
+    vec3 mc = vec3(0.92, 0.93, 0.97) * (1.0 - seas) * (1.0 - 0.25 * mr * mr);
+    mc *= mix(vec3(1.0, 0.72, 0.45), vec3(1.0), smoothstep(0.02, 0.18, uMoonDir.y));
+    col += mc * disc * (0.32 + 1.2 * uNight) * clear;
+  }
+  col += vec3(0.3, 0.4, 0.7) * pow(max(md, 0.0), 900.0) * 0.05 * uNight * clear;
   // stars
   vec3 sp = d * 300.0;
   vec3 cell = floor(sp);
