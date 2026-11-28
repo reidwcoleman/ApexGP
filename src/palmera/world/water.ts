@@ -160,10 +160,30 @@ const swashFrag = /* glsl */ `
 uniform float uTime;
 uniform float uDay;
 uniform vec3 uHorizon;
+uniform vec3 uSunDir;
+uniform vec3 uZenith;
+uniform sampler2D tA;
+uniform sampler2D tB;
+uniform float uRotA;
+uniform float uRotB;
+uniform float uMix;
+uniform float uLevel;
+uniform float uHasPhoto;
 varying vec3 vWPos;
+vec3 skyPhoto(sampler2D t, vec3 d, float rot) {
+  float az = atan(d.z, d.x) + rot;
+  float el = asin(clamp(d.y, -1.0, 1.0));
+  vec2 uv = vec2(fract(az / 6.2831853 + 0.5), 0.5 + el / 3.14159265);
+  return min(texture2D(t, uv).rgb, vec3(6.0));
+}
 float wHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float wNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
   return mix(mix(wHash(i), wHash(i+vec2(1,0)), f.x), mix(wHash(i+vec2(0,1)), wHash(i+vec2(1,1)), f.x), f.y); }
+// distance to the nearest scattered point: small in a bubble's middle, large on the lace between bubbles
+float worley(vec2 p){ vec2 i = floor(p), f = fract(p); float d = 1.0;
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) { vec2 g = vec2(float(x), float(y));
+    vec2 o = vec2(wHash(i + g), wHash(i + g + 17.3)); d = min(d, length(g + o - f)); }
+  return d; }
 #include <fog_pars_fragment>
 void main() {
   float x = vWPos.x, z = vWPos.z;
@@ -177,12 +197,35 @@ void main() {
   float light = 0.08 + 0.92 * uDay;
   vec4 c = vec4(0.0);
   if (x > edge) {
-    // the thin water: clear over the sand, foam at the leading edge and in lace behind it
+    // the thin water: see-through over the sand, a sheen of sky at low angles and the sun's glints off
+    // its ripples; foam bunched at the leading edge and a lace of bubbles behind it that thins as it drains
     float k = x - edge;
-    float lace = wNoise(vec2(x * 2.2 + uTime * 0.6 * (u < 0.2 ? -1.0 : 1.0), z * 1.6));
-    float foam = smoothstep(0.9, 0.0, k) * (0.55 + 0.45 * lace) + smoothstep(0.62, 0.85, lace) * 0.5 * smoothstep(3.0, 0.5, k);
-    vec3 wcol = mix(vec3(0.3, 0.5, 0.46), uHorizon * 0.9, 0.35) * light;
-    c = vec4(mix(wcol, vec3(0.95, 0.97, 0.97) * light, clamp(foam * 1.2, 0.0, 1.0)), clamp(0.45 + k * 0.1 + foam * 0.7, 0.0, 0.9));
+    float dir = u < 0.2 ? -1.0 : 1.0;
+    float cell = worley(vec2(x * 1.7 + uTime * 0.45 * dir, z * 1.5));
+    float cell2 = worley(vec2(x * 4.1 + uTime * 0.6 * dir, z * 3.7 + 9.0));
+    float lace = smoothstep(0.42, 0.62, cell) * 0.7 + smoothstep(0.5, 0.68, cell2) * 0.3;
+    float clump = smoothstep(0.4, 0.72, wNoise(vec2(x * 0.6, z * 0.3 + cyc * 5.0)));
+    float drain = u < 0.2 ? 1.0 : 1.0 - 0.6 * smoothstep(0.25, 1.0, u);
+    float lineF = smoothstep(1.2, 0.0, k) * (0.55 + 0.45 * lace) + smoothstep(0.35, 0.0, k) * 0.4;
+    float foam = lineF * (0.75 + 0.25 * drain) + lace * clump * smoothstep(4.5, 0.6, k) * 0.85 * drain;
+    vec3 V = normalize(cameraPosition - vWPos);
+    float fres = 0.03 + 0.97 * pow(1.0 - max(V.y, 0.0), 5.0);
+    vec2 rip = vec2(wNoise(vec2(x * 3.0 - uTime * 1.4, z * 2.0)), wNoise(vec2(z * 2.6, x * 2.0 + uTime))) - 0.5;
+    vec3 N = normalize(vec3(rip.x * 0.3, 1.0, rip.y * 0.3));
+    vec3 R = reflect(-V, N);
+    float glint = pow(max(dot(R, normalize(uSunDir)), 0.0), 140.0) * 4.0 * uDay;
+    vec3 tint = vec3(0.13, 0.19, 0.17) * light;
+    // the sky it mirrors, the same as the sea's
+    vec3 sky = mix(uHorizon, uZenith, pow(clamp(R.y, 0.0, 1.0), 0.5));
+    if (uHasPhoto > 0.5) sky = mix(skyPhoto(tA, R, uRotA), skyPhoto(tB, R, uRotB), uMix) * uLevel;
+    vec3 wcol = mix(tint, sky, clamp(fres, 0.0, 0.7)) + glint;
+    float a = clamp(0.3 + fres * 0.4 + min(k, 3.0) * 0.04 + glint * 0.3, 0.0, 0.75);
+    // where it deepens into the sea, the sea's own sandy-turquoise edge colour, so the two meet without a seam
+    float sea = smoothstep(730.5, 734.0, x);
+    wcol = mix(wcol, mix(vec3(0.6, 0.58, 0.42), vec3(0.16, 0.5, 0.48), 0.25) * light + sky * 0.05, sea * 0.75);
+    a = mix(a, 0.55, sea);
+    float fm = clamp(foam, 0.0, 1.0);
+    c = vec4(mix(wcol, vec3(0.96, 0.98, 0.98) * light, fm), max(a, fm * 0.95));
   } else if (x > reach) {
     // wet sand where the last waves reached, drying toward the top
     float w = smoothstep(reach, reach + 1.2, x) * (0.55 + 0.45 * smoothstep(edge - 4.0, edge, x));
@@ -244,6 +287,9 @@ export class Water {
     smat.uniforms.uTime = this.uniforms.uTime;
     smat.uniforms.uDay = this.uniforms.uDay;
     smat.uniforms.uHorizon = this.uniforms.uHorizon;
+    smat.uniforms.uSunDir = this.uniforms.uSunDir;
+    smat.uniforms.uZenith = this.uniforms.uZenith;
+    for (const k of ['tA', 'tB', 'uRotA', 'uRotB', 'uMix', 'uLevel', 'uHasPhoto']) smat.uniforms[k] = sky.uniforms[k];
     this.swash = new THREE.Mesh(sg, smat);
     this.swash.renderOrder = 1;
     scene.add(this.swash);
