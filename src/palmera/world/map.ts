@@ -17,6 +17,8 @@ export const IZS = [-580, -420, -260, -100, 60, 220, 380, 540];
 export const MAIN = { x0: -720, x1: 400, z0: -620, z1: 620 };
 export const ISLAND = { x0: 560, x1: 712, z0: -660, z1: 660 };
 export const BEACH = { x0: 676, x1: 800 };
+/** how far the beach's sand spits run out past the island's ends */
+export const SPIT = 30;
 export const BRIDGE = { z: -260, x0: 400, x1: 560, half: 7, peak: 7.5 };
 export const WORLD = { x0: -900, x1: 1000, z0: -800, z1: 800 };
 
@@ -68,6 +70,15 @@ export function groundBase(x: number, z: number): number {
   if (z >= ISLAND.z0 && z <= ISLAND.z1 && x >= ISLAND.x0) {
     if (x <= ISLAND.x1) return 0;
     if (x <= BEACH.x1 + 60) return lerp(0, -3.2, (x - ISLAND.x1) / (BEACH.x1 - ISLAND.x1));
+  }
+  // the beach runs on round the island's ends as a sand spit sloping into the sea (it was cut off
+  // square, the sand dropping straight into deep water)
+  if (x > ISLAND.x1 && x <= BEACH.x1 + 60) {
+    const out = z < ISLAND.z0 ? ISLAND.z0 - z : z - ISLAND.z1;
+    if (out > 0 && out < SPIT) {
+      const h = lerp(0, -3.2, (x - ISLAND.x1) / (BEACH.x1 - ISLAND.x1));
+      return h - Math.max(0, h + 4.5) * (out / SPIT);
+    }
   }
   return -6;
 }

@@ -6,7 +6,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { box, cyl, merge, prep } from '../core/geo';
 import { Rng, clamp } from '../core/math';
 import {
-  BEACH, BRIDGE, CityMap, ISLAND, MAIN, ROAD_HALF, SIDEWALK, WATER_Y, bridgeDeckY, groundAt, groundBase, pondShape, regionAt,
+  BEACH,
+  SPIT, BRIDGE, CityMap, ISLAND, MAIN, ROAD_HALF, SIDEWALK, WATER_Y, bridgeDeckY, groundAt, groundBase, pondShape, regionAt,
   type BuildingSpec, type PropSpec,
 } from './map';
 import * as T from './textures';
@@ -1148,6 +1149,21 @@ export class City {
     }
     // sand around the island tips
     b.flat(ISLAND.x0, ISLAND.z1 - 1, BEACH.x0, ISLAND.z1, 0.005, 16);
+    // the spits at both ends of the beach, sloping away into the sea
+    {
+      const sx = [ISLAND.x1, 720, 735, 750, 770, 800, 830, 859];
+      for (const side of [-1, 1]) {
+        const edge = side < 0 ? ISLAND.z0 : ISLAND.z1;
+        for (let i = 0; i < sx.length - 1; i++)
+          for (let j = 0; j < 10; j++) {
+            const oa = (j / 10) * SPIT, ob = ((j + 1) / 10) * SPIT - (j === 9 ? 0.01 : 0);
+            const za = side < 0 ? edge - ob : edge + oa, zb = side < 0 ? edge - oa : edge + ob;
+            const xa = sx[i], xb = sx[i + 1];
+            const y = (x: number, z: number) => groundBase(x, z) + 0.01;
+            b.quad([xa, y(xa, zb), zb], [xb, y(xb, zb), zb], [xb, y(xb, za), za], [xa, y(xa, za), za], [xa / 16, -zb / 16], [xb / 16, -zb / 16], [xb / 16, -za / 16], [xa / 16, -za / 16]);
+          }
+      }
+    }
     this.add(b.geo(), D(new THREE.MeshStandardMaterial({ map: sand, roughness: 1 }), 'coast_sand_01', { scale: 3, albedo: 0.9, normal: 1.0, rough: [0.8, 1] }));
     // seawalls
     const sw: THREE.BufferGeometry[] = [];
