@@ -555,7 +555,8 @@ export function kitModel(type: CarType, spec: CarSpec, variant: number): KitMode
     for (const sx of [-1, 1]) boxAt(cw * 0.38, 0.62, 0.12, sx * cw * 0.25, belt + 0.12, -b.L * 0.05, [0.09, 0.08, 0.075]);
   }
   // headliner: kept inside the roof (it used to poke out through the raked windscreen)
-  boxAt(cw * 0.8, 0.03, b.L * 0.22, 0, b.H - 0.12, -b.L * 0.09, [0.42, 0.41, 0.39]);
+  // (dark: on the SUVs and the pickup it shows through a glass sunroof, and a light one read as a grey panel)
+  boxAt(cw * 0.8, 0.03, b.L * 0.22, 0, b.H - 0.18, -b.L * 0.09, [0.12, 0.12, 0.115]);
   if (type === 'ambulance') {
     // a red band round the body and a white light bar
     for (const s of [-1, 1]) boxAt(0.03, 0.22, b.L * 0.86, s * (b.W / 2 + 0.012), b.H * 0.52, -b.L * 0.04, [0.78, 0.06, 0.08]);

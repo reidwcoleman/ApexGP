@@ -506,7 +506,7 @@ float grime = 0.0;`)
 
 // shared materials
 export const carMats = {
-  detail: addLampLight(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.32, metalness: 0.35 })),
+  detail: addLampLight(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.32, metalness: 0.35, side: THREE.DoubleSide })),
   glass: new THREE.MeshPhysicalMaterial({ vertexColors: true, color: 0xffffff, roughness: 0.04, metalness: 0.0, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.8, transparent: true, opacity: 0.55, depthWrite: false }),
   lamps: lampMaterial(),
   /** a bus's windows: its strip lights glow through them after dark (setCarNight) */
@@ -534,6 +534,10 @@ export function paintMat(color: number): THREE.MeshStandardMaterial {
         ? { color, vertexColors: true, roughness: 0.34, metalness: 0.72, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.3 }
         : { color, vertexColors: true, roughness: 0.42, metalness: 0.0, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.2 },
     );
+    // two-sided: parts of the modelled bodies (the cab roofs and pillars of the van and pickup among
+    // them) are wound inside out, and one-sided they vanished - an open, roofless cab with only the
+    // A-pillars standing, like black blades either side of the windscreen
+    pm.side = THREE.DoubleSide;
     addGrime(pm);
     addLampLight(pm);
     m = pm;
