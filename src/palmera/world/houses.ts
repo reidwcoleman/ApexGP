@@ -13,6 +13,9 @@ const CELL = 120;
 
 export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
   const cells = new Map<string, { x: number; z: number; list: THREE.BufferGeometry[] }>();
+  // each house's wall height, from its building (the houses list only has the footprint)
+  const wallH = new Map<string, number>();
+  for (const b of map.buildings) if (b.style === 2 && b.y0 === 0) wallH.set(Math.round(b.x * 10) + ',' + Math.round(b.z * 10), b.h);
   for (const h of map.houses) {
     const cx = Math.floor(h.x / CELL), cz = Math.floor(h.z / CELL), key = cx + ',' + cz;
     let cell = cells.get(key);
@@ -33,15 +36,17 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
     };
     const front = h.hd;
     const setback = 6;
-    const doorAl = (rnd() - 0.5) * h.hw * 0.6;
+    // centred between the two front windows (the facade shader puts them 1.08-2.52 m either side of the
+    // middle): anywhere else the door, its frame or a porch post stood in front of the glass
+    const doorAl = (rnd() - 0.5) * 0.12;
     // door, frame and step
     hb(doorAl, 1.08, front + 0.05, 1.0, 2.1, 0.1, DOORS[Math.floor(rnd() * DOORS.length)]);
     hb(doorAl, 1.15, front + 0.03, 1.25, 2.3, 0.06, 0xf4f1ea);
     hb(doorAl, 0.08, front + 0.7, 2.0, 0.16, 1.4, 0xcfc9bd);
     // a porch canopy on two posts
     if (rnd() < 0.5) {
-      hb(doorAl, 2.62, front + 0.85, 2.8, 0.14, 1.8, 0xf4f1ea);
-      for (const s of [-1, 1]) hb(doorAl + s * 1.25, 1.3, front + 1.65, 0.12, 2.6, 0.12, 0xf4f1ea);
+      hb(doorAl, 2.62, front + 0.85, 1.6, 0.14, 1.8, 0xf4f1ea);
+      for (const s of [-1, 1]) hb(doorAl + s * 0.62, 1.3, front + 1.65, 0.12, 2.6, 0.12, 0xf4f1ea);
     }
     // a paved path to the sidewalk
     hb(doorAl, 0.025, front + (setback + 1.4) / 2, 1.2, 0.05, setback - 1.4, 0xd8d2c6, true);
@@ -68,6 +73,15 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
         hb((a + b) / 2, 0.42, fo, b - a, 0.62, 0.03, 0xf7f5f0);
         hb((a + b) / 2, 0.76, fo, b - a, 0.05, 0.07, 0xf7f5f0);
         for (let p = a; p <= b + 0.01; p += Math.max(1.2, (b - a) / Math.ceil((b - a) / 1.6))) hb(p, 0.45, fo, 0.09, 0.9, 0.09, 0xf7f5f0);
+      }
+    }
+    // gutters under the front and back eaves, a downpipe at each end of them
+    const H = wallH.get(Math.round(h.x * 10) + ',' + Math.round(h.z * 10));
+    if (H) {
+      const gc = rnd() < 0.6 ? 0xf2f0ea : 0x8b8f92;
+      for (const s of [-1, 1]) {
+        hb(0, H - 0.07, s * (front + 0.47), 2 * h.hw + 0.62, 0.12, 0.12, gc);
+        for (const e of [-1, 1]) hb(e * (h.hw - 0.12), (H - 0.1) / 2, s * (front + 0.06), 0.07, H - 0.1, 0.07, gc);
       }
     }
     // an AC unit against the side wall away from the drive
