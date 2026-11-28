@@ -93,6 +93,11 @@ const fract = (x: number) => x - Math.floor(x);
 const BROAD_K = new THREE.Color(0.74, 0.9, 0.8);
 const SPRUCE_K = new THREE.Color(0.3, 0.45, 0.4);
 const SHRUB_K = new THREE.Color(0.56, 0.7, 0.6);
+/** how far into autumn each venue's race weekend is (0 full summer green … 1 a few crowns turning) */
+const AUTUMN: Partial<Record<string, number>> = { park: 1, zandvoort: 0.5, austin: 0.6 };
+/** a turning crown (yellow-brown) and one just fading, over the leaf's own tint */
+const TURNING_K = new THREE.Color(1.42, 1.04, 0.58);
+const FADING_K = new THREE.Color(1.1, 1.02, 0.84);
 const NEAR_BAND = 125; // trees closer than this to the circuit get a 3D version
 const R3D = 170;
 /** tan(30°): the lens the LOD distances are tuned for (a 60° view) — and the most a long lens may stretch them */
@@ -173,8 +178,13 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     if (map.venue === 'mexico') return c.multiply(new THREE.Color(0.98, 1.02, 0.86));
     // Hungary in late July: dusty, olive, heat-tired foliage (nothing turning yet)
     if (map.venue === 'hungaroring') return c.multiply(new THREE.Color(1.04, 1.0, 0.8));
-    if (h2 < 0.05 && (sp === 'plane' || sp === 'chestnut' || sp === 'poplar')) c.setRGB(1.28, 1.02, 0.5);
-    else if (h2 < 0.09 && sp !== 'shrub' && sp !== 'spruce') c.setRGB(1.12, 1.03, 0.78);
+    // (2026-11-27: only where the race is late enough in the year for it — Monza in September, Zandvoort
+    // at the end of August, Austin in October; Spa and Silverstone race in July, Suzuka now in April — and
+    // the turning leaf keeps the scan's brightness: it used to replace the tint outright, a crown half
+    // again as bright as its neighbours that glowed lemon-yellow out of a July wood in every chase shot)
+    const turn = AUTUMN[map.venue] ?? 0;
+    if (h2 < 0.05 * turn && (sp === 'plane' || sp === 'chestnut' || sp === 'poplar')) c.multiply(TURNING_K);
+    else if (h2 < 0.09 * turn && sp !== 'shrub' && sp !== 'spruce') c.multiply(FADING_K);
     return c;
   };
   /** species by stand type */
