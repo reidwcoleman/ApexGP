@@ -77,7 +77,10 @@ export const SPIELBERG: CircuitDef = {
     barrier: 'armco',
     fence: 1,
     art: 'ads',
-    runoffPaint: 'bands',
+    // (the Red Bull Ring's run-off is painted a wide violet-blue past the red/white kerbs: the real pole onboard)
+    runoffPaint: 'flag',
+    runoffColors: ['#5a4fb0'],
+    runoffBand: 2.8,
     kerb: ['#d0202a', '#efefeb'],
     armcoBoards: true,
     runs: [

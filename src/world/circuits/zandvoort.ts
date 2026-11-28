@@ -47,7 +47,8 @@ export const ZANDVOORT: CircuitDef = {
     fence: 1,
     art: 'ads',
     runoffPaint: 'bands',
-    kerb: ['#d0211c', '#efefea'],
+    // (Dutch orange and white: every kerb in the real pole onboard)
+    kerb: ['#e4621b', '#efefea'],
     armcoBoards: true,
     runs: [
       { from: 430, to: 990, side: 1, kind: 'concrete', fence: 2 },

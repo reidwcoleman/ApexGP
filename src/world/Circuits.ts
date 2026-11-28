@@ -248,6 +248,8 @@ export const SILVERSTONE: CircuitDef = {
   trackside: {
     barrier: 'armco',
     runoffPaint: 'astroturf',
+    // (Silverstone's kerbs are black and white: every one in the real pole onboard)
+    kerb: ['#161616', '#ecece8'],
     armcoBoards: true,
     runs: [{ from: 120, to: 640, side: -1, kind: 'concrete', fence: 2 }],
     lights: [{ from: 1560, to: 2080, side: 1, spacing: 75 }],

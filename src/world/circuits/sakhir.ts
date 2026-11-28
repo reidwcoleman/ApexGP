@@ -64,7 +64,10 @@ export const SAKHIR: CircuitDef = {
   trackside: {
     barrier: 'armco',
     fence: 1,
-    runoffPaint: 'bands',
+    // (the real pole onboard: red/white kerbs, then the run-off painted a wide sky blue)
+    runoffPaint: 'flag',
+    runoffColors: ['#4f9fdc'],
+    runoffBand: 2.8,
     kerb: ['#d2231c', '#ecece8'],
     armcoBoards: true,
     ground: 'desert',
