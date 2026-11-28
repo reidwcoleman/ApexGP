@@ -58,12 +58,56 @@ export function intersectionTexture(): THREE.CanvasTexture {
   return tex(c);
 }
 
+/**
+ * Zebra bars across the road (u along the road's width, v the 3 m across the crossing), worn the way
+ * painted bars wear: scuffed through in each lane's two wheel tracks, ragged at the edges, pitted where
+ * the asphalt's stones show through, and greyed with road grime. They were 128 px of clean, even paint.
+ */
 export function crosswalkTexture(): THREE.CanvasTexture {
-  const [c, ctx] = canvas(128, 32);
-  ctx.clearRect(0, 0, 128, 32);
-  ctx.fillStyle = 'rgba(236,233,224,0.92)';
-  for (let x = 4; x < 128; x += 14) ctx.fillRect(x, 3, 8, 26);
+  const W = 1024, H = 128;
+  const rng = new Rng(29);
+  const [c, ctx] = canvas(W, H);
+  const img = ctx.createImageData(W, H);
+  // smooth 1D noise for ragged edges and patchy wear
+  const N = 64, tbl = Array.from({ length: N + 1 }, () => rng.next());
+  tbl[N] = tbl[0];
+  const n1 = (x: number) => { const t = ((x % N) + N) % N, i = Math.floor(t), f = t - i, s = f * f * (3 - 2 * f); return tbl[i] * (1 - s) + tbl[i + 1] * s; };
+  const tracks = [0.13, 0.33, 0.67, 0.87];
+  const pit = new Float32Array(W * H);
+  for (let k = 0; k < 9000; k++) {
+    const x = Math.floor(rng.next() * W), y = Math.floor(rng.next() * H);
+    pit[y * W + x] = 1;
+    if (rng.chance(0.4) && x + 1 < W) pit[y * W + x + 1] = 1;
+  }
+  for (let bar = 0; bar < 9; bar++) {
+    const x0 = 34 + bar * 112, x1 = x0 + 64;
+    const shade = 0.9 + rng.next() * 0.1;
+    for (let y = 0; y < H; y++) {
+      // ragged ends and sides, a few px either way
+      const ey = 6 + n1(bar * 7.1 + y * 0.09) * 6, eyb = H - 6 - n1(bar * 3.3 + y * 0.11 + 20) * 6;
+      for (let x = x0 - 4; x < x1 + 4; x++) {
+        const l = x0 + (n1(bar * 5 + y * 0.12) - 0.5) * 5, r = x1 + (n1(bar * 9 + y * 0.12 + 30) - 0.5) * 5;
+        const ins = Math.min(x - l, r - x, y - ey, eyb - y);
+        if (ins <= 0) continue;
+        const u = x / W;
+        let trk = 0;
+        for (const t of tracks) trk = Math.max(trk, Math.exp(-Math.pow((u - t) / 0.03, 2)));
+        const patchy = n1(x * 0.05 + y * 0.31 + bar * 13);
+        let a = Math.min(1, ins / 1.5) * 0.93;
+        a *= 1 - trk * (0.45 + 0.4 * patchy);
+        if (pit[y * W + x] && rng.next() < 0.35 + trk * 0.5) a *= 0.25;
+        const g = 1 - trk * 0.16 - patchy * 0.05;
+        const i = (y * W + x) * 4;
+        img.data[i] = 238 * shade * g;
+        img.data[i + 1] = 235 * shade * g;
+        img.data[i + 2] = 226 * shade * g;
+        img.data[i + 3] = Math.max(0, a) * 255;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
   const t = tex(c, false);
+  t.anisotropy = 8;
   return t;
 }
 
