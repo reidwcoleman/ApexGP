@@ -194,7 +194,14 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     // the Ardennes: spruce plantations with stands of beech/oak (the chestnut crowns stand in for beech)
     // (about a quarter broadleaf, in stands, so the hills read as dark conifer with patches of lighter beech)
     if (map.scenic) return scenicSpecies(map.scenic, map, x, z, n, n2, h);
-    if (map.venue === 'ardennes') return n < 0.12 || (n < 0.3 && h > 0.4) || h > 0.85 ? 'spruce' : n2 > -0.1 ? 'chestnut' : 'oak';
+    // (2026-11-27: the woods that line the circuit itself are mostly old broadleaf — beech and oak in one
+    // closed canopy — with the spruce plantations further up the slopes: the real pole onboard shows a
+    // solid wall of leaf along the straights, where ours was a row of spires with the sky between them)
+    if (map.venue === 'ardennes') {
+      const dT = map.distToTrack(x, z);
+      const k = dT < 150 ? 0.35 : dT < 320 ? 0.7 : 1;
+      return n < 0.12 - 0.2 * (1 - k) || (n < 0.3 && h > 1 - 0.6 * k) || h > 1 - 0.15 * k ? 'spruce' : n2 > -0.1 ? 'chestnut' : 'oak';
+    }
     // English lowland: oak and ash (the plane crowns stand in for ash), a few horse chestnuts and poplars
     if (map.venue === 'airfield') return n < 0.05 ? 'oak' : n < 0.3 ? 'plane' : n2 > 0.3 ? 'poplar' : 'chestnut';
     // Suzuka: sugi cedar and pine on the slopes (the spruce crowns stand in), oak and chestnut in the hollows
@@ -258,6 +265,8 @@ export function buildVegetation(map: WorldMap, layout: Layout, renderer: THREE.W
     if (map.venue === 'yasmarina') scale *= sp === 'shrub' ? 0.9 : 0.6;
     // Monza's park is old growth: the broadleaves stand 25–30 m over the fences
     if (map.venue === 'park' && (sp === 'oak' || sp === 'plane' || sp === 'chestnut')) scale *= 1.22;
+    // (and the Ardennes beech and oak by the circuit: tall, full crowns that close over the gaps)
+    if (map.venue === 'ardennes' && (sp === 'oak' || sp === 'chestnut') && map.distToTrack(x, z) < 320) scale *= 1.2;
     if (map.scenic) scale *= scenicTreeLook(map.scenic, sp, hash2i(Math.floor(x * 2), Math.floor(z * 2), 77)).scale;
     const tint = tintFor(sp, hash2i(Math.floor(x * 3), Math.floor(z * 3), 21), h2);
     if (tintK) tint.multiply(tintK);
