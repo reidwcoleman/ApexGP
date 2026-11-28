@@ -1391,7 +1391,7 @@ export class City {
     const out: Inst[] = [];
     const tmp: ReturnType<typeof this.map.colliders.query> = [];
     const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
-    const warm = [new THREE.Color(0xffc483), new THREE.Color(0xffd9a8), new THREE.Color(0xffb36b)], cool = new THREE.Color(0xcfe2ff);
+    const warm = [new THREE.Color(0xffc483), new THREE.Color(0xffd9a8), new THREE.Color(0xffb36b)], cool = new THREE.Color(0x9fb4d4);
     for (const b of this.map.buildings) {
       if (b.y0 !== 0 || !(b.style === 1 || b.style === 3) || b.h < 4) continue;
       for (const [nx, nz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
@@ -1946,7 +1946,8 @@ export class City {
     this.lampHeadMat.color.setRGB(k, k * 0.88, k * 0.66);
     this.poolMat.opacity = clamp(night * 0.3, 0, 0.3);
     lampUniforms.uLampOn.value = clamp((night - 0.15) / 0.5, 0, 1);
-    this.spillMat.opacity = clamp(night * 0.9, 0, 0.9);
+    // dims as the shops shut for the night
+    this.spillMat.opacity = clamp(night * 0.9, 0, 0.9) * clamp(cityUniforms.uLitShop.value / 0.85, 0.15, 1);
     const n = 0.7 + night * 1.8;
     this.neonMat.color.setRGB(n, n, n);
     const sn = 0.55 + night * 3.2;
@@ -2179,12 +2180,14 @@ function spillTexture(): THREE.CanvasTexture {
   const img = x.createImageData(W, H);
   for (let j = 0; j < H; j++) {
     const t = j / (H - 1);
-    const fall = Math.pow(1 - t, 1.7) * Math.min(1, t * 14 + 0.25);
-    const half = 0.4 + 0.12 * t;
+    // soft all round: strongest just out from the glass, gone well before the far edge and the sides
+    // (the old falloff left hard-edged slabs of light lying out across the pavement)
+    const fall = Math.pow(1 - t, 2.4) * Math.min(1, t * 10 + 0.3);
     for (let i = 0; i < W; i++) {
       const d = Math.abs(i / (W - 1) - 0.5);
-      const side = 1 - Math.min(1, Math.max(0, (d - half + 0.12) / 0.12));
-      const v = Math.round(255 * fall * side * side);
+      const e = Math.min(1, Math.max(0, (0.5 - d) / (0.2 + 0.14 * t)));
+      const side = e * e * (3 - 2 * e);
+      const v = Math.round(255 * fall * side);
       const k = (j * W + i) * 4;
       img.data[k] = img.data[k + 1] = img.data[k + 2] = v;
       img.data[k + 3] = 255;
