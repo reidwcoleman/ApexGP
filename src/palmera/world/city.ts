@@ -243,6 +243,8 @@ vStyle = aStyle;`,
 uniform float uNight; uniform float uTime; uniform sampler2D uShops; uniform float uShopsOn; uniform sampler2D uRooms; uniform float uRoomsOn; uniform sampler2D uShed; uniform float uShedOn;
 varying vec3 vBN; varying vec3 vLP; varying vec3 vBS; varying vec2 vStyle; varying vec3 vBW;
 float bhash(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719)))*43758.5453); }
+float bvn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(bhash(vec3(i, 0.0)), bhash(vec3(i + vec2(1.0, 0.0), 0.0)), f.x), mix(bhash(vec3(i + vec2(0.0, 1.0), 0.0)), bhash(vec3(i + vec2(1.0, 1.0), 0.0)), f.x), f.y); }
 // a person in a room: a cut-out figure standing at depth zp, centred on x = px, scale sc, legs
 // scissoring by amp*sin(w). 0 = missed, 1 = top/arms, 2 = legs, 3 = head
 float bPerson(vec3 ro, vec3 rd, float zp, float px, float sc, float w, float amp, float tLim) {
@@ -556,8 +558,30 @@ if (bn.y > 0.5) {
   // awnings' shade line and a darker plinth on shops
   if (shop && v > 3.5 && v < 4.2) diffuseColor.rgb *= 0.8;
   if (bStyle > 2.5 && v < 0.7) diffuseColor.rgb *= 0.55;
-  // grime toward the ground, a little lighter up high
-  diffuseColor.rgb *= mix(0.78, 1.0, smoothstep(0.0, 2.5, v)) * mix(1.0, 1.04, smoothstep(10.0, 40.0, v));
+  // weathering: uneven paint and sun-bleach in big soft patches, dirt splashed up from the pavement
+  // (ragged along its top), rain streaks run down from the window sills and from the roof edge, and
+  // darker corners where the walls meet; none of it on the glass
+  {
+    float sd = vStyle.y * 37.0 + face * 5.3;
+    float macro = bvn(vec2(u, v) * 0.06 + sd) * 0.6 + bvn(vec2(u, v) * 0.21 + sd * 1.7) * 0.4;
+    float tone = mix(0.84, 1.07, macro);
+    float gh = 0.8 + 1.5 * bvn(vec2(u * 0.35, sd));
+    float ground = 1.0 - smoothstep(0.0, gh, v);
+    float underWin = step(abs(f.x - 0.5), hw.x * 0.92) * (1.0 - inside) * step(f.y, 0.5 - hw.y) * inCols * (shop ? 0.0 : 1.0);
+    float fall = (0.5 - hw.y) - f.y;
+    // thin runs: narrow in u, long in v, each fading out at its own length
+    float runs = smoothstep(0.45, 0.85, bvn(vec2(u * 11.0, v * 0.12 + sd))) * (0.6 + 0.4 * bvn(vec2(u * 3.0, sd + 5.0)));
+    float streak = underWin * smoothstep(0.15 + 0.6 * bvn(vec2(u * 7.0, sd + 1.0)), 0.0, fall) * runs;
+    float roofRun = smoothstep(1.5 + 4.5 * bvn(vec2(u * 6.0, sd + 3.0)), 0.0, vBS.y - v) * smoothstep(0.3, 0.75, bvn(vec2(u * 9.0, v * 0.1 + sd + 9.0)));
+    float corner = 1.0 - smoothstep(0.0, 1.1, halfW - abs(u));
+    float dirt = clamp(ground * 0.55 + streak * 0.5 + roofRun * 0.35 + corner * 0.2, 0.0, 0.8) * (1.0 - wmask);
+    // real white paint reflects ~80%: keep the brightest walls from clipping in full sun
+    float lum = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+    diffuseColor.rgb *= mix(1.0, min(1.0, 0.8 / max(lum, 0.01)), 1.0 - wmask);
+    diffuseColor.rgb *= mix(tone, 1.0, wmask);
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.4, 0.36, 0.31), dirt);
+    diffuseColor.rgb *= mix(1.0, 1.04, smoothstep(10.0, 40.0, v));
+  }
 } else if (bn.y > -0.5 && bStyle > 3.5 && bStyle < 4.5 && uShedOn > 0.5) {
   // sheds and warehouses (the marina boat sheds, swamp shacks, rooftop plant rooms): corrugated
   // siding in 4 m bays with a clerestory strip, and roller doors in some ground-floor bays of a
@@ -608,7 +632,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v11';
+  mat.customProgramCacheKey = () => 'palmera-building-v14';
   return mat;
 }
 
