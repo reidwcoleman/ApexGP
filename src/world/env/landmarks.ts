@@ -28,6 +28,8 @@ export interface LandmarksBuild {
 
 const CONCRETE = srgb(0xc2beb5);
 const CONCRETE_DARK = srgb(0x8f8b84);
+/** the banks over the crossover's retaining walls (Suzuka's April turf, the terrain's lawn and meadow) */
+const TURF = srgb(0x9c8c55);
 const WHITE = srgb(0xeeeeea);
 const STEEL = srgb(0xdfe2e6);
 const STEEL_DARK = srgb(0x4d5157);
@@ -364,22 +366,32 @@ export function buildLandmarks(layout: Layout, track: Track, map: WorldMap): Lan
           // one wall panel between the two stations (front face toward the road, top, back)
           const c = CONCRETE;
           const p0 = prev.a, p1 = cur.a, q0 = prev.b, q1 = cur.b;
-          const face = (u0: THREE.Vector3, u1: THREE.Vector3, t0: number, t1: number, flip: boolean) => {
+          const face = (u0: THREE.Vector3, u1: THREE.Vector3, t0: number, t1: number, flip: boolean, col = c, cls: number = ARCH.CONCRETE) => {
             const v0 = new THREE.Vector3(u0.x, prev!.y0, u0.z), v1 = new THREE.Vector3(u1.x, cur.y0, u1.z);
             const w1 = new THREE.Vector3(u1.x, t1, u1.z), w0 = new THREE.Vector3(u0.x, t0, u0.z);
-            if (flip) solid.quad4(v1, v0, w0, w1, c);
-            else solid.quad4(v0, v1, w1, w0, c);
+            if (flip) solid.quad4(v1, v0, w0, w1, col, undefined, cls);
+            else solid.quad4(v0, v1, w1, w0, col, undefined, cls);
           };
           // orientation: front faces the road (−side), so wind the quad accordingly
           face(p0, p1, prev.top, cur.top, side > 0);
-          face(q0, q1, prev.top, cur.top, side < 0);
-          solid.quad4(
-            new THREE.Vector3(p0.x, prev.top, p0.z),
-            new THREE.Vector3(p1.x, cur.top, p1.z),
-            new THREE.Vector3(q1.x, cur.top, q1.z),
-            new THREE.Vector3(q0.x, prev.top, q0.z),
-            CONCRETE_DARK,
-          );
+          // (the block's back, where it stands above the land behind: the bank's turf going down)
+          face(q0, q1, prev.top, cur.top, side < 0, TURF, ARCH.FABRIC);
+          // the cap faces up on both sides (it was wound one way for both: on the far side it faced down,
+          // lit from below and striped with shadow acne — the sawtooth seen from the TV and heli cameras)
+          const c0 = new THREE.Vector3(p0.x, prev.top, p0.z), c1 = new THREE.Vector3(p1.x, cur.top, p1.z);
+          const c2 = new THREE.Vector3(q1.x, cur.top, q1.z), c3 = new THREE.Vector3(q0.x, prev.top, q0.z);
+          // (and it is a 0.45 m concrete coping, then the bank's turf at its level: a 6 m slab of bare
+          // concrete over the cutting read as a car park; Suzuka's are grass banks over the walls)
+          const k = 0.45 / Math.max(0.5, c0.distanceTo(c3));
+          const m0 = c0.clone().lerp(c3, k), m1 = c1.clone().lerp(c2, k);
+          const up = (c1.x - c0.x) * (c3.z - c0.z) - (c1.z - c0.z) * (c3.x - c0.x);
+          if (up < 0) {
+            solid.quad4(c0, c1, m1, m0, CONCRETE_DARK);
+            solid.quad4(m0, m1, c2, c3, TURF, undefined, ARCH.FABRIC);
+          } else {
+            solid.quad4(m0, m1, c1, c0, CONCRETE_DARK);
+            solid.quad4(c3, c2, m1, m0, TURF, undefined, ARCH.FABRIC);
+          }
         }
         prev = cur;
       }
@@ -435,6 +447,10 @@ export function buildLandmarks(layout: Layout, track: Track, map: WorldMap): Lan
   tagClass(steel, 0, ARCH.STEEL);
   const solidMat = archMaterial();
   solidMat.side = THREE.DoubleSide;
+  // (double-sided, its shadow pass drew every lit face too and the big flat ones striped themselves
+  // with acne — the crossover's wall caps, a hatched sawtooth from every camera above the road.
+  // The far faces cast the shadow: the boxes and walls are closed)
+  solidMat.shadowSide = THREE.BackSide;
   add(solid, solidMat, 'landmarks_solid', true, true);
   add(steel, archMaterial(), 'landmarks_steel', true, true);
   add(glass, new THREE.MeshStandardMaterial({ color: 0x1c2733, roughness: 0.08, metalness: 0.85 }), 'landmarks_glass', false);
