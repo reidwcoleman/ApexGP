@@ -911,10 +911,10 @@ float fg_h(vec2 p) {
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
   vec3 c = clamp(inputColor.rgb, 0.0, 1.0);
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  // (the sim look prints clean: colour all the way into the shadows, a neutral white, and only a
-  // quarter of the black floor — what is left is the wet day's veil of spray, which is real)
+  // (the sim look prints clean: colour all the way into the shadows and a neutral white; it keeps 60 % of
+  // the black floor — a quarter left the halo, the tyres and the cockpit as holes next to real onboards)
   c = mix(vec3(l), c, mix(mix(filmShadowSat, 1.0, sim), 1.0, smoothstep(0.0, 0.06, l)));
-  vec3 lift = filmLift * (1.0 - 0.75 * sim);
+  vec3 lift = filmLift * (1.0 - 0.4 * sim);
   c = lift + c * (mix(filmWhite, vec3(1.0), sim) - lift);
   if (filmGrain > 0.0) {
     // the gain: ~0 in daylight, ~1 by a wet morning or a night (metered log luminance, pre-grade)

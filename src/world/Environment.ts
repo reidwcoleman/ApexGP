@@ -62,8 +62,11 @@ const FILM = {
   /**
    * black floor (linear, after tone mapping): footage's blacks sit at ~1 % (sRGB ~0.01), a hair warm by
    * day and olive at night (Le Mans onboard: the unlit dark is a greenish brown-black, never red or navy)
+   * (2026-11-28: 2025 pole-lap onboards, Monza and Spa, hold their darkest 2 % at sRGB 0.064 … 0.126 and the
+   * darkest 0.5 % at 0.04 … 0.09 — the halo, the tyres, the cockpit read as charcoal; ours sat at 0.045 /
+   * 0.035 and the T-cam's tyres were holes. The broadcast look only: the sim look keeps its old floor)
    */
-  lift: [0.0011, 0.001, 0.0008],
+  lift: [0.003, 0.0029, 0.0027],
   nightLift: [0.0006, 0.0007, 0.0004],
   /** wet: the veil of spray and water on the lens lifts the whole dark end (wet AC onboard: blacks ~0.09) */
   wetLift: [0.003, 0.0031, 0.0033],

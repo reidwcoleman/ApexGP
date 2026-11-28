@@ -278,6 +278,10 @@ if ( tyTread > 0.5 ) {
   tyGroove = 1.0 - uTyreC.w * 0.8 * smoothstep( 0.1, 0.95, tyWear );
   vec3 treadBase = vec3( 0.0085 );
   tyC = mix( tyC, treadBase, grooveMask * smoothstep( 0.2, 1.0, tyWear ) * 0.85 );
+  // the running film: a slick that has turned a wheel on the track is no longer the mould's carbon black
+  // but a dull dark grey (rubber dust, the road's fines, the heat-cycled skin). Real and AC T-cams show
+  // the tread at 0.55 … 0.7 and 0.3 … 0.5 of the road's brightness; the 0.7 % atlas black gave 0.1.
+  tyC = mix( tyC, vec3( 0.047, 0.048, 0.052 ) * ( 0.85 + 0.3 * tyD.a ), 0.9 );
   // used rubber: lighter, browner, matte; patchy
   vec3 used = vec3( 0.058, 0.056, 0.054 ) * ( 0.65 + 0.7 * tyD.a );
   tyC = mix( tyC, used, tyWv * 0.92 );
@@ -437,7 +441,7 @@ export function patchTyre(mat: THREE.MeshPhysicalMaterial, u: TyreUniforms) {
       .replace('#include <normal_fragment_maps>', FRAG_NORMAL)
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + FRAG_LIGHTS);
   };
-  mat.customProgramCacheKey = () => 'apex-tyre-v5';
+  mat.customProgramCacheKey = () => 'apex-tyre-v7';
 }
 
 /** a wheel material with its own condition uniforms */
