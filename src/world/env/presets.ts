@@ -280,7 +280,10 @@ const TONE_CONTRAST = 1.0;
  */
 const LOOK_EXPOSURE = 0.84;
 /** overcast (AC reference): exposure down, contrast and saturation up, a touch warm (see dExposure) */
-export const OVER = { dim: 0.22, contrast: 0.13, sat: 0.12, warm: 0.045 };
+// (2026-11-27: dim 0.22 → 0.08. The real Spa pole onboard under a bright deck puts the road at 0.37–0.52
+// on screen and the sky at 0.88, ours sat at 0.25–0.33 and 0.72: a broadcast camera meters a grey day
+// back up. AC's darker Monza keeps a little of the dimming, the contrast and the colour)
+export const OVER = { dim: 0.08, contrast: 0.13, sat: 0.12, warm: 0.045 };
 const OVER_DIM = OVER.dim, OVER_CONTRAST = OVER.contrast, OVER_SAT = OVER.sat, OVER_WARM = OVER.warm;
 const LOOK_FILL = 0.9;
 const LOOK_SHADOW: [number, number, number] = [1.0, 1.0, 0.95];
@@ -435,8 +438,10 @@ export function weatherLook(w: WeatherState): WeatherLook {
   // (and over a morning mist the air is clean: the mist is the night's cold air pooled under an inversion,
   // the sky above it a pale blue and the far hills standing clear over the white — a hazy veil on top
   // turned the whole sky the mist's white)
+  // (2026-11-27: under a deck the air is moister and the haze thicker than on a fine day — the real Spa
+  // onboard's tree lines half a kilometre off are already a grey-green, ours stayed near-black: ×2.3, was ×1.6)
   const fogDensity =
-    (Math.max(P.fogDensity, 1.2e-4) * (1 + overcast * 0.6) + fog * 3.2e-4 * (1 - 0.65 * mistKind) + (smooth(0.5, 0.9, fog) * 1.3e-3 + thick * 3.2e-3) * (1 - layerK) + layerK * mix(1.2e-4, 8e-4, fogDeep) + rain * rain * 3.2e-3) *
+    (Math.max(P.fogDensity, 1.2e-4) * (1 + overcast * 1.3) + fog * 3.2e-4 * (1 - 0.65 * mistKind) + (smooth(0.5, 0.9, fog) * 1.3e-3 + thick * 3.2e-3) * (1 - layerK) + layerK * mix(1.2e-4, 8e-4, fogDeep) + rain * rain * 3.2e-3) *
       (1 - 0.3 * windK) +
     heatK * 1.7e-4 +
     // (heavy snow is the thickest air there is short of fog: ~300 m in a blizzard; blown sand ~400 m)
