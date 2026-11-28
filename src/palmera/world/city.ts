@@ -494,7 +494,7 @@ vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office
         `#include <color_fragment>
 vec3 bn = normalize(vBN);
 float bStyle = vStyle.x;
-float wmask = 0.0; float wlit = 0.0; vec3 bInterior = vec3(0.0); float bFrame = 0.0; float bLamp = 0.0;
+float wmask = 0.0; float wlit = 0.0; vec3 bInterior = vec3(0.0); float bFrame = 0.0; float bLamp = 0.0; float bShopG = 0.0;
 vec3 litCol = vec3(1.0, 0.78, 0.5);
 if (bn.y > 0.5) {
   // a flat roof is a roof, not the walls' paint: white membrane, grey cap sheet or gravel ballast by
@@ -546,6 +546,7 @@ if (bn.y > 0.5) {
   // the street floor of shops and hotels: tall shopfronts
   bool shop = (bStyle > 0.5 && bStyle < 1.5 || bStyle > 2.5) && v < 4.2;
   if (shop) { cell = vec2(4.6, 4.4); fr = vec2(0.82, 0.66); y0 = -0.75; }
+  bShopG = shop ? 1.0 : 0.0;
   float nCols = max(floor((2.0 * halfW - 1.2) / cell.x), 0.0);
   float off = (2.0 * halfW - nCols * cell.x) * 0.5;
   float uu = (u + halfW - off) / cell.x;
@@ -757,17 +758,36 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
     float rows = step(0.5, fract(bR.y * 34.0)) * step(0.35, fract(az * 22.0));
     vec3 facR = mix(vec3(0.5, 0.47, 0.42), vec3(0.16, 0.18, 0.2), rows * 0.8);
     vec3 refl = bR.y < -0.02 ? vec3(0.17, 0.17, 0.18) : bR.y < roofE ? facR : skyR;
-    refl *= dayLight * 0.9;
+    refl *= 0.9;
+    // after dark the glass shows the street at night: the lamp-lit pavement where the reflected ray
+    // lands, the facades opposite dark but for their lit windows, a near-black sky (it went pure black)
+    vec3 reflN = vec3(0.006, 0.008, 0.014);
+    if (bR.y < -0.02) {
+      vec3 gP = vBW + bR * (max(vBW.y, 0.2) / -bR.y);
+      float lp = uLampOn > 0.001 ? texture2D(uLampMap, (gP.xz - uLampBox.xy) / uLampBox.zw).r : 0.0;
+      reflN = vec3(0.012) + vec3(1.0, 0.68, 0.4) * lp * 0.55;
+    } else if (bR.y < roofE) {
+      vec2 wq = vec2(az * 46.0, bR.y * 70.0);
+      vec2 wc = floor(wq);
+      float win = step(0.45, fract(wq.y)) * step(0.4, fract(wq.x));
+      float rr = fract(sin(dot(wc, vec2(12.9898, 78.233))) * 43758.5453);
+      float on = step(rr, uLitRes * 0.8) * win;
+      reflN = vec3(0.014, 0.014, 0.016) + mix(vec3(1.0, 0.72, 0.42), vec3(0.7, 0.8, 1.0), step(rr, 0.04)) * on * 0.17;
+    }
+    refl = mix(refl, reflN, uNight);
     totalEmissiveRadiance += refl * bF * 0.85;
   }
   // the room as the daylight shows it, and lamps on in some rooms at night
   totalEmissiveRadiance += bInterior * wmask * (1.0 - bF * 0.85 * dayLight) * (dayLight * (bStyle < 0.5 ? 0.22 : 0.32) + uNight * 0.04);
   // lit rooms at night: the lamp falls off across walls, floor and furniture, so it reads as a room
   totalEmissiveRadiance += bInterior * litCol * wlit * uNight * (0.28 + bLamp * 1.35);
+  // shops shut for the night keep a dim night light on at the back, so the display still reads
+  // through the glass instead of a black hole in the shopfront
+  totalEmissiveRadiance += bInterior * wmask * (1.0 - wlit) * bShopG * uNight * vec3(0.62, 0.72, 0.9) * 0.1;
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v21';
+  mat.customProgramCacheKey = () => 'palmera-building-v22';
   return mat;
 }
 
