@@ -36,6 +36,41 @@ interface ActiveMission {
   cleanup(): void;
 }
 
+const WALL = 0.75;
+let curtain: THREE.CanvasTexture | null = null;
+/** canvas top = the cylinder's top: dark there, bright at the foot, with soft vertical streaks round it */
+function curtainTex(): THREE.CanvasTexture {
+  if (curtain) return curtain;
+  const W = 256, H = 128;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const x = c.getContext('2d')!;
+  const img = x.createImageData(W, H);
+  const streak = new Float32Array(W);
+  for (let k = 0; k < 18; k++) {
+    const cx = Math.random() * W, w = 2 + Math.random() * 9, a = 0.25 + Math.random() * 0.5;
+    for (let i = 0; i < W; i++) {
+      const d = Math.min(Math.abs(i - cx), W - Math.abs(i - cx));
+      streak[i] += a * Math.exp(-(d * d) / (w * w));
+    }
+  }
+  for (let j = 0; j < H; j++) {
+    const v = 1 - (j + 0.5) / H;
+    const up = Math.pow(1 - v, 2.6) * (1 - Math.pow(v, 6));
+    for (let i = 0; i < W; i++) {
+      const k = Math.round(255 * Math.min(1, up * (0.45 + 0.55 * Math.min(1, streak[i])) + Math.max(0, 0.06 - v) * 6));
+      const o = (j * W + i) * 4;
+      img.data[o] = img.data[o + 1] = img.data[o + 2] = k;
+      img.data[o + 3] = 255;
+    }
+  }
+  x.putImageData(img, 0, 0);
+  curtain = new THREE.CanvasTexture(c);
+  curtain.wrapS = THREE.RepeatWrapping;
+  return curtain;
+}
+
 export class Marker {
   /** the camera, set by the game: a marker's glowing wall fades out as you get right up to it */
   static camera: THREE.Camera | null = null;
@@ -43,7 +78,9 @@ export class Marker {
   private wall: THREE.MeshBasicMaterial;
   private ringMat: THREE.MeshBasicMaterial;
   constructor(scene: THREE.Scene, color: number, radius: number, height = 6) {
-    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    // a curtain of light rising off the ring: bright at the foot, streaked, gone by the top (it was a
+    // flat tinted tube, which read as a plastic cylinder standing in the street)
+    const mat = new THREE.MeshBasicMaterial({ color, map: curtainTex(), transparent: true, opacity: WALL, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
     this.wall = mat;
     Marker.all.add(this);
     const cyl = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, 28, 1, true), mat);
@@ -82,7 +119,7 @@ export class Marker {
     if (!c) return;
     for (const m of Marker.all) {
       const d = Math.hypot(c.position.x - m.group.position.x, c.position.z - m.group.position.z);
-      m.wall.opacity = 0.3 * Math.min(1, Math.max(0, (d - 5) / 9));
+      m.wall.opacity = WALL * Math.min(1, Math.max(0, (d - 5) / 9));
     }
   }
 }
