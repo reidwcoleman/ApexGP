@@ -191,8 +191,46 @@ def sign():
     for p, s in (((0, 3.0, 0), (1.1, 0.24, 0.03)), ((0, 2.7, 0), (0.03, 0.24, 1.1))):
         box((s[0] + (0.02 if s[0] > 0.5 else 0), s[1] + 0.02, s[2] + (0.02 if s[2] > 0.5 else 0)), p, 0xf2f2ee, bevel=0.01)
         box((s[0] - 0.02 if s[0] > 0.5 else s[0] + 0.004, s[1] - 0.025, s[2] - 0.02 if s[2] > 0.5 else s[2] + 0.004), p, 0x1d6b3e, bevel=0.005)
-    box((0.5, 0.6, 0.03), (0, 2.15, 0.02), 0xeeeeee, bevel=0.01)
-    box((0.42, 0.5, 0.032), (0, 2.15, 0.025), 0xc0392b, bevel=0.006)
+    # the street name along each blade, both faces: blocks of letter widths, a word space or two
+    for along, y, seed in ((True, 3.0, 17), (False, 2.7, 91)):
+        x, r = -0.4, seed
+        while x < 0.38:
+            r = (r * 9301 + 49297) % 233280
+            w = 0.035 + (r / 233280) * 0.035
+            if r % 7 == 0 and x > -0.3:
+                x += 0.05
+                continue
+            h, dy = (0.068, -0.0105) if r % 5 == 0 else (0.089, 0.0)
+            narrow = w < 0.047
+            if narrow:
+                w = 0.016
+            # wider letters get a green counter cut in them - open at the foot (n), the top (u) or
+            # closed (o) - so they read as letters, not a row of white windows
+            cw, ch, cy = w - 0.028, h - 0.03, y + dy
+            if r % 3 == 0:
+                ch, cy = h - 0.014, y + dy - 0.008
+            elif r % 3 == 1:
+                ch, cy = h - 0.014, y + dy + 0.008
+            for sz, cc, col in (((w, h, 0.036), (x + w / 2, y + dy), 0xf2f2ee), ((cw, ch, 0.04), (x + w / 2, cy), 0x1d6b3e)):
+                if col != 0xf2f2ee and narrow:
+                    continue
+                if along:
+                    box(sz, (cc[0], cc[1], 0), col, bevel=0)
+                else:
+                    box((sz[2], sz[1], sz[0]), (0, cc[1], cc[0]), col, bevel=0)
+            x += w + 0.016
+    # below them a no-parking sign (it was a blank red panel): a white plate, a black P in a red
+    # ring struck through, two lines of small print
+    box((0.46, 0.62, 0.03), (0, 2.12, 0.02), 0xf2f2ee, bevel=0.008)
+    torus(0.155, 0.022, (0, 2.22, 0.037), 0xc0392b, axis='z')
+    K = 0x1a1a1a
+    box((0.04, 0.2, 0.006), (-0.035, 2.22, 0.037), K, bevel=0)
+    box((0.085, 0.034, 0.006), (0.0, 2.303, 0.037), K, bevel=0)
+    box((0.085, 0.034, 0.006), (0.0, 2.233, 0.037), K, bevel=0)
+    box((0.034, 0.1, 0.006), (0.043, 2.268, 0.037), K, bevel=0)
+    box((0.036, 0.31, 0.006), (0, 2.22, 0.041), 0xc0392b, bevel=0, rot=(0, 0, math.pi / 4))
+    box((0.32, 0.03, 0.006), (0, 1.98, 0.037), K, bevel=0)
+    box((0.22, 0.03, 0.006), (0, 1.92, 0.037), 0xc0392b, bevel=0)
     for y in (1.95, 2.35):
         box((0.08, 0.03, 0.06), (0, y, -0.01), 0x55585b)
 
@@ -495,7 +533,7 @@ for name, fn in (('bench', bench), ('bin', bin_), ('hydrant', hydrant), ('news',
     # triangles (the bevels and round sections are where the count went; the silhouettes stay)
     me.calc_loop_triangles()
     before = len(me.loop_triangles)
-    target = {'shelter': 420, 'signal': 380, 'lamp': 300, 'umbrella': 1500, 'lounger': 700, 'lifeguard': 2600, 'mailbox': 420}.get(name, 260)
+    target = {'sign': 1500, 'shelter': 420, 'signal': 380, 'lamp': 300, 'umbrella': 1500, 'lounger': 700, 'lifeguard': 2600, 'mailbox': 420}.get(name, 260)
     if before > target:
         m = o.modifiers.new('d', 'DECIMATE')
         m.ratio = target / before

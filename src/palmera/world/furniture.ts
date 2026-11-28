@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { box, cyl, merge } from '../core/geo';
+import { box, cyl, merge, prep } from '../core/geo';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { SIDEWALK, groundAt, type CityMap } from './map';
 
@@ -120,13 +120,42 @@ export function furnitureGeometry(kind: FurnitureKind, modelledOk = true): THREE
         P.push(g);
       }
       break;
-    case 'sign':
+    case 'sign': {
       P.push(cyl(0.035, 0.035, 3.2, 8, 0, 1.6, 0, 0x3a3d40));
-      P.push(box(1.1, 0.24, 0.03, 0, 3.0, 0, 0x1d6b3e));
-      P.push(box(0.03, 0.24, 1.1, 0, 2.7, 0, 0x1d6b3e));
-      P.push(box(0.5, 0.6, 0.03, 0, 2.15, 0.02, 0xeeeeee));
-      P.push(box(0.42, 0.5, 0.032, 0, 2.15, 0.025, 0xc0392b));
+      // two street-name blades, green with a white border and a white name along them (blocks of
+      // letter widths: at the distance you read a sign from, that's what lettering is)
+      const W = 0xf2f2ee;
+      const blade = (alongX: boolean, y: number, seed: number) => {
+        const b = (l: number, h: number, t: number, a: number, yy: number) => (alongX ? box(l, h, t, a, yy, 0, W) : box(t, h, l, 0, yy, a, W));
+        P.push(alongX ? box(1.1, 0.24, 0.03, 0, y, 0, 0x1d6b3e) : box(0.03, 0.24, 1.1, 0, y, 0, 0x1d6b3e));
+        for (const s of [-1, 1]) P.push(b(1.04, 0.012, 0.034, 0, y + s * 0.1), b(0.012, 0.2, 0.034, s * 0.514, y));
+        let x = -0.4;
+        let r = seed;
+        while (x < 0.38) {
+          r = (r * 9301 + 49297) % 233280;
+          const w = 0.035 + (r / 233280) * 0.035;
+          if (r % 7 === 0 && x > -0.3) { x += 0.05; continue; } // a word space
+          P.push(b(w, r % 5 === 0 ? 0.075 : 0.1, 0.034, x + w / 2, y - (r % 5 === 0 ? 0.0125 : 0)));
+          x += w + 0.018;
+        }
+      };
+      blade(true, 3.0, 17);
+      blade(false, 2.7, 91);
+      // below them, a no-parking sign: a white plate, a black P in a red ring struck through
+      P.push(box(0.46, 0.62, 0.03, 0, 2.12, 0.02, W));
+      const ring = new THREE.TorusGeometry(0.155, 0.024, 6, 28);
+      ring.translate(0, 2.22, 0.036);
+      P.push(prep(ring, 0xc0392b));
+      const K = 0x1a1a1a;
+      P.push(box(0.04, 0.2, 0.006, -0.035, 2.22, 0.036, K), box(0.085, 0.034, 0.006, 0.0, 2.303, 0.036, K), box(0.085, 0.034, 0.006, 0.0, 2.233, 0.036, K), box(0.034, 0.1, 0.006, 0.043, 2.268, 0.036, K));
+      const slash = new THREE.BoxGeometry(0.036, 0.31, 0.006);
+      slash.rotateZ(Math.PI / 4);
+      slash.translate(0, 2.22, 0.04);
+      P.push(prep(slash, 0xc0392b));
+      // and two lines of small print under it
+      P.push(box(0.32, 0.03, 0.006, 0, 1.98, 0.036, K), box(0.22, 0.03, 0.006, 0, 1.92, 0.036, 0xc0392b));
       break;
+    }
     case 'shelter':
       P.push(box(3.6, 0.1, 1.6, 0, 2.55, -0.1, 0xe8e6e0));
       for (const x of [-1.7, 1.7]) P.push(box(0.08, 2.5, 0.08, x, 1.25, -0.8, 0x3a3d40), box(0.08, 2.5, 0.08, x, 1.25, 0.55, 0x3a3d40));
