@@ -189,7 +189,7 @@ const MOUNTS: Partial<Record<CameraMode, Mount>> = {
   // the TV pod offset: the lens in the left end of the T-bar, as the broadcast's second onboard —
   // the helmet and the halo's hoop off to the right of the picture, the left front tyre and the
   // road ahead in the clear
-  tcamoff: { pos: [0.24, 1.08, -0.22], dir: [-0.012, -0.25, 1], fov: 61, shake: 0.65, prof: 'tcam', flex: 22, level: 0.1, dyn: 4 },
+  tcamoff: { pos: [0.24, 1.17, -0.22], dir: [-0.012, -0.39, 1], fov: 61, shake: 0.65, prof: 'tcam', flex: 22, level: 0.1, dyn: 4 },
   // the pod's rear-facing lens: the engine cover's spine and fin, the rear wing, whoever is behind above
   tcamrev: { pos: [0, 1.05, -0.3], dir: [0, -0.16, -1], fov: 58, shake: 0.6, prof: 'tcam', flex: 22, level: 0.1, dyn: 2 },
   // the broadcast halo camera: low in the tub in front of the driver, bolted to the chassis (no neck
