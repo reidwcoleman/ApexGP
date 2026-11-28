@@ -1,5 +1,6 @@
 // The Game: owns the world, entities and systems, runs the frame loop.
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { AudioSys } from '../audio/audio';
 import { Input } from '../core/input';
 import { clamp, damp } from '../core/math';
@@ -292,6 +293,7 @@ export class Game {
     });
     moored.castShadow = true;
     this.scene.add(moored);
+    void this.modelMooredBoats(moored);
 
     window.addEventListener('resize', () => this.resize());
     this.focus.copy(this.player.pos);
@@ -336,6 +338,51 @@ export class Game {
     this.scene.remove(v.root);
     if (v.beam) v.beam = null;
   }
+  /**
+   * The moored boats as the Blender runabout (tools/palmera/boat.py): the painted topsides tinted
+   * each boat's colour, everything else as modelled, sharing the stand-in's placements; the
+   * stand-in stays if the file can't be had.
+   */
+  private async modelMooredBoats(stand: THREE.InstancedMesh) {
+    try {
+      const base = ((import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/') + 'palmera/';
+      const gl = await new GLTFLoader().loadAsync(base + 'boat.glb');
+      gl.scene.updateMatrixWorld(true);
+      const get = (name: string) => {
+        let out: THREE.BufferGeometry | null = null;
+        gl.scene.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (m.isMesh && o.name === name) {
+            out = m.geometry.clone();
+            out.applyMatrix4(m.matrixWorld);
+          }
+        });
+        return out as THREE.BufferGeometry | null;
+      };
+      const paint = get('boat_paint'), rest = get('boat_rest');
+      if (!paint || !rest) return;
+      const n = stand.count;
+      const pm = new THREE.InstancedMesh(paint, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.28, metalness: 0.05 }), n);
+      const rm = new THREE.InstancedMesh(rest, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55 }), n);
+      const m4 = new THREE.Matrix4(), c = new THREE.Color();
+      for (let i = 0; i < n; i++) {
+        stand.getMatrixAt(i, m4);
+        pm.setMatrixAt(i, m4);
+        rm.setMatrixAt(i, m4);
+        stand.getColorAt(i, c);
+        pm.setColorAt(i, c);
+      }
+      for (const m of [pm, rm]) {
+        m.castShadow = true;
+        m.receiveShadow = true;
+        this.scene.add(m);
+      }
+      this.scene.remove(stand);
+    } catch (e) {
+      console.warn('palmera: boat.glb failed, keeping the stand-in boats', e);
+    }
+  }
+
   addNpc(h: Human) {
     this.npcs.push(h);
     this.humans.push(h);
