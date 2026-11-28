@@ -464,7 +464,42 @@ float bStyle = vStyle.x;
 float wmask = 0.0; float wlit = 0.0; vec3 bInterior = vec3(0.0); float bFrame = 0.0; float bLamp = 0.0;
 vec3 litCol = vec3(1.0, 0.78, 0.5);
 if (bn.y > 0.5) {
-  diffuseColor.rgb *= 0.72;
+  // a flat roof is a roof, not the walls' paint: white membrane, grey cap sheet or gravel ballast by
+  // building, laid in sheets with lapped seams, ponding stains with a tide mark, grime along the parapet
+  // and a scatter of drains; fine detail fades to its average once smaller than a pixel
+  float rk = fract(vStyle.y * 5.31);
+  vec2 rp = vBW.xz;
+  vec3 memb = rk < 0.45 ? vec3(0.74, 0.74, 0.72) : rk < 0.8 ? vec3(0.5, 0.495, 0.48) : vec3(0.46, 0.43, 0.39);
+  float fw = fwidth(rp.x) + fwidth(rp.y);
+  float fine = 1.0 - smoothstep(0.03, 0.12, fw);
+  // gravel and cap-sheet granules
+  float grain = bhash(vec3(floor(rp * 22.0), 3.0));
+  memb *= mix(1.0, 0.86 + 0.24 * grain, (rk < 0.45 ? 0.25 : 1.0) * fine);
+  // sheets 3 m wide along the longer side, end laps every 12 m
+  bool alongX = vBS.x > vBS.z;
+  float acr = alongX ? vLP.z : vLP.x, alo = alongX ? vLP.x : vLP.z;
+  float seamA = 1.0 - smoothstep(0.0, 0.035, abs(fract(acr / 3.0 + 0.5) - 0.5) * 3.0);
+  float seamB = 1.0 - smoothstep(0.0, 0.035, abs(fract(alo / 12.0 + 0.5) - 0.5) * 12.0);
+  float seams = max(seamA, seamB * 0.7) * (rk < 0.8 ? 1.0 : 0.0) * (1.0 - smoothstep(0.02, 0.06, fw));
+  // ponding: low spots where the water sat and dried, ringed with a darker tide mark
+  float pn = bvn(rp * 0.11 + vStyle.y * 37.0) * 0.7 + bvn(rp * 0.37 + 5.0) * 0.3;
+  float pond = smoothstep(0.6, 0.72, pn);
+  float tide = smoothstep(0.52, 0.6, pn) * (1.0 - smoothstep(0.6, 0.66, pn));
+  // grime washed to the edges against the parapet, large soft variation over the whole roof
+  float e = min(vBS.x * 0.5 - abs(vLP.x), vBS.z * 0.5 - abs(vLP.z));
+  float edge = 1.0 - smoothstep(0.0, 1.6, e);
+  float macro = 0.9 + 0.14 * bvn(rp * 0.035 + 11.0);
+  // drains on a 9 m grid, a dark ring and grate
+  vec2 dg = abs(fract(vLP.xz / 9.0) - 0.5) * 9.0;
+  float drain = (1.0 - smoothstep(0.16, 0.2, length(dg))) * step(2.0, e) * fine;
+  vec3 dirt = vec3(0.36, 0.33, 0.29);
+  vec3 rc = memb * macro;
+  rc = mix(rc, rc * 0.82, seams);
+  rc = mix(rc, mix(rc, dirt, 0.45), pond * 0.6);
+  rc = mix(rc, dirt * 0.9, tide * 0.16);
+  rc = mix(rc, dirt, edge * 0.35);
+  rc = mix(rc, vec3(0.08), drain);
+  diffuseColor.rgb = rc;
 } else if (bn.y > -0.5 && bStyle < 3.5) {
   bool sideX = abs(bn.x) > 0.5;
   float u = sideX ? vLP.z : vLP.x;
@@ -634,7 +669,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v15';
+  mat.customProgramCacheKey = () => 'palmera-building-v16';
   return mat;
 }
 
@@ -1117,8 +1152,8 @@ export class City {
         big.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, h1 + h2, b.z), q, new THREE.Vector3(b.w * 0.5, h3, b.d * 0.5)), c: col.clone().offsetHSL(0, 0, -0.08), a: [0, b.seed + 0.57] });
         // ledges where it steps in
         const lc = col.clone().lerp(new THREE.Color(0xffffff), 0.6);
-        this.ledges.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, h1 - 0.2, b.z), q, new THREE.Vector3(b.w + 0.4, 0.5, b.d + 0.4)), c: lc });
-        this.ledges.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, h1 + h2 - 0.2, b.z), q, new THREE.Vector3(b.w * 0.76 + 0.4, 0.5, b.d * 0.76 + 0.4)), c: lc });
+        this.ledges.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, h1 - 0.3, b.z), q, new THREE.Vector3(b.w + 0.4, 0.5, b.d + 0.4)), c: lc });
+        this.ledges.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, h1 + h2 - 0.3, b.z), q, new THREE.Vector3(b.w * 0.76 + 0.4, 0.5, b.d * 0.76 + 0.4)), c: lc });
         if (towers.indexOf(b) < 7) {
           const sh = 10 + rng.next() * 14;
           spires.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(b.x, b.h, b.z), q, new THREE.Vector3(0.8, sh, 0.8)), c: new THREE.Color(0xc8ccd0) });
