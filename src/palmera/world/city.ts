@@ -163,6 +163,10 @@ function shadowOnly(m: THREE.Material): THREE.Material {
 // ------------------------------------------------------------ building material
 export const cityUniforms = {
   uNight: { value: 0 },
+  /** the share of windows lit after dark, by the hour: offices, homes, shops */
+  uLitOff: { value: 0.35 },
+  uLitRes: { value: 0.42 },
+  uLitShop: { value: 0.9 },
   uTime: { value: 0 },
   uWind: { value: 1 },
   /** the shop interiors rendered in Blender (tools/palmera/shops.py): an atlas, and whether it's loaded */
@@ -206,6 +210,9 @@ function buildingMaterial(): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0.0 });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uNight = cityUniforms.uNight;
+    sh.uniforms.uLitOff = cityUniforms.uLitOff;
+    sh.uniforms.uLitRes = cityUniforms.uLitRes;
+    sh.uniforms.uLitShop = cityUniforms.uLitShop;
     sh.uniforms.uTime = cityUniforms.uTime;
     sh.uniforms.uShops = cityUniforms.uShops;
     sh.uniforms.uShopsOn = cityUniforms.uShopsOn;
@@ -241,7 +248,7 @@ vStyle = aStyle;`,
       .replace(
         '#include <common>',
         `#include <common>
-uniform float uNight; uniform float uTime; uniform sampler2D uShops; uniform float uShopsOn; uniform sampler2D uRooms; uniform float uRoomsOn; uniform sampler2D uShed; uniform float uShedOn;
+uniform float uNight; uniform float uLitOff; uniform float uLitRes; uniform float uLitShop; uniform float uTime; uniform sampler2D uShops; uniform float uShopsOn; uniform sampler2D uRooms; uniform float uRoomsOn; uniform sampler2D uShed; uniform float uShedOn;
 varying vec3 vBN; varying vec3 vLP; varying vec3 vBS; varying vec2 vStyle; varying vec3 vBW;
 float bhash(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719)))*43758.5453); }
 float bvn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -583,8 +590,10 @@ if (bn.y > 0.5) {
   float sill = (1.0 - inside) * inCols * step(d.x, hw.x + 0.03) * step(f.y, 0.5 - hw.y) * step(0.5 - hw.y - 0.035, f.y) * step(0.5, bStyle) * (shop ? 0.0 : 1.0);
   wmask = inside * (1.0 - bFrame);
   float r = bhash(vec3(id, face * 7.0 + vStyle.y * 91.0));
-  float litP = bStyle < 0.5 ? 0.35 : 0.42;
-  if (shop) litP = 0.9;
+  // by the hour: offices emptying through the evening, homes busiest after dinner and dark by the small
+  // hours, shops shut by late evening (a fixed 35-42% left every office tower blazing at 2 am)
+  float litP = bStyle < 0.5 ? uLitOff : uLitRes;
+  if (shop) litP = uLitShop;
   wlit = step(r, litP) * wmask;
   litCol = r < 0.06 ? vec3(0.55, 0.75, 1.0) : (r < 0.16 ? vec3(1.0, 0.85, 0.6) : vec3(1.0, 0.66, 0.34));
   // the room behind the window
@@ -758,7 +767,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v20';
+  mat.customProgramCacheKey = () => 'palmera-building-v21';
   return mat;
 }
 
@@ -1900,10 +1909,18 @@ export class City {
     this.map.colliders.add(wx - 3.5, wz - 3.5, wx + 3.5, wz + 3.5, -1, 30);
   }
 
-  update(cam: THREE.Vector3, night: number, elapsed: number) {
+  update(cam: THREE.Vector3, night: number, elapsed: number, hour = 21) {
     this.chunks.update(cam);
     this.grass?.update(cam, elapsed);
     cityUniforms.uNight.value = night;
+    const tab = (t: [number, number][]) => {
+      const h = ((hour % 24) + 24) % 24;
+      for (let i = 1; i < t.length; i++) if (h <= t[i][0]) return t[i - 1][1] + ((h - t[i - 1][0]) / (t[i][0] - t[i - 1][0])) * (t[i][1] - t[i - 1][1]);
+      return t[t.length - 1][1];
+    };
+    cityUniforms.uLitOff.value = tab([[0, 0.07], [5, 0.05], [7, 0.2], [17, 0.45], [19, 0.36], [21, 0.18], [23, 0.1], [24, 0.07]]);
+    cityUniforms.uLitRes.value = tab([[0, 0.26], [2, 0.12], [4, 0.06], [6, 0.15], [7, 0.3], [9, 0.15], [17, 0.3], [19, 0.55], [21, 0.5], [23, 0.38], [24, 0.26]]);
+    cityUniforms.uLitShop.value = tab([[0, 0.15], [7, 0.3], [9, 0.9], [21, 0.85], [22.5, 0.2], [24, 0.15]]);
     cityUniforms.uTime.value = elapsed;
     const k = 0.55 + night * 2.4;
     this.lampHeadMat.color.setRGB(k, k * 0.88, k * 0.66);

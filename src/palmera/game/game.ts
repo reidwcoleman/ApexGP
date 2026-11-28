@@ -1192,7 +1192,7 @@ export class Game {
     const cam = this.camera.position;
     this.sky.update(sdt, this.focus, cam, this.renderer, this.elapsed);
     this.water.update(this.elapsed, this.sky, cam);
-    this.city.update(cam, this.sky.night, this.elapsed);
+    this.city.update(cam, this.sky.night, this.elapsed, this.sky.time);
     this.effects.update(sdt, this.renderer.domElement.height, this.camera.fov);
     // the rain, and the streets drying after it
     this.rain.update(this.elapsed, cam, this.sky.rain, 0.2 + 0.8 * this.sky.day);
