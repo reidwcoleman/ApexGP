@@ -1075,6 +1075,8 @@ export class City {
   chunks = new ChunkManager();
   lampHeadMat = new THREE.MeshBasicMaterial({ color: 0x999988 });
   poolMat: THREE.MeshBasicMaterial;
+  /** a little added light as well, so near-black tarmac under a lamp still picks up a glow */
+  poolAddMat: THREE.MeshBasicMaterial;
   /** shop-window light spilling onto the pavement at night */
   spillMat: THREE.MeshBasicMaterial;
   neonMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: true });
@@ -1083,7 +1085,10 @@ export class City {
   private beaconMat = new THREE.MeshBasicMaterial({ color: 0xffeeaa });
 
   constructor(private scene: THREE.Scene, public map: CityMap) {
-    this.poolMat = new THREE.MeshBasicMaterial({ map: T.lampPoolTexture(), color: 0xffbf80, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+    // lamp pools light what they fall on (dst x (1 + light)) rather than adding a flat glow over it: added
+    // light buried the asphalt where pools overlapped, the middle of a lit junction a flat peach square
+    this.poolMat = new THREE.MeshBasicMaterial({ map: T.lampPoolTexture(), color: 0x000000, transparent: true, premultipliedAlpha: true, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.DstColorFactor, blendDst: THREE.OneFactor });
+    this.poolAddMat = new THREE.MeshBasicMaterial({ map: this.poolMat.map, color: 0xffbf80, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
     this.spillMat = new THREE.MeshBasicMaterial({ map: spillTexture(), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     this.buildGround();
     this.buildRoads();
@@ -1823,6 +1828,7 @@ float mhF(vec2 p) { return mhN(p) * 0.55 + mhN(p * 2.07 + 3.1) * 0.3 + mhN(p * 4
     const poolGeo = new THREE.PlaneGeometry(1, 1);
     const pm = chunked(this.scene, this.chunks, pools, poolGeo, this.poolMat, { far: 260, shadow: false, receive: false });
     pm.forEach((m) => (m.renderOrder = 2));
+    chunked(this.scene, this.chunks, pools, poolGeo, this.poolAddMat, { far: 260, shadow: false, receive: false }).forEach((m) => (m.renderOrder = 3));
     this.buildSpill();
     chunked(this.scene, this.chunks, groups.get('umbrella') ?? [], propGeometry('umbrella') ?? umbrellaGeometry(), std({ side: THREE.DoubleSide, roughness: 0.85 }), { far: 300, shadow: true, lodGeo: umbrellaGeometry(), lodDist: 70, shadowGeo: umbrellaGeometry() });
     chunked(this.scene, this.chunks, groups.get('lounger') ?? [], propGeometry('lounger') ?? loungerGeometry(), std({ roughness: 0.5 }), { far: 160, shadow: false, lodGeo: loungerGeometry(), lodDist: 50 });
@@ -2051,7 +2057,11 @@ if (max(vColor.r, max(vColor.g, vColor.b)) < 0.08) totalEmissiveRadiance += vec3
     cityUniforms.uTime.value = elapsed;
     const k = 0.55 + night * 2.4;
     this.lampHeadMat.color.setRGB(k, k * 0.88, k * 0.66);
-    this.poolMat.opacity = clamp(night * 0.3, 0, 0.3);
+    {
+      const pk = clamp(night, 0, 1) * 3.6;
+      this.poolMat.color.setRGB(pk, pk * 0.7, pk * 0.42);
+      this.poolAddMat.opacity = clamp(night * 0.09, 0, 0.09);
+    }
     lampUniforms.uLampOn.value = clamp((night - 0.15) / 0.5, 0, 1);
     // dims as the shops shut for the night
     this.spillMat.opacity = clamp(night * 0.9, 0, 0.9) * clamp(cityUniforms.uLitShop.value / 0.85, 0.15, 1);
