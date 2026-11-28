@@ -984,7 +984,7 @@ export class City {
   private beaconMat = new THREE.MeshBasicMaterial({ color: 0xffeeaa });
 
   constructor(private scene: THREE.Scene, public map: CityMap) {
-    this.poolMat = new THREE.MeshBasicMaterial({ map: T.lampPoolTexture(), color: 0xffa860, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.poolMat = new THREE.MeshBasicMaterial({ map: T.lampPoolTexture(), color: 0xffbf80, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
     this.spillMat = new THREE.MeshBasicMaterial({ map: spillTexture(), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     this.buildGround();
     this.buildRoads();
@@ -1545,7 +1545,7 @@ export class City {
         const px = p.x + Math.sin(p.r) * 2.6, pz = p.z + Math.cos(p.r) * 2.6;
         lampPts.push({ x: px, z: pz });
         const pq = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
-        pools.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(px, groundAt(px, pz) + 0.16, pz), pq, new THREE.Vector3(20, 20, 1)) });
+        pools.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(px, groundAt(px, pz) + 0.16, pz), pq, new THREE.Vector3(16, 16, 1)) });
       }
     }
     const std = (o: THREE.MeshStandardMaterialParameters = {}) => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, ...o });
@@ -1562,7 +1562,7 @@ export class City {
       const pq = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
       for (const n of this.map.nodes) {
         if (!n.light) continue;
-        pools.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(n.x, groundAt(n.x, n.z) + 0.16, n.z), pq, new THREE.Vector3(24, 24, 1)) });
+        pools.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(n.x, groundAt(n.x, n.z) + 0.16, n.z), pq, new THREE.Vector3(22, 22, 1)) });
       }
     }
     bakeLampField(lampPts);
@@ -1808,7 +1808,7 @@ export class City {
     cityUniforms.uTime.value = elapsed;
     const k = 0.55 + night * 2.4;
     this.lampHeadMat.color.setRGB(k, k * 0.88, k * 0.66);
-    this.poolMat.opacity = clamp(night * 0.38, 0, 0.38);
+    this.poolMat.opacity = clamp(night * 0.3, 0, 0.3);
     lampUniforms.uLampOn.value = clamp((night - 0.15) / 0.5, 0, 1);
     this.spillMat.opacity = clamp(night * 0.9, 0, 0.9);
     const n = 0.7 + night * 1.8;

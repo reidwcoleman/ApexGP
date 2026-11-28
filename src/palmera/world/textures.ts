@@ -206,7 +206,7 @@ export function lampPoolTexture(): THREE.CanvasTexture {
       const dx = (x + 0.5) / N * 2 - 1, dy = (y + 0.5) / N * 2 - 1;
       const r = Math.hypot(dx, dy);
       const e = Math.min(1, Math.max(0, (r - 0.62) / 0.3));
-      const a = Math.exp(-r * r * 3.2) * (1 - e * e * (3 - 2 * e));
+      const a = Math.exp(-r * r * 4.2) * (1 - e * e * (3 - 2 * e));
       const o = (y * N + x) * 4;
       img.data[o] = img.data[o + 1] = img.data[o + 2] = 255;
       img.data[o + 3] = Math.round(a * 255);
