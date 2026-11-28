@@ -571,14 +571,17 @@ export function paintMat(color: number): THREE.MeshStandardMaterial {
  * through it - brightest under the ceiling, falling off down the window, with the seat backs and
  * heads of the riders as darker shapes along the lower half (from the body-space position)
  */
+/** how much daylight shows through a bus from the far side (0 at night) */
+const busDay = { value: 1 };
 function busGlassMaterial() {
   const m = new THREE.MeshPhysicalMaterial({ vertexColors: true, color: 0xffffff, roughness: 0.04, metalness: 0.0, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.8, transparent: true, opacity: 0.62, depthWrite: false, emissive: 0xd8e6ff, emissiveIntensity: 0 });
   m.onBeforeCompile = (sh) => {
+    sh.uniforms.uBusDay = busDay;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vBusP;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBusP = position;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vBusP;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vBusP;\nuniform float uBusDay;')
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
@@ -597,10 +600,17 @@ function busGlassMaterial() {
   float shoulders = smoothstep(0.03, -0.03, y - (1.86 - dz * dz * 6.0)) * smoothstep(0.05, -0.02, abs(dz) - 0.21);
   float dark = max(seat * 0.55, rider * max(head, shoulders) * 0.7);
   totalEmissiveRadiance *= lit * (1.0 - dark);
+  // by day you see through the bus: the far side's windows bright with the street and sky beyond,
+  // the seats and riders dark against them, the floor and seat bases dim below (the glass was a
+  // black slab along the whole side)
+  float far = smoothstep(1.3, 1.5, y) * (1.0 - smoothstep(2.55, 2.75, y));
+  float pillar = smoothstep(0.03, 0.0, abs(fract(vBusP.z / 1.64 + 0.37) - 0.5) - 0.47);
+  vec3 seen = mix(vec3(0.05, 0.055, 0.06), vec3(0.62, 0.68, 0.74) * (0.75 + 0.25 * smoothstep(1.5, 2.6, y)), far * (1.0 - pillar * 0.85));
+  totalEmissiveRadiance += seen * (1.0 - max(seat * 0.85, rider * max(head, shoulders) * 0.9)) * uBusDay;
 }`,
       );
   };
-  m.customProgramCacheKey = () => 'palmera-busglass-v2';
+  m.customProgramCacheKey = () => 'palmera-busglass-v3';
   return m;
 }
 
@@ -623,4 +633,5 @@ export function setCarEnv(env: THREE.Texture | null, k: number) {
 export function setCarNight(night: number) {
   lampGlow.value = 0.35 + night * 2.6;
   carMats.busGlass.emissiveIntensity = Math.max(0, night - 0.15) * 0.75;
+  busDay.value = 0.55 * (1 - Math.min(1, night * 1.4));
 }

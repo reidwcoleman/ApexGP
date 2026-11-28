@@ -117,11 +117,14 @@ for s in (-1, 1):
     for k in range(6):
         za = ZR + 0.95 + k * 1.52 + 0.06
         zb = za + 1.52 - 0.12
+        segs = [(za, zb)]
         if s < 0:
-            # skip the door openings
-            if zb > 3.95 and za < 5.2 or (zb > -0.45 and za < 0.95):
-                continue
-        K.box((0.012, 1.18, zb - za), (s * (W / 2 + 0.012), 2.0, (za + zb) / 2), GL, bevel=0)
+            # cut round the door openings (whole bays used to be dropped, leaving a black slab of
+            # frame either side of each door)
+            for ca, cb in ((-0.45 - 0.06, 0.95 + 0.06), (3.95 - 0.06, 5.2 + 0.06)):
+                segs = [q for a0, b0 in segs for q in ((a0, min(b0, ca)), (max(a0, cb), b0)) if q[1] - q[0] > 0.25]
+        for a0, b0 in segs:
+            K.box((0.012, 1.18, b0 - a0), (s * (W / 2 + 0.012), 2.0, (a0 + b0) / 2), GL, bevel=0)
     if s > 0:
         K.box((0.012, 1.18, 0.9), (W / 2 + 0.012, 2.0, ZF - 0.75), GL, bevel=0)
 for z0, z1 in ((4.0, 5.15), (-0.45, 0.95)):
