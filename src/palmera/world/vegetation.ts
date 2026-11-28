@@ -146,13 +146,14 @@ transformed.y += 0.02;
 vH = position.y;
 float dry = smoothstep(0.55, 0.95, sin(cell.x * 0.09 + 1.3) * sin(cell.y * 0.11) * 0.5 + 0.5 + aRnd.y * 0.25);
 vTint = mix(mix(vec3(0.85, 1.0, 0.85), vec3(1.08, 1.04, 0.8), aRnd.z), vec3(1.3, 1.05, 0.6), dry * 0.25);
-vTint = mix(vTint, vec3(0.6, 0.64, 0.38) * (0.85 + 0.3 * aRnd.z), mk.g * 0.85);
+// marsh sawgrass: olive-gold, not lawn green (it came out a pale lime under the sun) - some clumps greener, some drier
+vTint = mix(vTint, mix(vec3(1.0, 0.52, 0.66), vec3(0.78, 0.66, 0.6), step(0.7, aRnd.z)) * (0.8 + 0.35 * aRnd.x), mk.g * 0.9);
 vSw = mk.g;
 // mown turf: greener and even, the cut tips a touch paler
 vTint = mix(vTint, vec3(0.95, 1.05, 0.85) * (0.92 + 0.12 * aRnd.z), mown * 0.8);`);
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', '#include <common>\nvarying float vH; varying vec3 vTint; varying float vSw;')
-        .replace('vec4 diffuseColor = vec4( diffuse, opacity );', 'vec4 diffuseColor = vec4(mix(mix(vec3(0.065, 0.14, 0.03), vec3(0.17, 0.33, 0.075), vH) * vTint, vec3(0.42, 0.36, 0.2), smoothstep(0.55, 1.0, vH) * vSw * 0.85), 1.0);')
+        .replace('vec4 diffuseColor = vec4( diffuse, opacity );', 'vec4 diffuseColor = vec4(mix(mix(vec3(0.065, 0.14, 0.03), vec3(0.17, 0.33, 0.075), vH) * vTint, vec3(0.4, 0.34, 0.19), smoothstep(0.45, 1.0, vH) * vSw * 0.9), 1.0);')
         .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n// lit mostly like the lawn they grow from: thin blades facing sideways went near black whenever the sun was not behind you\nnormal = normalize(mix(normalize(vNormal) * (gl_FrontFacing ? 1.0 : -1.0), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz), 0.78));');
     };
     // no depth write: the AO pass reads depth, and thousands of thin blades read as deep crevices (near-black grass at dusk).
