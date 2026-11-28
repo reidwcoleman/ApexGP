@@ -422,20 +422,22 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
       const float pL = 29.0;
       float pc = floor(sv / pL);
       float h = tsHash(vec2(pc, 71.3));
-      if (h < 0.24) {
+      // (2026-11-28: one 29 m stretch in ten, and a shade or two off the road round it — a quarter of
+      // them at ±20 % dropped a stark dark rectangle into the chase cam's road every hundred metres)
+      if (h < 0.1) {
         float h2 = tsHash(vec2(pc, 19.7)), h3 = tsHash(vec2(pc, 5.1)), h4 = tsHash(vec2(pc, 88.2));
         float len = 2.5 + 15.0 * h2 * h2;
         float s0 = pc * pL + h3 * (pL - len);
         float pw = 1.4 + 4.0 * h4;
-        float c0 = (h / 0.12 - 1.0) * max(0.0, hw - 0.4 - pw * 0.5);
+        float c0 = (h / 0.05 - 1.0) * max(0.0, hw - 0.4 - pw * 0.5);
         float e = max(max(s0 - sv, sv - s0 - len), abs(lat - c0) - pw * 0.5);   // < 0 inside
         float inP = 1.0 - smoothstep(-px, px, e);
         float seam = (1.0 - smoothstep(0.025, 0.025 + px * 1.5, abs(e - 0.03))) * (1.0 - smoothstep(0.02, 0.07, px));
         float newer = step(0.45, h3);
-        col *= 1.0 + inP * mix(0.13, -0.2, newer) * (0.85 + 0.3 * m3.b);
+        col *= 1.0 + inP * mix(0.08, -0.11, newer) * (0.85 + 0.3 * m3.b);
         rough += inP * mix(0.05, -0.04, newer);
         tsDetail *= 1.0 + inP * mix(0.25, -0.3, newer);
-        col = mix(col, vec3(0.03, 0.03, 0.032), seam * 0.75);
+        col = mix(col, vec3(0.03, 0.03, 0.032), seam * 0.6);
         rough = mix(rough, 0.36, seam * 0.6);
       }
     }
@@ -1097,7 +1099,7 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     roughness: 1,
     metalness: 0,
   });
-  patchGround(m, 'apex-ts-asphalt-20', t, ASPHALT_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-asphalt-21', t, ASPHALT_FRAG, (sh) => {
     sh.uniforms.uAsph = { value: t.asphalt };
     // the aggregate's anisotropic filtering ratio (what the driver grants: 16 on desktop GPUs)
     sh.uniforms.uAniso = { value: Math.max(1, t.asphalt.anisotropy) };
