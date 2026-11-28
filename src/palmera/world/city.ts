@@ -1085,19 +1085,35 @@ export class City {
 
   private buildRoads() {
     const roadTex = T.roadTexture();
-    const roads = new MB(), swamp = new MB(), inter = new MB(), cross = new MB();
+    const roads = new MB(), swamp = new MB(), inter = new MB(), cross = new MB(), bars = new MB();
     const m = this.map;
+    // at a signalled junction the lane lines stop short: the crossing (ROAD_HALF+0.3 .. +3.3 from the
+    // node) and a stop bar across the inbound lane just behind it sit on plain asphalt, not painted through
+    const STOP = ROAD_HALF + 4.4;
     for (const e of m.edges) {
       if (e.bridge) continue;
       const A = m.nodes[e.a], B = m.nodes[e.b];
-      const rx = -e.dz * ROAD_HALF, rz = e.dx * ROAD_HALF;
-      const sx = A.x + e.dx * ROAD_HALF, sz = A.z + e.dz * ROAD_HALF;
-      const ex = B.x - e.dx * ROAD_HALF, ez = B.z - e.dz * ROAD_HALF;
-      const L = e.len - ROAD_HALF * 2;
       const y = 0.02;
       const mb = e.swamp ? swamp : roads;
-      // left = -right; u: 0 at left, 1 at right
-      mb.quad([sx - rx, y, sz - rz], [sx + rx, y, sz + rz], [ex + rx, y, ez + rz], [ex - rx, y, ez - rz], [0, 0], [1, 0], [1, L / 24], [0, L / 24]);
+      // a rectangle along the edge: t from A, off across (+ = right of A->B)
+      const rect = (into: MB, t0: number, t1: number, o0: number, o1: number, yy: number, uv: (t: number, o: number) => number[]) => {
+        const P = (t: number, o: number) => [A.x + e.dx * t - e.dz * o, yy, A.z + e.dz * t + e.dx * o];
+        into.quad(P(t0, o0), P(t0, o1), P(t1, o1), P(t1, o0), uv(t0, o0), uv(t0, o1), uv(t1, o1), uv(t1, o0));
+      };
+      const world = (t: number, o: number) => [(A.x + e.dx * t - e.dz * o) / 12, -(A.z + e.dz * t + e.dx * o) / 12];
+      const trim = !e.swamp && e.len > 2 * STOP + 4;
+      const ta = trim && A.light ? STOP : ROAD_HALF, tb = e.len - (trim && B.light ? STOP : ROAD_HALF);
+      // left = -right; u: 0 at left, 1 at right; v runs with distance from the node so it doesn't jump
+      rect(mb, ta, tb, -ROAD_HALF, ROAD_HALF, y, (t, o) => [(o + ROAD_HALF) / (2 * ROAD_HALF), (t - ROAD_HALF) / 24]);
+      if (ta > ROAD_HALF) {
+        rect(inter, ROAD_HALF, ta, -ROAD_HALF, ROAD_HALF, y, world);
+        // traffic into A drives on A's side of the road's right: offsets < 0
+        rect(bars, ROAD_HALF + 3.6, ROAD_HALF + 4.05, -ROAD_HALF + 0.35, -0.2, 0.03, () => [0, 0]);
+      }
+      if (tb < e.len - ROAD_HALF) {
+        rect(inter, tb, e.len - ROAD_HALF, -ROAD_HALF, ROAD_HALF, y, world);
+        rect(bars, e.len - ROAD_HALF - 4.05, e.len - ROAD_HALF - 3.6, 0.2, ROAD_HALF - 0.35, 0.03, () => [0, 0]);
+      }
     }
     for (const n of m.nodes) {
       const h = ROAD_HALF;
@@ -1119,6 +1135,7 @@ export class City {
     this.add(inter.geo(), D(new THREE.MeshStandardMaterial({ map: T.intersectionTexture(), roughness: 0.92  }), 'asphalt_02', asph));
     const cw = this.add(cross.geo(), new THREE.MeshStandardMaterial({ map: T.crosswalkTexture(), transparent: true, roughness: 0.9, depthWrite: false }));
     cw.renderOrder = 1;
+    this.add(bars.geo(), new THREE.MeshStandardMaterial({ color: 0xe9e6dc, roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
   }
 
   private buildSidewalks() {

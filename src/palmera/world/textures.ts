@@ -50,9 +50,11 @@ export function roadTexture(): THREE.CanvasTexture {
 export function intersectionTexture(): THREE.CanvasTexture {
   const rng = new Rng(9);
   const [c, ctx] = canvas(128, 128);
-  ctx.fillStyle = '#5b5a5c';
+  // a shade darker than the road's base: the road's tyre-worn lanes darken it on average, and the plain
+  // asphalt at the junctions read as a pale square against it
+  ctx.fillStyle = '#525153';
   ctx.fillRect(0, 0, 128, 128);
-  speckle(ctx, 128, 128, 2600, rng, ['#525154', '#636265', '#6b6a6c', '#4a494b']);
+  speckle(ctx, 128, 128, 2600, rng, ['#4a494c', '#5a595c', '#626163', '#434244']);
   return tex(c);
 }
 
