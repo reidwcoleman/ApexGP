@@ -11,6 +11,7 @@ import {
 } from './map';
 import * as T from './textures';
 import { addDetail as D } from '../render/detail';
+import { addLampLight, bakeLampField, lampUniforms } from './lamplight';
 import { palmKit } from './palms';
 import { Grass, moundGeometry, crownGeometry, leafTexture, trunkGeometry, blossomGeometry, hedgeGeometry, placePlants, shrubGeometry, foliageMaterial, foliageGeometry } from './vegetation';
 import { furnitureGeometry, placeFurniture, type FurnitureKind, propGeometry } from './furniture';
@@ -1174,7 +1175,7 @@ export class City {
   }
 
   private buildBuildings() {
-    const mat = D(buildingMaterial(), 'white_stucco_02', { scale: 3.5, albedo: 0.55, normal: 0.8, faces: 'side' });
+    const mat = addLampLight(D(buildingMaterial(), 'white_stucco_02', { scale: 3.5, albedo: 0.55, normal: 0.8, faces: 'side' }));
     const geo = new THREE.BoxGeometry(1, 1, 1);
     geo.translate(0, 0.5, 0);
     const big: Inst[] = [], small: Inst[] = [], roofs: Inst[] = [], neon: Inst[] = [];
@@ -1512,6 +1513,7 @@ export class City {
   private buildProps() {
     const groups = new Map<PropSpec['kind'], Inst[]>();
     const lampHeads: Inst[] = [], pools: Inst[] = [];
+    const lampPts: { x: number; z: number }[] = [];
     const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
     for (const p of this.map.props) {
       const y = groundAt(p.x, p.z);
@@ -1524,6 +1526,7 @@ export class City {
         const hx = p.x + Math.sin(p.r) * 1.6, hz = p.z + Math.cos(p.r) * 1.6;
         lampHeads.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(hx, y + 6.95, hz), q, new THREE.Vector3(0.34, 0.06, 0.6)) });
         const px = p.x + Math.sin(p.r) * 2.6, pz = p.z + Math.cos(p.r) * 2.6;
+        lampPts.push({ x: px, z: pz });
         const pq = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
         pools.push({ m: new THREE.Matrix4().compose(new THREE.Vector3(px, groundAt(px, pz) + 0.16, pz), pq, new THREE.Vector3(15, 15, 1)) });
       }
@@ -1535,18 +1538,19 @@ export class City {
     const palms = groups.get('palm') ?? [];
     // near and far LOD share instance buffers
     const pk = palmKit();
-    const tm = swayMaterial(pk.trunkMat, 8), fm = swayMaterial(pk.frondMat, 8), dm = swayMaterial(pk.dryMat, 8);
+    bakeLampField(lampPts);
+    const tm = addLampLight(swayMaterial(pk.trunkMat, 8)), fm = addLampLight(swayMaterial(pk.frondMat, 8)), dm = addLampLight(swayMaterial(pk.dryMat, 8));
     this.palmMats.push(tm, fm, dm);
     chunked(this.scene, this.chunks, palms, pk.trunk, tm, { far: 520, shadow: true, lodGeo: pk.trunkLo, lodDist: 140, shadowGeo: pk.trunkLo });
     chunked(this.scene, this.chunks, palms, pk.crown, [fm, dm] as unknown as THREE.Material, { far: 520, shadow: true, lodGeo: pk.crownLo, lodDist: 140, shadowGeo: pk.crownLo });
     void palmMat;
     // broadleaf trees and swamp cypress: branching trunks under canopies of leaf cards
     const leafTex = leafTexture();
-    const leafMat = () => swayMaterial(std({ map: leafTex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.8 }), 6);
+    const leafMat = () => addLampLight(swayMaterial(std({ map: leafTex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.8 }), 6));
     const tLeaf = leafMat(), cLeaf = leafMat();
     this.palmMats.push(tLeaf, cLeaf);
     const trees = groups.get('tree') ?? [], cyp = groups.get('cypress') ?? [];
-    chunked(this.scene, this.chunks, trees, trunkGeometry(2.6, 0.22, 4, 5, 4.2, 2.4), std({ roughness: 0.95 }), { far: 420, shadow: true, shadowGeo: trunkGeometry(2.6, 0.22, 0, 5, 4.2, 2.4) });
+    chunked(this.scene, this.chunks, trees, trunkGeometry(2.6, 0.22, 4, 5, 4.2, 2.4), addLampLight(std({ roughness: 0.95 })), { far: 420, shadow: true, shadowGeo: trunkGeometry(2.6, 0.22, 0, 5, 4.2, 2.4) });
     const treeLo = crownGeometry({ cy: 4.5, rx: 2.6, ry: 1.8, cards: 18, size: 2.6, seed: 9, tint: 0xd8ecc0, filler: true });
     chunked(this.scene, this.chunks, trees, crownGeometry({ cy: 4.5, rx: 2.7, ry: 1.9, cards: 70, size: 1.7, seed: 9, tint: 0xd8ecc0, filler: true }), tLeaf, { far: 420, shadow: true, lodGeo: treeLo, lodDist: 110, shadowGeo: treeLo });
     chunked(this.scene, this.chunks, cyp, trunkGeometry(5.5, 0.3, 5, 21, 7.2, 1.6, 0x6a5c4b), std({ roughness: 0.95 }), { far: 420, shadow: true, shadowGeo: trunkGeometry(5.5, 0.3, 0, 21, 7.2, 1.6, 0x6a5c4b) });
@@ -1774,6 +1778,7 @@ export class City {
     const k = 0.55 + night * 2.4;
     this.lampHeadMat.color.setRGB(k, k * 0.88, k * 0.66);
     this.poolMat.opacity = clamp(night * 0.32, 0, 0.32);
+    lampUniforms.uLampOn.value = clamp((night - 0.15) / 0.5, 0, 1);
     this.spillMat.opacity = clamp(night * 0.9, 0, 0.9);
     const n = 0.7 + night * 1.8;
     this.neonMat.color.setRGB(n, n, n);
