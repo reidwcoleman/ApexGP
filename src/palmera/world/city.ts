@@ -1141,8 +1141,40 @@ export class City {
     this.add(g2.geo(), D(new THREE.MeshStandardMaterial({ map: conc, roughness: 0.9, color: 0xf2ece2 }), 'concrete_pavement', { aligned: true, scale: 2, albedo: 0.5, normal: 0.8, rough: [0.6, 0.95] }));
     const g3 = new MB();
     g3.flat(MAIN.x0, MAIN.z0, -480, MAIN.z1, 0, 20);
-    // the marsh: wet olive-brown, not lawn
-    this.add(g3.geo(), D(new THREE.MeshStandardMaterial({ map: mud, roughness: 0.9, color: 0x9c946a }), 'leafy_grass', { scale: 3, albedo: 0.45, normal: 0.8 }));
+    // the marsh: wet olive-brown, not lawn - and not one even colour to the horizon: big soft patches of
+    // greener growth, sun-dried straw and dark wet ground, mottled finer within (it read as a flat
+    // brown plain past the near grass)
+    const marsh = new THREE.MeshStandardMaterial({ map: mud, roughness: 0.9, color: 0x9c946a });
+    marsh.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vMW;')
+        .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvMW = (modelMatrix * vec4(transformed, 1.0)).xz;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+varying vec2 vMW;
+float mhH(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float mhN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mhH(i), mhH(i + vec2(1, 0)), f.x), mix(mhH(i + vec2(0, 1)), mhH(i + vec2(1, 1)), f.x), f.y); }
+float mhF(vec2 p) { return mhN(p) * 0.55 + mhN(p * 2.07 + 3.1) * 0.3 + mhN(p * 4.3 - 1.7) * 0.15; }`,
+        )
+        .replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+{
+  float g = mhF(vMW / 46.0), d = mhF(vMW / 31.0 + 17.0), wt = mhF(vMW / 23.0 - 9.0);
+  float fine = mhF(vMW / 5.5);
+  vec3 tint = vec3(1.0);
+  tint = mix(tint, vec3(0.74, 1.14, 0.66), smoothstep(0.42, 0.66, g));
+  tint = mix(tint, vec3(1.36, 1.2, 0.84), smoothstep(0.5, 0.72, d) * 0.9);
+  tint = mix(tint, vec3(0.5, 0.52, 0.48), smoothstep(0.56, 0.76, wt) * 0.85);
+  diffuseColor.rgb *= tint * (0.84 + 0.32 * fine);
+}`,
+        );
+    };
+    marsh.customProgramCacheKey = () => 'palmera-marsh-v2';
+    this.add(g3.geo(), D(marsh, 'leafy_grass', { scale: 3, albedo: 0.45, normal: 0.8 }));
     // beach: flat sand then a slope into the sea
     const b = new MB();
     const xs = [BEACH.x0, ISLAND.x1, 735, 770, 860];
