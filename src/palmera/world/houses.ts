@@ -6,20 +6,21 @@
 import * as THREE from 'three';
 import { box, merge } from '../core/geo';
 import { groundBase, type CityMap } from './map';
+import { glowTexture } from './textures';
 
 const DOORS = [0x6b4a32, 0x2f4f6f, 0x8a2e2e, 0x2e5d4b, 0xf2efe6, 0x3a3a3a];
 
 const CELL = 120;
 
 export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
-  const cells = new Map<string, { x: number; z: number; list: THREE.BufferGeometry[]; pickets: number[]; slabs: number[] }>();
+  const cells = new Map<string, { x: number; z: number; list: THREE.BufferGeometry[]; pickets: number[]; slabs: number[]; lamps: THREE.BufferGeometry[]; pools: number[]; washes: number[] }>();
   // each house's wall height, from its building (the houses list only has the footprint)
   const wallH = new Map<string, number>();
   for (const b of map.buildings) if (b.style === 2 && b.y0 === 0) wallH.set(Math.round(b.x * 10) + ',' + Math.round(b.z * 10), b.h);
   for (const h of map.houses) {
     const cx = Math.floor(h.x / CELL), cz = Math.floor(h.z / CELL), key = cx + ',' + cz;
     let cell = cells.get(key);
-    if (!cell) cells.set(key, (cell = { x: (cx + 0.5) * CELL, z: (cz + 0.5) * CELL, list: [], pickets: [], slabs: [] }));
+    if (!cell) cells.set(key, (cell = { x: (cx + 0.5) * CELL, z: (cz + 0.5) * CELL, list: [], pickets: [], slabs: [], lamps: [], pools: [], washes: [] }));
     const pk = cell.pickets;
     const sl = cell.slabs;
     // a concrete top on a slab: al0..al1 across, o0..o1 along, at height up; per vertex x y z, u (m along), v (m across from the middle), kind
@@ -55,6 +56,20 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
     hb(doorAl, 1.08, front + 0.05, 1.0, 2.1, 0.1, DOORS[Math.floor(rnd() * DOORS.length)]);
     hb(doorAl, 1.15, front + 0.03, 1.25, 2.3, 0.06, 0xf4f1ea);
     hb(doorAl, 0.08, front + 0.7, 2.0, 0.16, 1.4, 0xcfc9bd);
+    // a porch lantern beside the door (on two houses in three, the side by the drive), and the pool of
+    // light it throws on the step and path after dark
+    if (rnd() < 0.67) {
+      const side = h.drive ? 1 : -1;
+      const la = doorAl + side * 0.85;
+      const x = h.x + h.ax * la + h.nx * (front + 0.1), z = h.z + h.az * la + h.nz * (front + 0.1);
+      cell.list.push(h.ax ? box(0.12, 0.12, 0.06, x - h.nx * 0.04, y0 + 2.0, z - h.nz * 0.04, 0x2a2a2a) : box(0.06, 0.12, 0.12, x - h.nx * 0.04, y0 + 2.0, z - h.nz * 0.04, 0x2a2a2a));
+      cell.lamps.push(h.ax ? box(0.14, 0.22, 0.14, x, y0 + 1.9, z, 0xffffff) : box(0.14, 0.22, 0.14, x, y0 + 1.9, z, 0xffffff));
+      cell.list.push(box(0.16, 0.04, 0.16, x, y0 + 2.03, z, 0x2a2a2a));
+      const px = h.x + h.ax * (doorAl + side * 0.3) + h.nx * (front + 1.3), pz = h.z + h.az * (doorAl + side * 0.3) + h.nz * (front + 1.3);
+      cell.pools.push(px, y0 + 0.075, pz);
+      // the wash of light on the wall round it, facing out from the front
+      cell.washes.push(x - h.nx * 0.07, y0 + 1.85, z - h.nz * 0.07, Math.atan2(h.nx, h.nz));
+    }
     // a porch canopy on two posts
     if (rnd() < 0.5) {
       hb(doorAl, 2.62, front + 0.85, 1.6, 0.14, 1.8, 0xf4f1ea);
@@ -111,6 +126,12 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
   }
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 });
   const slabMat = concreteSlabMaterial();
+  // the lantern glass: warm and bright after dark, a dull pale shade by day
+  const lanternMat = new THREE.MeshStandardMaterial({ color: 0xd8d2c2, roughness: 0.4, emissive: 0xffb866, emissiveIntensity: 0 });
+  const poolGeo = new THREE.PlaneGeometry(3.4, 3.4).rotateX(-Math.PI / 2);
+  const washGeo = new THREE.PlaneGeometry(1.4, 1.4);
+  const poolMat = new THREE.MeshBasicMaterial({ map: glowTexture(), color: 0xffa860, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  const washMat = poolMat.clone();
   const picketMat = new THREE.MeshStandardMaterial({ map: picketTexture(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.75 });
   const chunks: { m: THREE.Mesh; x: number; z: number }[] = [];
   for (const c of cells.values()) {
@@ -121,6 +142,32 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
     m.castShadow = false;
     m.receiveShadow = true;
     scene.add(m);
+    if (c.lamps.length) {
+      const lm = new THREE.Mesh(merge(c.lamps), lanternMat);
+      scene.add(lm);
+      chunks.push({ m: lm, x: c.x, z: c.z });
+    }
+    if (c.pools.length) {
+      const n = c.pools.length / 3;
+      const im = new THREE.InstancedMesh(poolGeo, poolMat, n);
+      const m4 = new THREE.Matrix4();
+      for (let i = 0; i < n; i++) im.setMatrixAt(i, m4.makeTranslation(c.pools[i * 3], c.pools[i * 3 + 1], c.pools[i * 3 + 2]));
+      im.renderOrder = 2;
+      scene.add(im);
+      chunks.push({ m: im, x: c.x, z: c.z });
+    }
+    if (c.washes.length) {
+      const n = c.washes.length / 4;
+      const im = new THREE.InstancedMesh(washGeo, washMat, n);
+      const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
+      for (let i = 0; i < n; i++) {
+        const w = c.washes.slice(i * 4, i * 4 + 4);
+        im.setMatrixAt(i, m4.compose(new THREE.Vector3(w[0], w[1], w[2]), q.setFromAxisAngle(up, w[3]), one));
+      }
+      im.renderOrder = 2;
+      scene.add(im);
+      chunks.push({ m: im, x: c.x, z: c.z });
+    }
     if (c.slabs.length) {
       const n = c.slabs.length / 6;
       const pos = new Float32Array(n * 3), drv = new Float32Array(n * 3), nor = new Float32Array(n * 3);
@@ -158,8 +205,12 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
   }
   /** small stuff: each 120 m cell only within 240 m of the camera */
   return {
-    update(cam: THREE.Vector3) {
+    update(cam: THREE.Vector3, night = 0) {
       for (const c of chunks) c.m.visible = Math.hypot(c.x - cam.x, c.z - cam.z) < 240 + CELL * 0.7;
+      const on = Math.min(1, Math.max(0, (night - 0.2) / 0.5));
+      lanternMat.emissiveIntensity = on * 3.2;
+      poolMat.opacity = on * 0.42;
+      washMat.opacity = on * 0.3;
     },
   };
 }

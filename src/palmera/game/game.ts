@@ -1155,7 +1155,7 @@ export class Game {
       this.marsh.update(this.camera.position);
       this.pier.update(sdt, this.sky.night, this);
       this.fireworks.update(sdt);
-      this.houseFronts.update(this.camera.position);
+      this.houseFronts.update(this.camera.position, this.sky.night);
       this.herons.update(sdt);
       this.stunts.update(sdt, dt);
       this.reactions.update(sdt);
