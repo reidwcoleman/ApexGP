@@ -264,6 +264,96 @@ def planter():
     cyl(0.47, 0.47, 0.04, (0, 0.02, 0), 0xa9a296, seg=28)
 
 
+def mesh(verts, faces, col, smooth=True):
+    """a mesh from game-space verts and quad/tri faces, one colour"""
+    me = bpy.data.meshes.new('m')
+    me.from_pydata([G(*v) for v in verts], [], faces)
+    me.update()
+    o = bpy.data.objects.new('m', me)
+    sc.collection.objects.link(o)
+    if smooth:
+        for f in me.polygons:
+            f.use_smooth = True
+    return finish(o, col, 0)
+
+
+def umbrella():
+    """a beach umbrella: eight fabric panels sagging between their ribs (alternate panels white and
+    grey, so the game's per-umbrella colour makes the stripes), a scalloped valance round the rim,
+    ribs and stretchers underneath, a two-part pole with a hub, a finial and a ground anchor"""
+    R, TOP, N = 1.5, 2.92, 8
+    def y_at(r, f):
+        k = r / R
+        return TOP - 0.58 * k ** 1.1 - 0.085 * k * math.sin(math.pi * f) ** 1.2
+    for k in range(N):
+        col = 0xffffff if k % 2 == 0 else 0xa2a2a2
+        a0, a1 = k * 2 * math.pi / N, (k + 1) * 2 * math.pi / N
+        NR, NA = 9, 7
+        verts, faces = [], []
+        for i in range(NR + 1):
+            r = 0.04 + (R - 0.04) * i / NR
+            for j in range(NA + 1):
+                f = j / NA
+                a = a0 + (a1 - a0) * f
+                verts.append((r * math.cos(a), y_at(r, f), r * math.sin(a)))
+        for i in range(NR):
+            for j in range(NA):
+                v = i * (NA + 1) + j
+                faces.append((v, v + 1, v + NA + 2, v + NA + 1))
+        o = mesh(verts, faces, col)
+        sol = o.modifiers.new('s', 'SOLIDIFY')
+        sol.thickness = 0.008
+        # the valance: a flap hanging from the rim, two scallops a panel
+        vv, ff = [], []
+        NV = 16
+        for j in range(NV + 1):
+            f = j / NV
+            a = a0 + (a1 - a0) * f
+            yt = y_at(R, f)
+            yb = yt - 0.1 - 0.05 * math.sin(math.pi * ((2 * f) % 1.0))
+            c, s_ = math.cos(a), math.sin(a)
+            vv += [(R * c, yt + 0.005, R * s_), (R * 1.005 * c, yb, R * 1.005 * s_)]
+        for j in range(NV):
+            ff.append((2 * j, 2 * j + 2, 2 * j + 3, 2 * j + 1))
+        v = mesh(vv, ff, col)
+        v.modifiers.new('s', 'SOLIDIFY').thickness = 0.006
+    STEEL = 0xd4d4d4
+    for k in range(N):
+        a = k * 2 * math.pi / N
+        c, s_ = math.cos(a), math.sin(a)
+        seg((0, TOP - 0.03, 0), (R * 0.99 * c, y_at(R, 0) - 0.012, R * 0.99 * s_), 0.008, STEEL, sides=5)
+        rm = 0.8
+        seg((0, 2.2, 0), (rm * c, y_at(rm, 0) - 0.012, rm * s_), 0.006, STEEL, sides=5)
+    smooth_cyl(cyl(0.022, 0.022, 2.9, (0, 1.45, 0), STEEL, seg=10))
+    smooth_cyl(cyl(0.03, 0.03, 0.12, (0, 2.2, 0), STEEL, seg=10))
+    smooth_cyl(cyl(0.028, 0.028, 0.06, (0, 1.25, 0), 0x707070, seg=10))
+    sphere(0.035, (0, TOP + 0.04, 0), STEEL, seg=10)
+    smooth_cyl(cyl(0.05, 0.035, 0.12, (0, 0.06, 0), 0x8a8a8a, seg=10))
+
+
+def lounger():
+    """a white resin beach lounger, head end toward -z: side rails, four legs, the seat in slats and
+    a backrest tilted up at 40 degrees in slats on its own rails"""
+    W = 0xf4f4f2
+    for sx in (-0.29, 0.29):
+        box((0.045, 0.05, 1.25), (sx, 0.32, 0.27), W, bevel=0.012)
+        seg((sx, 0.33, -0.33), (sx, 0.82, -0.92), 0.022, W, sides=8)
+        for z in (-0.25, 0.8):
+            box((0.045, 0.3, 0.05), (sx, 0.15, z), W, bevel=0.01)
+        box((0.05, 0.08, 0.06), (sx, 0.04, -0.3), 0x9a9a9a, bevel=0.01)
+    box((0.6, 0.04, 0.04), (0, 0.32, 0.86), W, bevel=0.01)
+    z = -0.28
+    while z < 0.84:
+        box((0.58, 0.022, 0.065), (0, 0.355, z), W, bevel=0.008)
+        z += 0.085
+    th = math.atan2(0.49, 0.59)
+    for i in range(8):
+        t = (i + 0.5) / 8
+        y = 0.345 + 0.49 * t
+        zz = -0.33 - 0.59 * t
+        box((0.58, 0.022, 0.065), (0, y + 0.02, zz), W, bevel=0.008, rot=(th, 0, 0))
+
+
 def ground():
     bpy.ops.mesh.primitive_plane_add(size=12, location=(0, 0, 0))
     return bpy.context.active_object
@@ -276,7 +366,8 @@ sc.world = bpy.data.worlds.new('w')
 sc.world.light_settings.distance = 0.5
 made = []
 for name, fn in (('bench', bench), ('bin', bin_), ('hydrant', hydrant), ('news', news), ('meter', meter), ('sign', sign),
-                 ('shelter', shelter), ('lamp', lamp), ('signal', signal), ('planter', planter)):
+                 ('shelter', shelter), ('lamp', lamp), ('signal', signal), ('planter', planter),
+                 ('umbrella', umbrella), ('lounger', lounger)):
     fn()
     o = build(name)
     # AO over a ground plane into the colours (floor 0.45: soft contact shading, not soot)
@@ -303,7 +394,7 @@ for name, fn in (('bench', bench), ('bin', bin_), ('hydrant', hydrant), ('news',
     # triangles (the bevels and round sections are where the count went; the silhouettes stay)
     me.calc_loop_triangles()
     before = len(me.loop_triangles)
-    target = {'shelter': 420, 'signal': 380, 'lamp': 300}.get(name, 260)
+    target = {'shelter': 420, 'signal': 380, 'lamp': 300, 'umbrella': 1500, 'lounger': 700}.get(name, 260)
     if before > target:
         m = o.modifiers.new('d', 'DECIMATE')
         m.ratio = target / before

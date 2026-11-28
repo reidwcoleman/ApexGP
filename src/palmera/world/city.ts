@@ -1483,8 +1483,8 @@ export class City {
     const pm = chunked(this.scene, this.chunks, pools, poolGeo, this.poolMat, { far: 260, shadow: false, receive: false });
     pm.forEach((m) => (m.renderOrder = 2));
     this.buildSpill();
-    chunked(this.scene, this.chunks, groups.get('umbrella') ?? [], umbrellaGeometry(), std({ side: THREE.DoubleSide }), { far: 300, shadow: true });
-    chunked(this.scene, this.chunks, groups.get('lounger') ?? [], loungerGeometry(), std(), { far: 160, shadow: false });
+    chunked(this.scene, this.chunks, groups.get('umbrella') ?? [], propGeometry('umbrella') ?? umbrellaGeometry(), std({ side: THREE.DoubleSide, roughness: 0.85 }), { far: 300, shadow: true, lodGeo: umbrellaGeometry(), lodDist: 70, shadowGeo: umbrellaGeometry() });
+    chunked(this.scene, this.chunks, groups.get('lounger') ?? [], propGeometry('lounger') ?? loungerGeometry(), std({ roughness: 0.5 }), { far: 160, shadow: false, lodGeo: loungerGeometry(), lodDist: 50 });
     chunked(this.scene, this.chunks, groups.get('tower') ?? [], lifeguardGeometry(), std(), { far: 600, shadow: true });
   }
 
