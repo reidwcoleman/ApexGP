@@ -13,7 +13,7 @@ import {
   GLOVE_W, GLOVE_H, R_GL_BACK, R_GL_PALM, R_GL_FINGER, R_GL_THUMB, R_GL_CUFF,
   WHEEL_TEX_W, WHEEL_TEX_H, R_SIDEWALL, R_TREAD, R_RIMFACE, WC, WHEEL_PROPS, WHEEL_CELL,
   SIDEWALL_R0, SIDEWALL_R1, RIM_R, WHEEL_R,
-  DRV_W, DRV_H, R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_CODE_L, R_CODE_R, R_TCAM_NUM, R_HELM_SPON, R_HALO_SPON, R_HALO_ARM_L, R_HALO_ARM_R, R_DECK_SPON, type Rect,
+  DRV_W, DRV_H, R_HELMET, R_NUM_NOSE, R_NUM_FIN_L, R_NUM_FIN_R, R_CODE_L, R_CODE_R, R_TCAM_NUM, R_HELM_SPON, R_HALO_SPON, R_HALO_ARM_L, R_HALO_ARM_R, R_DECK_SPON, R_COWL_SPON, type Rect,
 } from './carLayout.ts';
 
 export const FONT = '"Titillium Web", "Arial Narrow", Arial, sans-serif';
@@ -1246,6 +1246,8 @@ export function driverTexture(teamIn: Team, driverIn: Driver): THREE.Texture {
       const P = partnersOf(team.id);
       drawInRect(g, R_HALO_ARM_L, P.principal[0].name, contrastOn(haloPaint), null, 0.86, 1.95, 800, false);
       drawInRect(g, R_HALO_ARM_R, P.principal[1].name, contrastOn(haloPaint), null, 0.86, 1.95, 800, false);
+      // (the cowl patch is ~38 × 12 cm on the cell's 4:1: x-scale 1.37 for upright letters)
+      drawInRect(g, R_COWL_SPON, P.tech[0].name, contrastOn(team.primary), null, 0.66, 1.37, 900, false);
     }
     // flat cells: visor, suit, suit2, HANS, gloves, belts
     const cells = ['#121722', team.primary, team.secondary, '#18191b', team.secondary, team.accent];

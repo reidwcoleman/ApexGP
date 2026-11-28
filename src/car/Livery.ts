@@ -56,6 +56,10 @@ const PARTNER_DECALS: { zf: number; zr: number; kt: number; h: number; k: number
   // sidepod: top front, and low on the flank above the undercut
   { zf: 0.12, zr: -0.22, kt: 6.1, h: 0.026, k: 8 },
   { zf: 0.05, zr: -0.42, kt: 7.75, h: 0.024, k: 9, tile: true },
+  // the cockpit's shoulder beside the driver and the sidepod's top behind it (what the T-cam looks
+  // down on either side of the helmet)
+  { zf: 0.54, zr: 0.26, kt: 2.95, h: 0.028, k: 12 },
+  { zf: -0.42, zr: -0.74, kt: 5.75, h: 0.026, k: 13, tile: true },
   // engine cover flank, under the shoulder, and its tail
   { zf: -0.95, zr: -1.3, kt: 4.7, h: 0.024, k: 10 },
   { zf: -1.98, zr: -2.25, kt: 3.3, h: 0.02, k: 11, tile: true },
@@ -561,7 +565,7 @@ function buildLivery(team: Team): LiverySet {
   mask.colorSpace = THREE.NoColorSpace;
   mask.anisotropy = 4;
   // painted on an earlier visit (same build, same team): draw it back
-  const key = pixelKey('livery', 2, team, partnersOf(team.id), PAINT_W, PAINT_H);
+  const key = pixelKey('livery', 3, team, partnersOf(team.id), PAINT_W, PAINT_H);
   if (restorePixels(key + 'm', c) && restorePixels(key + 'k', mc)) return { map, mask };
   // the per-texel hull pass is font independent: keep it only until the webfont repaint has happened
   let hull: HullImg | null = null;

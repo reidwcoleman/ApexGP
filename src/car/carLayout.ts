@@ -296,6 +296,9 @@ export const R_HALO_ARM_L: Rect = { x: 0, y: 288, w: 512, h: 32 };
 export const R_HALO_ARM_R: Rect = { x: 0, y: 320, w: 512, h: 32 };
 /** the title sponsor across the chassis top in front of the cockpit, read from behind (T-cam, cockpit) */
 export const R_DECK_SPON: Rect = { x: 0, y: 352, w: 256, h: 64 };
+/** a principal partner across the cockpit's front cowl (the slope between the opening and the halo's
+ * pillar that faces the T-cam), read across the car as on the real cars (Ferrari's Peroni, Red Bull's Oracle) */
+export const R_COWL_SPON: Rect = { x: 256, y: 352, w: 256, h: 64 };
 /** flat colour cells in the driver sheet (16×16 at y = 224) */
 export const DC = { visor: 0, suit: 1, suit2: 2, hans: 3, glove: 4, belts: 5 } as const;
 export function drvCellUV(i: number): V2 {
