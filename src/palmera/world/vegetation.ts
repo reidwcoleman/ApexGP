@@ -120,7 +120,7 @@ export class Grass {
         .replace('#include <common>', `#include <common>
 attribute vec2 aOff; attribute vec3 aRnd;
 uniform vec3 uCam; uniform float uTime; uniform sampler2D uMask; uniform vec4 uBox;
-varying float vH; varying vec3 vTint;`)
+varying float vH; varying vec3 vTint; varying float vSw;`)
         .replace('#include <begin_vertex>', `
 vec2 cell = aOff + ${PATCH.toFixed(1)} * floor((uCam.xz - aOff) / ${PATCH.toFixed(1)} + 0.5);
 vec2 muv = (cell - uBox.xy) / uBox.zw;
@@ -135,7 +135,7 @@ float hgt = mix(mix(0.13, 0.3, aRnd.y), mix(0.06, 0.11, aRnd.y), mown) * (1.0 + 
 float ang = aRnd.z * 6.2832;
 float cs = cos(ang), sn = sin(ang);
 vec3 transformed = position;
-transformed.xz *= keep * (0.6 + 0.5 * aRnd.y) * (1.0 + mk.g) * mix(1.0, 0.55, mown);
+transformed.xz *= keep * (0.6 + 0.5 * aRnd.y) * (1.0 + mk.g * 0.35) * mix(1.0, 0.55, mown);
 transformed.y *= hgt;
 transformed.xz = vec2(cs * transformed.x - sn * transformed.z, sn * transformed.x + cs * transformed.z);
 float wind = sin(uTime * 1.7 + cell.x * 0.31 + cell.y * 0.23) * 0.6 + sin(uTime * 3.3 + cell.x * 1.7 + cell.y) * 0.25;
@@ -146,12 +146,13 @@ transformed.y += 0.02;
 vH = position.y;
 float dry = smoothstep(0.55, 0.95, sin(cell.x * 0.09 + 1.3) * sin(cell.y * 0.11) * 0.5 + 0.5 + aRnd.y * 0.25);
 vTint = mix(mix(vec3(0.85, 1.0, 0.85), vec3(1.08, 1.04, 0.8), aRnd.z), vec3(1.3, 1.05, 0.6), dry * 0.25);
-vTint = mix(vTint, vec3(0.95, 0.85, 0.5), mk.g * 0.75);
+vTint = mix(vTint, vec3(0.6, 0.64, 0.38) * (0.85 + 0.3 * aRnd.z), mk.g * 0.85);
+vSw = mk.g;
 // mown turf: greener and even, the cut tips a touch paler
 vTint = mix(vTint, vec3(0.95, 1.05, 0.85) * (0.92 + 0.12 * aRnd.z), mown * 0.8);`);
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying float vH; varying vec3 vTint;')
-        .replace('vec4 diffuseColor = vec4( diffuse, opacity );', 'vec4 diffuseColor = vec4(mix(vec3(0.065, 0.14, 0.03), vec3(0.17, 0.33, 0.075), vH) * vTint, 1.0);')
+        .replace('#include <common>', '#include <common>\nvarying float vH; varying vec3 vTint; varying float vSw;')
+        .replace('vec4 diffuseColor = vec4( diffuse, opacity );', 'vec4 diffuseColor = vec4(mix(mix(vec3(0.065, 0.14, 0.03), vec3(0.17, 0.33, 0.075), vH) * vTint, vec3(0.42, 0.36, 0.2), smoothstep(0.55, 1.0, vH) * vSw * 0.85), 1.0);')
         .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n// lit mostly like the lawn they grow from: thin blades facing sideways went near black whenever the sun was not behind you\nnormal = normalize(mix(normalize(vNormal) * (gl_FrontFacing ? 1.0 : -1.0), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz), 0.78));');
     };
     // no depth write: the AO pass reads depth, and thousands of thin blades read as deep crevices (near-black grass at dusk).
