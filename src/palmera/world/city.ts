@@ -979,31 +979,38 @@ function pitchedRoofMaterial(): THREE.MeshStandardMaterial {
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, u);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vRW;\nattribute vec3 aWall;\nvarying vec3 vWall;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRW;\nvarying vec3 vRL;\nvarying vec3 vRN;\nattribute vec3 aWall;\nvarying vec3 vWall;')
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
 {
-  vec4 rw = vec4(transformed, 1.0);
+  // the slope's normal per vertex (through the inverse-transpose: the prisms are non-uniformly scaled),
+  // and the position measured from the roof's own origin. The frame used to come from screen-space
+  // derivatives of absolute world position, too imprecise hundreds of metres out: the tiles and
+  // shingles were sampled metres off from pixel to pixel and showed as grit
+  mat4 rm = modelMatrix;
   #ifdef USE_INSTANCING
-  rw = instanceMatrix * rw;
+  rm = modelMatrix * instanceMatrix;
   #endif
-  vRW = (modelMatrix * rw).xyz;
+  vec4 rw = rm * vec4(transformed, 1.0);
+  vRW = rw.xyz;
+  vRL = rw.xyz - (rm * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  vRN = normalize(transpose(inverse(mat3(rm))) * objectNormal);
   vWall = aWall;
 }`,
       );
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vRW; varying vec3 vWall; uniform sampler2D uRoofTex; uniform float uRoofOn;\nvec3 rN; vec3 rT; vec3 rB; vec2 rUv; float rOn; float rCol;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRW; varying vec3 vRL; varying vec3 vRN; varying vec3 vWall; uniform sampler2D uRoofTex; uniform float uRoofOn;\nvec3 rN; vec3 rT; vec3 rB; vec2 rUv; float rOn; float rCol;')
       .replace(
         '#include <map_fragment>',
         `#include <map_fragment>
-rN = normalize(cross(dFdx(vRW), dFdy(vRW)));
+rN = normalize(vRN);
 if (rN.y < 0.0) rN = -rN;
 rOn = uRoofOn * step(0.2, rN.y) * step(rN.y, 0.985);
 rT = normalize(vec3(-rN.z, 0.0, rN.x) + 1e-5);
 rB = normalize(cross(rN, rT));
 if (rB.y < 0.0) { rB = -rB; rT = -rT; }
-rUv = vec2(dot(vRW, rT), dot(vRW, rB)) / 2.0;
+rUv = vec2(dot(vRL, rT), dot(vRL, rB)) / 2.0;
 #if defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
 rCol = step(vColor.g * 1.25, vColor.r);
 #else
@@ -1035,7 +1042,7 @@ if (rOn > 0.5) {
 }`,
       );
   };
-  m.customProgramCacheKey = () => 'palmera-roof-v6';
+  m.customProgramCacheKey = () => 'palmera-roof-v8';
   return m;
 }
 
