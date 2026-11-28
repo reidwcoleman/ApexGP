@@ -1290,6 +1290,8 @@ float gStripe = 0.0;
   float dry = (smoothstep(0.5 - 0.3 * uVergeDry, 0.85, mB.b) * 0.6 + smoothstep(0.55 - 0.35 * uVergeDry, 0.9, mA.a) * 0.4) * (1.0 - 0.6 * uWetness);
   col = mix(col, col * vec3(1.45, 1.2, 0.62), dry * (0.6 + 0.3 * uVergeDry));
   col = mix(col, col * vec3(1.3, 1.12, 0.7), uVergeDry * 0.55);
+  // (a dormant sward, not a parched one: winter-brown zoysia, tan through and through — Suzuka in April)
+  col = mix(col, vec3(dot(col, vec3(0.33))) * vec3(1.32, 1.08, 0.66), smoothstep(0.8, 1.0, uVergeDry) * 0.7);
   // mottling at a few metres (clover, rye, thinner sward on the crowns): a verge is never one flat colour
   float mot = texture2D(uMacro, vTrk * (1.0 / 3.1) + vec2(0.13, 0.57)).g;
   col *= 0.9 + 0.2 * mot;
@@ -1385,7 +1387,10 @@ const DESERT_FRAG = /* glsl */ `
 /** how sun-dried each circuit's verges are in its race month (0 lush … 1 straw) */
 export const VERGE_DRY: Record<string, number> = {
   austin: 0.7, mexico: 0.6, hungaroring: 0.55, melbourne: 0.4, spielberg: 0.15, interlagos: 0.2, monza: 0.3, zandvoort: 0.3,
-  montreal: 0.15, silverstone: 0.2, spa: 0.05, suzuka: 0.1, sakhir: 0.15, yasmarina: 0.1,
+  montreal: 0.15, silverstone: 0.2, spa: 0.05, sakhir: 0.15, yasmarina: 0.1,
+  // (Suzuka races in early April now: the zoysia verges are still winter-dormant, a straw tan with green
+  // only coming through in patches — every frame of the real 2025 pole onboard)
+  suzuka: 0.95,
 };
 export function grassMaterial(t: GroundTextures, opts: { desert?: boolean; dry?: number } = {}): THREE.MeshStandardMaterial {
   t.grassAlbedo.repeat.set(1 / GRASS_TILE, 1 / GRASS_TILE);

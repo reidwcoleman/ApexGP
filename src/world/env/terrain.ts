@@ -89,7 +89,8 @@ export const TERRAIN_PALETTES: Record<string, TerrainPalette> = {
   // Lombardy: maize and wheat on the plain, woods only on the Brianza slopes
   park: { forest: -0.02, pasture: 0.22 },
   // Mie: wooded hills, paddies and tea fields on the plain
-  suzuka: { forest: 0.12, pasture: 0.5 },
+  // (early April: dormant zoysia lawns, straw-tan — see VERGE_DRY)
+  suzuka: { forest: 0.12, pasture: 0.5, lawn: 0x8a7d4c, meadow: 0x8f8150, straw: 0xab9561, grassDark: 0x6b6338 },
   // Styria: spruce on the slopes, hay meadows and pasture in the valleys
   spielberg: { forest: 0.14, pasture: 0.85 },
   // the St Lawrence plain: dairy farms and maize
