@@ -1241,13 +1241,14 @@ export function gravelMaterial(t: GroundTextures): THREE.MeshStandardMaterial {
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -2,
   });
-  patchGround(m, 'apex-ts-gravel-15', t, GRAVEL_FRAG + snowGround('vA1.x'), (sh) => {
+  patchGround(m, 'apex-ts-gravel-16', t, GRAVEL_FRAG + snowGround('vA1.x'), (sh) => {
     sh.fragmentShader = sh.fragmentShader
       // parallax: pebbles stand proud of the voids between them (height in the albedo's alpha)
       .replace(
         '#include <map_fragment>',
         `vec2 gPuv = vMapUv;
         vec4 gTex;
+        float gFar = 0.0;
         {
           mat3 tbnP = getTangentFrame(-vViewPosition, normalize(vNormal), vMapUv);
           vec3 Vt = normalize(vec3(dot(normalize(vViewPosition), tbnP[0]), dot(normalize(vViewPosition), tbnP[1]), dot(normalize(vViewPosition), tbnP[2])));
@@ -1257,13 +1258,19 @@ export function gravelMaterial(t: GroundTextures): THREE.MeshStandardMaterial {
           float h1 = texture2D(map, gPuv).a;
           gPuv = vMapUv + dir * (0.5 * (h0 + h1) - 0.55);
           gTex = texture2D(map, gPuv);
+          // (2026-11-28: from the T-cam and the chase cam, 3 … 8 m off, a 1–2 cm pebble is 2–4 px: the
+          // photograph's black voids and the normal map's lit pebble tops came out as salt-and-pepper
+          // static, sharpened on top. A camera there sees a soft stony grain: past ~3 px a pebble, the
+          // stones fold toward their local average, their relief eases with them)
+          gFar = smoothstep(0.004, 0.014, length(fwidth(vMapUv)) * ${GRAVEL_TILE.toFixed(2)}) * 0.4;
+          gTex.rgb = mix(gTex.rgb, texture2D(map, gPuv, 3.0).rgb, gFar);
           diffuseColor *= gTex;
         }`,
       )
       .replace('texture2D( normalMap, vNormalMapUv )', 'texture2D( normalMap, gPuv )')
       .replace(
         '#include <normal_fragment_maps>',
-        '#include <normal_fragment_maps>\nnormal = normalize(normal + normalize(tbn[0]) * gRake * 0.45);',
+        '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, gFar * 0.8) + normalize(tbn[0]) * gRake * 0.45);',
       );
   });
   return m;
