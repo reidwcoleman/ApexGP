@@ -178,7 +178,8 @@ async function loadPhoto(renderer: THREE.WebGLRenderer, name: string): Promise<P
   // its saturation (the late-day photos' deep blue zenith turned roads in shade navy) - shade under a blue sky photo was going navy blue (roads, pavements, white walls)
   const city = 35 * (Math.PI / 180);
   // the sunset and dusk skies are the bluest of all (the sun's gone, it's all zenith): least colour kept
-  const sat = /sunset|dusk/.test(name) ? 0.22 : 0.4;
+  // (the late-afternoon photo's deep blue too: in shade it turned every road navy by 5 pm)
+  const sat = /sunset|dusk/.test(name) ? 0.22 : /late_afternoon/.test(name) ? 0.24 : 0.4;
   for (let y = 0; y < h; y++) {
     const lower = y >= h / 2;
     const el = (0.5 - (y + 0.5) / h) * Math.PI;

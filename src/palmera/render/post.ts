@@ -24,13 +24,17 @@ class GradeEffect extends Effect {
         float k = 1.0 - uNight * 0.6;
         // (kept subtle: a strong teal in the shadows turned every shaded road navy by late afternoon)
         c += ( vec3( 1.0, 0.92, 0.8 ) - 1.0 ) * 0.22 * k * smoothstep( 0.4, 1.0, l );
-        c += ( vec3( 0.95, 0.99, 1.02 ) - 1.0 ) * 0.3 * k * ( 1.0 - smoothstep( 0.0, 0.45, l ) );
+        // (as a tint, not an offset: subtracting a fixed amount of red took all of it out of deep shade -
+        // a shaded road came out navy blue)
+        c *= mix( vec3( 1.0 ), vec3( 0.95, 0.99, 1.02 ), 0.3 * k * ( 1.0 - smoothstep( 0.0, 0.45, l ) ) );
         // golden hour: the low sun's light pushed warm through the midtones and highlights, the shade a
         // touch cooler and the colour a little richer (AgX had muted the orange sun to cream)
         float gm = smoothstep( 0.22, 0.68, l );
         c *= mix( vec3( 1.0 ), mix( vec3( 0.94, 0.98, 1.06 ), vec3( 1.15, 0.98, 0.78 ), gm ), uGold );
         c = mix( vec3( l ), c, 1.04 + 0.12 * uGold );
-        c = ( c - 0.5 ) * 1.06 + 0.5;
+        // contrast about mid-grey, eased off in the deepest shade (it pushed everything under ~3% to black)
+        // (night keeps its deep blacks)
+        c = mix( c, ( c - 0.5 ) * 1.06 + 0.5, max( smoothstep( 0.03, 0.25, l ), uNight ) );
         float g = gh( uv * vec2( 1931.0, 1171.0 ) + fract( uTime * 13.7 ) * 97.0 ) - 0.5;
         c += g * 0.01;
         outputColor = vec4( clamp( c, 0.0, 1.0 ), inputColor.a );
