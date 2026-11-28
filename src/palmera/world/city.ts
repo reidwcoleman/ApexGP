@@ -1280,11 +1280,11 @@ float mhF(vec2 p) { return mhN(p) * 0.55 + mhN(p * 2.07 + 3.1) * 0.3 + mhN(p * 4
       if (ta > ROAD_HALF) {
         rect(inter, ROAD_HALF, ta, -ROAD_HALF, ROAD_HALF, y, world);
         // traffic into A drives on A's side of the road's right: offsets < 0
-        rect(bars, ROAD_HALF + 3.6, ROAD_HALF + 4.05, -ROAD_HALF + 0.35, -0.2, 0.03, () => [0, 0]);
+        rect(bars, ROAD_HALF + 3.6, ROAD_HALF + 4.05, -ROAD_HALF + 0.35, -0.2, 0.03, (t, o) => [(o + ROAD_HALF - 0.35) / (ROAD_HALF - 0.55), (t - ROAD_HALF - 3.6) / 0.45]);
       }
       if (tb < e.len - ROAD_HALF) {
         rect(inter, tb, e.len - ROAD_HALF, -ROAD_HALF, ROAD_HALF, y, world);
-        rect(bars, e.len - ROAD_HALF - 4.05, e.len - ROAD_HALF - 3.6, 0.2, ROAD_HALF - 0.35, 0.03, () => [0, 0]);
+        rect(bars, e.len - ROAD_HALF - 4.05, e.len - ROAD_HALF - 3.6, 0.2, ROAD_HALF - 0.35, 0.03, (t, o) => [(o - 0.2) / (ROAD_HALF - 0.55), (t - e.len + ROAD_HALF + 4.05) / 0.45]);
       }
     }
     for (const n of m.nodes) {
@@ -1307,7 +1307,8 @@ float mhF(vec2 p) { return mhN(p) * 0.55 + mhN(p * 2.07 + 3.1) * 0.3 + mhN(p * 4
     this.add(inter.geo(), D(new THREE.MeshStandardMaterial({ map: T.intersectionTexture(), roughness: 0.92  }), 'asphalt_02', asph));
     const cw = this.add(cross.geo(), new THREE.MeshStandardMaterial({ map: T.crosswalkTexture(), transparent: true, roughness: 0.9, depthWrite: false }));
     cw.renderOrder = 1;
-    this.add(bars.geo(), new THREE.MeshStandardMaterial({ color: 0xe9e6dc, roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    // the stop bars worn like the crossings: scuffed in the lane's wheel tracks, ragged, pitted
+    this.add(bars.geo(), new THREE.MeshStandardMaterial({ map: T.stopBarTexture(), transparent: true, depthWrite: false, roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
   }
 
   private buildSidewalks() {

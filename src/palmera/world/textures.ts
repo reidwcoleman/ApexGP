@@ -111,6 +111,39 @@ export function crosswalkTexture(): THREE.CanvasTexture {
   return t;
 }
 
+/** a stop bar across one lane (u across the lane, v the bar's 45 cm), worn like the crossings */
+export function stopBarTexture(): THREE.CanvasTexture {
+  const W = 512, H = 32;
+  const rng = new Rng(31);
+  const [c, ctx] = canvas(W, H);
+  const img = ctx.createImageData(W, H);
+  const N = 48, tbl = Array.from({ length: N + 1 }, () => rng.next());
+  tbl[N] = tbl[0];
+  const n1 = (x: number) => { const t = ((x % N) + N) % N, i = Math.floor(t), f = t - i, s = f * f * (3 - 2 * f); return tbl[i] * (1 - s) + tbl[i + 1] * s; };
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const u = x / W;
+      // ragged long edges, a little in from each end
+      const top = 2 + n1(x * 0.07) * 4, bot = H - 2 - n1(x * 0.07 + 21) * 4;
+      const ins = Math.min(y - top, bot - y, x - 3 - n1(y * 0.3) * 4, W - 3 - n1(y * 0.3 + 9) * 4 - x);
+      if (ins <= 0) continue;
+      const trk = Math.max(Math.exp(-Math.pow((u - 0.27) / 0.07, 2)), Math.exp(-Math.pow((u - 0.73) / 0.07, 2)));
+      const patchy = n1(x * 0.09 + y * 0.4);
+      let a = Math.min(1, ins / 1.5) * 0.93 * (1 - trk * (0.45 + 0.4 * patchy));
+      if (rng.next() < 0.05 + trk * 0.12) a *= 0.25;
+      const g = 1 - trk * 0.16 - patchy * 0.05;
+      const i = (y * W + x) * 4;
+      img.data[i] = 238 * g;
+      img.data[i + 1] = 235 * g;
+      img.data[i + 2] = 226 * g;
+      img.data[i + 3] = Math.max(0, a) * 255;
+    }
+  ctx.putImageData(img, 0, 0);
+  const t = tex(c, false);
+  t.anisotropy = 8;
+  return t;
+}
+
 export function concreteTexture(): THREE.CanvasTexture {
   const rng = new Rng(11);
   // 256 px with 1 px joints: at 128 px and 1.5 px the joints were ~9 cm wide on the plazas and blurred
