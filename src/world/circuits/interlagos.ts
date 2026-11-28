@@ -91,7 +91,10 @@ export const INTERLAGOS: CircuitDef = {
     barrier: 'armco',
     fence: 1,
     art: 'ads',
-    runoffPaint: 'stripes',
+    // (Brazil's green, yellow and blue in broad bands past every kerb: the real pole onboard)
+    runoffPaint: 'flag',
+    runoffColors: ['#2a9a4a', '#f0c419', '#2a56b8'],
+    runoffBand: 1.9,
     kerb: ['#c8261e', '#ecece8'],
     armcoBoards: true,
     runs: [

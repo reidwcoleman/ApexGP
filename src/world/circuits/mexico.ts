@@ -58,7 +58,10 @@ export const MEXICO: CircuitDef = {
     barrier: 'armco',
     fence: 1,
     art: 'ads',
-    runoffPaint: 'bands',
+    // (the tricolor, green, white and red, past the kerbs: the real pole onboard)
+    runoffPaint: 'flag',
+    runoffColors: ['#1f8a46', '#ecece8', '#c8261e'],
+    runoffBand: 1.9,
     kerb: ['#c8261e', '#ecece8'],
     armcoBoards: true,
     runs: [

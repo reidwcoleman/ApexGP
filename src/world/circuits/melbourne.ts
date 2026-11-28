@@ -57,7 +57,10 @@ export const MELBOURNE: CircuitDef = {
     barrier: 'concrete',
     fence: 1,
     art: 'ads',
-    runoffPaint: 'plain',
+    // (green and gold in wide bands at the corners: the real pole onboard)
+    runoffPaint: 'flag',
+    runoffColors: ['#2e8f3e', '#f2c21b'],
+    runoffBand: 2.8,
     kerb: ['#d42a22', '#eeeeea'],
     runs: [
       // grandstand walls: tall fences in front of the stands

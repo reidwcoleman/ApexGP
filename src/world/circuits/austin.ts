@@ -59,7 +59,10 @@ export const AUSTIN: CircuitDef = {
   trackside: {
     barrier: 'armco',
     fence: 1,
-    runoffPaint: 'stripes',
+    // (the real pole onboard: wide red bands past the kerbs, blue on the exits)
+    runoffPaint: 'flag',
+    runoffColors: ['#cf3a24', '#2d63c8'],
+    runoffBand: 2.8,
     kerb: ['#c8261e', '#ecece8'],
     armcoBoards: true,
     runs: [

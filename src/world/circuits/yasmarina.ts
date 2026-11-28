@@ -68,7 +68,10 @@ export const YASMARINA: CircuitDef = {
     barrier: 'concrete',
     fence: 1,
     art: 'ads',
-    runoffPaint: 'bands',
+    // (the real pole onboard: the run-off a wide turquoise under the lights)
+    runoffPaint: 'flag',
+    runoffColors: ['#1fa596'],
+    runoffBand: 2.8,
     kerb: ['#c8261e', '#ecece8'],
     runs: [
       // the main grandstand wall (north, left), the pit wall side is the pit complex's
