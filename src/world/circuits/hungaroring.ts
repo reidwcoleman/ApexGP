@@ -56,7 +56,10 @@ export const HUNGARORING: CircuitDef = {
     barrier: 'armco',
     fence: 1,
     art: 'ads',
-    runoffPaint: 'bands',
+    // (the real pole onboard: a wide, bright blue past the red/white kerbs)
+    runoffPaint: 'flag',
+    runoffColors: ['#2f6fd0'],
+    runoffBand: 2.8,
     kerb: ['#d0202a', '#efefeb'],
     armcoBoards: true,
     runs: [
