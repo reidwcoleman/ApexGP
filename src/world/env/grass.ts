@@ -265,7 +265,8 @@ ${CAR_WAKE_GLSL}`,
   // every blade its own shade, a few dead straw ones in the lawn
   // (lifted with the verge shader's lush lawn — trackside/materials.ts GRASS_FRAG — or the blades stand
   // darker than the ground they grow from)
-  vGC = col * vec3( 1.08, 1.18, 0.95 ) * ( 0.85 + 0.45 * fract( rnd * 5.3 ) );
+  // (the same yellower summer green as the verge under it: materials.ts GRASS_FRAG)
+  vGC = col * vec3( 1.2, 1.14, 0.74 ) * ( 0.85 + 0.45 * fract( rnd * 5.3 ) );
   vGC = mix( vGC, uStrawC * 0.9, step( 0.93, fract( rnd * 11.7 ) ) * 0.7 );
   // ...and the sward varies field by field: blue-green rye in the hollows, yellower on the crowns
   {

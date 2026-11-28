@@ -1269,7 +1269,9 @@ float gStripe = 0.0;
   col *= (0.78 + 0.42 * mA.r) * (0.8 + 0.4 * clump);
   // (a well-kept verge; 2026-11-26: AC's Monza footage measured side by side is a deeper, cooler green
   // than the old ×(1, 1.12, 0.64) — that one glowed lime next to the trees and the asphalt)
-  col *= vec3(0.9, 0.98, 0.74);
+  // (2026-11-27: the real Spa pole onboard, sampled in sun and shade, puts a summer verge at hue 65–75°;
+  // ours sat at 83–88°, a bluer green than any grass the broadcast shows: a touch more red, less blue)
+  col *= vec3(1.0, 0.95, 0.56);
   // drier, yellower patches (fewer when it rains)
   float dry = (smoothstep(0.5 - 0.3 * uVergeDry, 0.85, mB.b) * 0.6 + smoothstep(0.55 - 0.35 * uVergeDry, 0.9, mA.a) * 0.4) * (1.0 - 0.6 * uWetness);
   col = mix(col, col * vec3(1.45, 1.2, 0.62), dry * (0.6 + 0.3 * uVergeDry));
