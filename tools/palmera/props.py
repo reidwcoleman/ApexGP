@@ -354,6 +354,86 @@ def lounger():
         box((0.58, 0.022, 0.065), (0, y + 0.02, zz), W, bevel=0.008, rot=(th, 0, 0))
 
 
+def lifeguard():
+    """a beach lifeguard tower, ramp toward +z: square stilts with X bracing, a deck with a railed
+    front porch, a hut with framed dark windows and a door, an overhanging hip roof with a fascia
+    band and a flag on a pole, and a slatted ramp with handrails down to the sand. The game tints it
+    each tower's pastel, so the light parts take the colour and the glass stays dark."""
+    WH, TR, GL, WD = 0xffffff, 0xe6e6e6, 0x24323d, 0xdcdcdc
+    # stilts and bracing
+    for sx in (-1.1, 1.1):
+        for sz in (-1.0, 1.0):
+            box((0.16, 2.25, 0.16), (sx, 1.12, sz), TR, bevel=0.02)
+            box((0.3, 0.06, 0.3), (sx, 0.03, sz), 0xbdbdbd, bevel=0.01)
+    import math as _m
+    for sx in (-1.1, 1.1):
+        L = _m.hypot(2.0, 1.9)
+        a = _m.atan2(1.9, 2.0)
+        box((0.06, 0.08, L), (sx, 1.1, 0), TR, bevel=0.01, rot=(a, 0, 0))
+        box((0.06, 0.08, L), (sx, 1.1, 0), TR, bevel=0.01, rot=(-a, 0, 0))
+    for sz in (-1.0, 1.0):
+        L = _m.hypot(2.2, 1.9)
+        a = _m.atan2(1.9, 2.2)
+        box((L, 0.08, 0.06), (0, 1.1, sz), TR, bevel=0.01, rot=(0, 0, a))
+        box((L, 0.08, 0.06), (0, 1.1, sz), TR, bevel=0.01, rot=(0, 0, -a))
+    # deck with a porch out front
+    box((2.9, 0.14, 3.6), (0, 2.3, 0.35), WD, bevel=0.02)
+    # porch railings (front and sides of the porch; the ramp comes up the middle of the front)
+    for sx in (-1.4, 1.4):
+        for z in (1.1, 1.65, 2.1):
+            box((0.06, 0.95, 0.06), (sx, 2.84, z), WH, bevel=0.01)
+        box((0.07, 0.06, 1.1), (sx, 3.3, 1.6), WH, bevel=0.01)
+        box((0.05, 0.05, 1.1), (sx, 2.85, 1.6), WH, bevel=0.01)
+    for sx in (-1.4, -0.95, 0.95, 1.4):
+        box((0.06, 0.95, 0.06), (sx, 2.84, 2.12), WH, bevel=0.01)
+    for x0, x1 in ((-1.4, -0.5), (0.5, 1.4)):
+        box((x1 - x0, 0.06, 0.07), ((x0 + x1) / 2, 3.3, 2.12), WH, bevel=0.01)
+        box((x1 - x0, 0.05, 0.05), ((x0 + x1) / 2, 2.85, 2.12), WH, bevel=0.01)
+    # the hut
+    box((2.3, 1.85, 2.0), (0, 3.31, -0.45), WH, bevel=0.03)
+    box((2.42, 0.1, 2.12), (0, 2.42, -0.45), TR, bevel=0.02)
+    # front window band and a door on the side
+    box((1.7, 0.72, 0.04), (0, 3.55, 0.56), GL, bevel=0.004)
+    for x in (-0.87, 0, 0.87):
+        box((0.07, 0.8, 0.06), (x, 3.55, 0.58), TR, bevel=0.01)
+    box((1.82, 0.07, 0.08), (0, 3.92, 0.58), TR, bevel=0.01)
+    box((1.82, 0.07, 0.1), (0, 3.17, 0.6), TR, bevel=0.01)
+    for sx in (-1.16, 1.16):
+        box((0.04, 0.6, 1.2), (sx, 3.6, -0.55), GL, bevel=0.004)
+        box((0.06, 0.07, 1.3), (sx * 1.01, 3.93, -0.55), TR, bevel=0.01)
+        box((0.06, 0.07, 1.3), (sx * 1.01, 3.27, -0.55), TR, bevel=0.01)
+    box((0.04, 1.55, 0.7), (1.16, 3.17, 0.15), 0xc8c8c8, bevel=0.01)
+    box((0.06, 0.06, 0.06), (1.19, 3.15, -0.08), 0x555555, bevel=0.01)
+    # hip roof over a fascia band, a flag on a pole
+    box((2.8, 0.18, 2.55), (0, 4.3, -0.45), 0xd0d0d0, bevel=0.02)
+    bpy.ops.mesh.primitive_cone_add(vertices=4, radius1=1.95, radius2=0.25, depth=0.75, location=G(0, 4.76, -0.45), rotation=(0, 0, math.pi / 4))
+    o = bpy.context.active_object
+    o.scale = (1.0, 0.92, 1.0)
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+    finish(o, WH, 0.02)
+    smooth_cyl(cyl(0.025, 0.02, 1.4, (0.9, 5.4, -1.2), 0xd8d8d8, seg=8))
+    box((0.5, 0.3, 0.015), (1.16, 5.9, -1.2), 0xd8d8d8, bevel=0.003)
+    # the ramp: slats between stringers, handrails on posts, a support halfway
+    import math as m2
+    z0, y0, z1 = 2.1, 2.3, 5.0
+    L = m2.hypot(z1 - z0, y0)
+    ang = m2.atan2(y0, z1 - z0)
+    for sx in (-0.48, 0.48):
+        box((0.06, 0.14, L), (sx, y0 / 2, (z0 + z1) / 2), TR, bevel=0.01, rot=(ang, 0, 0))
+        box((0.05, 0.05, L), (sx, y0 / 2 + 0.85, (z0 + z1) / 2), WH, bevel=0.01, rot=(ang, 0, 0))
+        for t in (0.15, 0.5, 0.85):
+            zz = z0 + (z1 - z0) * t
+            yy = y0 * (1 - t)
+            box((0.05, 0.85, 0.05), (sx, yy + 0.47, zz), WH, bevel=0.01)
+        box((0.12, y0 * 0.5, 0.12), (sx, y0 * 0.25, z0 + (z1 - z0) * 0.5), TR, bevel=0.01)
+    n = 16
+    for i in range(n):
+        t = (i + 0.5) / n
+        zz = z0 + (z1 - z0) * t
+        yy = y0 * (1 - t) + 0.07
+        box((0.92, 0.04, L / n * 0.75), (0, yy, zz), WD, bevel=0.006, rot=(ang, 0, 0))
+
+
 def ground():
     bpy.ops.mesh.primitive_plane_add(size=12, location=(0, 0, 0))
     return bpy.context.active_object
@@ -367,7 +447,7 @@ sc.world.light_settings.distance = 0.5
 made = []
 for name, fn in (('bench', bench), ('bin', bin_), ('hydrant', hydrant), ('news', news), ('meter', meter), ('sign', sign),
                  ('shelter', shelter), ('lamp', lamp), ('signal', signal), ('planter', planter),
-                 ('umbrella', umbrella), ('lounger', lounger)):
+                 ('umbrella', umbrella), ('lounger', lounger), ('lifeguard', lifeguard)):
     fn()
     o = build(name)
     # AO over a ground plane into the colours (floor 0.45: soft contact shading, not soot)
@@ -394,7 +474,7 @@ for name, fn in (('bench', bench), ('bin', bin_), ('hydrant', hydrant), ('news',
     # triangles (the bevels and round sections are where the count went; the silhouettes stay)
     me.calc_loop_triangles()
     before = len(me.loop_triangles)
-    target = {'shelter': 420, 'signal': 380, 'lamp': 300, 'umbrella': 1500, 'lounger': 700}.get(name, 260)
+    target = {'shelter': 420, 'signal': 380, 'lamp': 300, 'umbrella': 1500, 'lounger': 700, 'lifeguard': 2600}.get(name, 260)
     if before > target:
         m = o.modifiers.new('d', 'DECIMATE')
         m.ratio = target / before
