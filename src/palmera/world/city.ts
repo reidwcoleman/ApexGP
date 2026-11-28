@@ -572,7 +572,9 @@ if (bn.y > 0.5) {
     // thin runs: narrow in u, long in v, each fading out at its own length
     float runs = smoothstep(0.45, 0.85, bvn(vec2(u * 11.0, v * 0.12 + sd))) * (0.6 + 0.4 * bvn(vec2(u * 3.0, sd + 5.0)));
     float streak = underWin * smoothstep(0.15 + 0.6 * bvn(vec2(u * 7.0, sd + 1.0)), 0.0, fall) * runs;
-    float roofRun = smoothstep(1.5 + 4.5 * bvn(vec2(u * 6.0, sd + 3.0)), 0.0, vBS.y - v) * smoothstep(0.3, 0.75, bvn(vec2(u * 9.0, v * 0.1 + sd + 9.0)));
+    // runs from the roof edge reach no more than a fifth of the way down (a bungalow isn't striped top to toe)
+    float runLen = min(1.2 + 4.0 * bvn(vec2(u * 6.0, sd + 3.0)), vBS.y * 0.2);
+    float roofRun = smoothstep(runLen, 0.0, vBS.y - v) * smoothstep(0.5, 0.85, bvn(vec2(u * 9.0, v * 0.1 + sd + 9.0)));
     float corner = 1.0 - smoothstep(0.0, 1.1, halfW - abs(u));
     float dirt = clamp(ground * 0.55 + streak * 0.5 + roofRun * 0.35 + corner * 0.2, 0.0, 0.8) * (1.0 - wmask);
     // real white paint reflects ~80%: keep the brightest walls from clipping in full sun
@@ -632,7 +634,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v14';
+  mat.customProgramCacheKey = () => 'palmera-building-v15';
   return mat;
 }
 
@@ -1455,7 +1457,7 @@ export class City {
     tex.anisotropy = 8;
     const lists = placeDecals(this.map);
     const look = {
-      manhole: { c: 0xffffff, rough: 0.5, metal: 0, a: 1, k: 1.25 }, grate: { c: 0xffffff, rough: 0.55, metal: 0, a: 1, k: 1.15 },
+      manhole: { c: 0xffffff, rough: 0.78, metal: 0, a: 1, k: 0.72 }, grate: { c: 0xffffff, rough: 0.8, metal: 0, a: 1, k: 0.8 },
       patch: { c: 0x9a9a9a, rough: 0.9, metal: 0, a: 0.8 }, oil: { c: 0xffffff, rough: 0.4, metal: 0, a: 0.8 },
     } as Record<DecalKind, { c: number; rough: number; metal: number; a: number; k?: number }>;
     for (const k of Object.keys(lists) as DecalKind[]) {
