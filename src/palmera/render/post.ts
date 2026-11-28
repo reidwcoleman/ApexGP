@@ -15,6 +15,7 @@ class GradeEffect extends Effect {
       /* glsl */ `
       uniform float uTime;
       uniform float uNight;
+      uniform float uGold;
       float gh( vec2 p ) { vec3 p3 = fract( vec3( p.xyx ) * 0.1031 ); p3 += dot( p3, p3.yzx + 33.33 ); return fract( ( p3.x + p3.y ) * p3.z ); }
       void mainImage( const in vec4 inputColor, const in vec2 uv, out vec4 outputColor ) {
         vec3 c = inputColor.rgb;
@@ -24,18 +25,23 @@ class GradeEffect extends Effect {
         // (kept subtle: a strong teal in the shadows turned every shaded road navy by late afternoon)
         c += ( vec3( 1.0, 0.92, 0.8 ) - 1.0 ) * 0.22 * k * smoothstep( 0.4, 1.0, l );
         c += ( vec3( 0.95, 0.99, 1.02 ) - 1.0 ) * 0.3 * k * ( 1.0 - smoothstep( 0.0, 0.45, l ) );
-        c = mix( vec3( l ), c, 1.04 );
+        // golden hour: the low sun's light pushed warm through the midtones and highlights, the shade a
+        // touch cooler and the colour a little richer (AgX had muted the orange sun to cream)
+        float gm = smoothstep( 0.22, 0.68, l );
+        c *= mix( vec3( 1.0 ), mix( vec3( 0.94, 0.98, 1.06 ), vec3( 1.15, 0.98, 0.78 ), gm ), uGold );
+        c = mix( vec3( l ), c, 1.04 + 0.12 * uGold );
         c = ( c - 0.5 ) * 1.06 + 0.5;
         float g = gh( uv * vec2( 1931.0, 1171.0 ) + fract( uTime * 13.7 ) * 97.0 ) - 0.5;
         c += g * 0.01;
         outputColor = vec4( clamp( c, 0.0, 1.0 ), inputColor.a );
       }`,
-      { blendFunction: BlendFunction.NORMAL, uniforms: new Map([['uTime', new THREE.Uniform(0)], ['uNight', new THREE.Uniform(0)]]) },
+      { blendFunction: BlendFunction.NORMAL, uniforms: new Map([['uTime', new THREE.Uniform(0)], ['uNight', new THREE.Uniform(0)], ['uGold', new THREE.Uniform(0)]]) },
     );
   }
-  set(t: number, night: number) {
+  set(t: number, night: number, gold = 0) {
     this.uniforms.get('uTime')!.value = t;
     this.uniforms.get('uNight')!.value = night;
+    this.uniforms.get('uGold')!.value = gold;
   }
 }
 
@@ -298,8 +304,8 @@ export class Post {
     this.composer.setSize(w, h);
   }
 
-  render(t: number, night: number, exposure: number) {
-    this.grade.set(t, night);
+  render(t: number, night: number, exposure: number, gold = 0) {
+    this.grade.set(t, night, gold);
     this.exposure.value = exposure;
     this.camera.updateMatrixWorld();
     this.wetRefl.set(this.camera, this.wet);

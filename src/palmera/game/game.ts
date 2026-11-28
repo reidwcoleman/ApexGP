@@ -1249,7 +1249,10 @@ export class Game {
     const pv = this.player.vehicle;
     this.speedBlurW += ((pv && !pv.isBoat ? Math.min(1, Math.max(0, (Math.abs(pv.speed) - 22) / 27)) : 0) - this.speedBlurW) * 0.07;
     this.post.speedBlur.set(this.speedBlurW);
-    this.post.render(this.elapsed, this.sky.night, this.sky.exposure);
+    // golden hour in the grade: while the sun is low and still up, less under cloud and rain
+    const sk = this.sky;
+    const gold = sk.sunset * sk.day * (1 - sk.night) * (1 - Math.min(1, sk.rain * 1.5)) * 0.85;
+    this.post.render(this.elapsed, sk.night, sk.exposure, gold);
   }
 
   private prLockUntil = 0;
