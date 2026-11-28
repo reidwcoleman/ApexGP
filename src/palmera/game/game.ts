@@ -46,6 +46,7 @@ import { Fishing } from './fishing';
 import { CashVan } from './cashvan';
 import { Flamingos } from './flamingos';
 import { Vendors } from './vendors';
+import { FenderBenders } from './fenderbender';
 import { StreetEvents } from './events';
 import { PhotoMode } from './photo';
 import { Club } from './club';
@@ -139,6 +140,7 @@ export class Game {
   cashVan!: CashVan;
   flamingos!: Flamingos;
   vendors!: Vendors;
+  benders!: FenderBenders;
   street!: StreetEvents;
   private speedBlurW = 0;
   photo!: PhotoMode;
@@ -222,6 +224,7 @@ export class Game {
     this.cashVan = new CashVan(this);
     this.flamingos = new Flamingos(this);
     this.vendors = new Vendors(this);
+    this.benders = new FenderBenders(this);
     Marker.camera = this.camera;
     this.photo = new PhotoMode(this);
     this.club = new Club(this);
@@ -1095,6 +1098,7 @@ export class Game {
       this.cashVan.update(sdt);
       this.flamingos.update(sdt);
       this.vendors.update(sdt);
+      this.benders.update(sdt);
       this.street.update(sdt);
       this.club.update(sdt);
       this.wakes.update(sdt);

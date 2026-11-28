@@ -451,6 +451,8 @@ export class Vehicle {
 
   /** -1 left, 0 none, 1 right (set by the AI before a turn) */
   signal = 0;
+  /** both indicators flashing (stopped after a bump) */
+  hazard = false;
   private lights: { brake: THREE.Mesh; l: THREE.Mesh; r: THREE.Mesh } | null = null;
 
   /** brake lights and indicators: glows on the tail, made when the car first comes near */
@@ -485,8 +487,8 @@ export class Vehicle {
     const braking = this.driver !== null && !this.wrecked && ((fs > 0.5 && this.input.thr < -0.05) || (fs < -0.5 && this.input.thr > 0.05) || (this.input.hand && Math.abs(fs) < 1 && this.driver === 'npc'));
     this.lights.brake.visible = braking;
     const on = Math.floor(t * 2.6) % 2 === 0 && !this.wrecked;
-    this.lights.l.visible = on && this.signal < 0;
-    this.lights.r.visible = on && this.signal > 0;
+    this.lights.l.visible = on && (this.signal < 0 || this.hazard);
+    this.lights.r.visible = on && (this.signal > 0 || this.hazard);
   }
 
   /** a motorbike or a bicycle: leans into corners, the rider sits on top */
