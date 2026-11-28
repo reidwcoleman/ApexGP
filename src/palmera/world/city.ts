@@ -1165,6 +1165,32 @@ export class City {
       }
     }
     this.add(b.geo(), D(new THREE.MeshStandardMaterial({ map: sand, roughness: 1 }), 'coast_sand_01', { scale: 3, albedo: 0.9, normal: 1.0, rough: [0.8, 1] }));
+    // the beach road's edge: a low concrete kerb along the sand (gaps for the beach paths), and sand
+    // blown off the beach lying across the outer lane in drifts and fingers. The sand used to meet the
+    // asphalt along a ruled line
+    {
+      const kb: THREE.BufferGeometry[] = [];
+      const zs: [number, number][] = [];
+      let z = ISLAND.z0 + 2;
+      const krng = new Rng(77);
+      while (z < ISLAND.z1 - 2) {
+        const len = 30 + krng.next() * 40;
+        zs.push([z, Math.min(z + len, ISLAND.z1 - 2)]);
+        z += len + 3.5;
+      }
+      for (const [za, zb] of zs) kb.push(box(0.22, 0.16, zb - za, BEACH.x0 + 0.11, 0.08, (za + zb) / 2, 0xd9d3c6));
+      const kg = merge(kb);
+      const km = new THREE.Mesh(kg, D(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }), 'concrete_pavement', { scale: 2, albedo: 0.6, normal: 0.6 }));
+      km.castShadow = km.receiveShadow = true;
+      this.scene.add(km);
+      const dr = new MB();
+      dr.quad([BEACH.x0 - 3.2, 0.012, ISLAND.z1], [BEACH.x0, 0.012, ISLAND.z1], [BEACH.x0, 0.012, ISLAND.z0], [BEACH.x0 - 3.2, 0.012, ISLAND.z0], [0, -ISLAND.z1 / 41], [1, -ISLAND.z1 / 41], [1, -ISLAND.z0 / 41], [0, -ISLAND.z0 / 41]);
+      const dm = new THREE.MeshStandardMaterial({ map: sandDriftTexture(), transparent: true, depthWrite: false, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+      const dmesh = new THREE.Mesh(dr.geo(), dm);
+      dmesh.receiveShadow = true;
+      dmesh.renderOrder = 1;
+      this.scene.add(dmesh);
+    }
     // seawalls
     const sw: THREE.BufferGeometry[] = [];
     const wall = (x0: number, z0: number, x1: number, z1: number) => sw.push(box(Math.max(0.6, x1 - x0), 5, Math.max(0.6, z1 - z0), (x0 + x1) / 2, -2.5, (z0 + z1) / 2, 0xbdb5a6));
@@ -2377,4 +2403,45 @@ diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.055, 0.1, 0.02) * (0.8 + 0.4 * p
   };
   m.customProgramCacheKey = () => 'palmera-pond-v2';
   return m;
+}
+
+/** sand blown onto a road edge: u across (0 = out in the lane, 1 = the kerb), v along (24 m a repeat) */
+function sandDriftTexture(): THREE.CanvasTexture {
+  const W = 128, H = 1024;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const x = c.getContext('2d')!;
+  const rng = new Rng(311);
+  // a continuous drift along the kerb, its edge wandering
+  for (let j = 0; j < H; j += 2) {
+    const reach = 0.2 + 0.13 * Math.sin(j * 0.013) + 0.08 * Math.sin(j * 0.041 + 1.3) + 0.04 * Math.sin(j * 0.17);
+    const g = x.createLinearGradient(W, 0, W * (1 - Math.max(0.08, reach)), 0);
+    g.addColorStop(0, 'rgba(226,210,178,0.85)');
+    g.addColorStop(0.5, 'rgba(222,205,172,0.45)');
+    g.addColorStop(1, 'rgba(218,200,168,0)');
+    x.fillStyle = g;
+    x.fillRect(0, j, W, 2);
+  }
+  // fingers blown out across the lane and loose grains
+  for (let i = 0; i < 26; i++) {
+    const j = rng.next() * H, len = W * (0.2 + Math.pow(rng.next(), 1.5) * 0.65), th = 3 + rng.next() * 14;
+    const g = x.createLinearGradient(W, 0, W - len, 0);
+    g.addColorStop(0, `rgba(224,207,174,${0.15 + rng.next() * 0.3})`);
+    g.addColorStop(1, 'rgba(224,207,174,0)');
+    x.fillStyle = g;
+    x.beginPath();
+    x.ellipse(W - len / 2, j, len / 2, th, (rng.next() - 0.5) * 0.7, 0, Math.PI * 2);
+    x.fill();
+  }
+  for (let i = 0; i < 2600; i++) {
+    const u = 1 - Math.pow(rng.next(), 2.2);
+    x.fillStyle = `rgba(214,198,166,${0.25 + rng.next() * 0.4})`;
+    x.fillRect(u * W, rng.next() * H, 1, 1);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 4;
+  return t;
 }
