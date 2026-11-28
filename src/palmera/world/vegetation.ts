@@ -517,3 +517,60 @@ export function trunkGeometry(h: number, r0: number, branches: number, seed: num
   g.setAttribute('color', new THREE.BufferAttribute(c, 3));
   return g;
 }
+
+/**
+ * A bald cypress's foot: the trunk flaring into a fluted buttress (up to ~3x its radius at the ground,
+ * eight ribs fading out by 2.2 m), darker where it stands in the wet, and a ring of knobbly knees
+ * poking up from the roots around it. Local frame, trunk at the origin; merge with the trunk.
+ */
+export function cypressBase(r0: number, seed: number, color = 0x6a5c4b): THREE.BufferGeometry {
+  let s = seed;
+  const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const parts: THREE.BufferGeometry[] = [];
+  const H = 2.2, NY = 7, NA = 20;
+  const pos: number[] = [], idx: number[] = [];
+  const ph = r() * 6.28;
+  for (let j = 0; j <= NY; j++) {
+    const t = j / NY, y = -0.25 + t * (H + 0.25);
+    const yy = Math.max(0, y);
+    // finishing just inside the trunk (0.86 r0: its 7-sided faces sit at 0.9 r0) so the joint doesn't show
+    const flare = 0.86 + 2.1 * (Math.exp(-yy / 0.5) - Math.exp(-H / 0.5));
+    for (let i = 0; i < NA; i++) {
+      const a = (i / NA) * Math.PI * 2;
+      const rib = 1 + 0.22 * Math.max(0, Math.cos(8 * a + ph)) ** 2 * (Math.exp(-yy / 0.9) - Math.exp(-H / 0.9));
+      const rr = r0 * flare * rib * (1 + 0.04 * Math.sin(a * 3 + ph * 2) * (1 - yy / H));
+      pos.push(Math.cos(a) * rr, y, Math.sin(a) * rr);
+    }
+  }
+  for (let j = 0; j < NY; j++)
+    for (let i = 0; i < NA; i++) {
+      const a = j * NA + i, b = j * NA + ((i + 1) % NA), c2 = a + NA, d = b + NA;
+      idx.push(a, c2, b, b, c2, d);
+    }
+  const base = new THREE.BufferGeometry();
+  base.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  base.setIndex(idx);
+  base.computeVertexNormals();
+  parts.push(base.toNonIndexed());
+  // knees: blunt cones round the trunk, leaning a little
+  const n = 5 + Math.floor(r() * 4);
+  for (let k = 0; k < n; k++) {
+    const a = r() * Math.PI * 2, d = 0.9 + r() * 1.5, hh = 0.25 + r() * 0.4, rb = 0.08 + r() * 0.07;
+    const g = new THREE.CylinderGeometry(rb * 0.45, rb, hh, 7, 1);
+    g.rotateZ((r() - 0.5) * 0.4);
+    g.translate(Math.cos(a) * d, hh / 2 - 0.08, Math.sin(a) * d);
+    g.deleteAttribute('uv');
+    parts.push(ni(g));
+  }
+  for (const g of parts) if (g.getAttribute('uv')) g.deleteAttribute('uv');
+  const g = mergeGeometries(parts)!;
+  const p = g.getAttribute('position') as THREE.BufferAttribute;
+  const c = new Float32Array(p.count * 3), bc = new THREE.Color(color);
+  for (let i = 0; i < p.count; i++) {
+    const y = p.getY(i);
+    const v = (0.8 + 0.25 * Math.sin(y * 9 + p.getX(i) * 13)) * (y < 0.45 ? 0.55 + y : 1);
+    c.set([bc.r * v, bc.g * v, bc.b * v], i * 3);
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  return g;
+}
