@@ -21,6 +21,8 @@ interface Photo {
   refl: THREE.Texture;
   /** the photo's own sun azimuth (rad, in the equirect's frame) */
   sunAz: number;
+  /** the photo's own sun's height above the horizon (radians) */
+  sunEl: number;
   /** mean luminance of the upper hemisphere (sun clamped) — photos are levelled by it */
   lum: number;
   horizon: THREE.Color;
@@ -40,6 +42,8 @@ uniform sampler2D tA;
 uniform sampler2D tB;
 uniform float uRotA;
 uniform float uRotB;
+uniform vec3 uPSunA;
+uniform vec3 uPSunB;
 uniform float uMix;
 uniform float uLevel;
 uniform float uHasPhoto;
@@ -60,12 +64,24 @@ vec3 photo(sampler2D t, vec3 d, float rot) {
   vec2 uv = vec2(fract(az / 6.2831853 + 0.5), 0.5 + el / 3.14159265);
   return min(texture2D(t, uv).rgb, vec3(8.0));
 }
+// the photo with its own sun taken out: round the photographed sun, the sky beside it at the same height
+// (the game draws its sun where the shadows come from; the photo's sat above or below it as a second one)
+vec3 photoS(sampler2D t, vec3 d, float rot, vec3 ps) {
+  vec3 c = photo(t, d, rot);
+  float k = dot(d, ps);
+  if (k > 0.94) {
+    vec3 side = normalize(cross(ps, vec3(0.0, 1.0, 0.0)));
+    vec3 ref = 0.5 * (photo(t, normalize(ps + side * 0.45), rot) + photo(t, normalize(ps - side * 0.45), rot));
+    c = mix(c, min(c, ref * 1.15), smoothstep(0.94, 0.985, k));
+  }
+  return c;
+}
 void main() {
   vec3 d = normalize(vDir);
   vec3 dd = vec3(d.x, max(d.y, 0.004), d.z);
   vec3 col;
   if (uHasPhoto > 0.5) {
-    col = mix(photo(tA, dd, uRotA), photo(tB, dd, uRotB), uMix) * uLevel;
+    col = mix(photoS(tA, dd, uRotA, uPSunA), photoS(tB, dd, uRotB, uPSunB), uMix) * uLevel;
   } else {
     col = mix(uHorizon, uZenith, pow(clamp(d.y, 0.0, 1.0), 0.42));
   }
@@ -113,15 +129,16 @@ async function loadPhoto(renderer: THREE.WebGLRenderer, name: string): Promise<P
   const { data, width: w, height: h } = img;
   const half = THREE.DataUtils.fromHalfFloat;
   // the photo's sun: the brightest pixel of the upper half
-  let best = -1, bx = 0;
+  let best = -1, bx = 0, by = 0;
   for (let y = 0; y < h / 2; y += 2)
     for (let x = 0; x < w; x += 2) {
       const o = (y * w + x) * 4;
       const v = half(data[o + 1]);
-      if (v > best) { best = v; bx = x; }
+      if (v > best) { best = v; bx = x; by = y; }
     }
   // texture u = az/2π + 0.5 (see photo() in the shader), so the sun sits at az = (u - 0.5)·2π
   const sunAz = ((bx + 0.5) / w - 0.5) * Math.PI * 2;
+  const sunEl = (0.5 - (by + 0.5) / h) * Math.PI;
   // levels and colours (sun clamped)
   const hor = new THREE.Color(0, 0, 0), zen = new THREE.Color(0, 0, 0), all = new THREE.Color(0, 0, 0);
   let nh = 0, nz = 0, na = 0;
@@ -231,7 +248,7 @@ async function loadPhoto(renderer: THREE.WebGLRenderer, name: string): Promise<P
   pm.dispose();
   ibl.dispose();
   rt.dispose();
-  return { tex, env, refl, sunAz, lum: lum(all), horizon: hor, zenith: zen };
+  return { tex, env, refl, sunAz, sunEl, lum: lum(all), horizon: hor, zenith: zen };
 }
 
 function frac(v: number) {
@@ -284,6 +301,8 @@ export class SkySystem {
       tB: { value: null },
       uRotA: { value: 0 },
       uRotB: { value: 0 },
+      uPSunA: { value: new THREE.Vector3(0, 1, 0) },
+      uPSunB: { value: new THREE.Vector3(0, 1, 0) },
       uMix: { value: 0 },
       uLevel: { value: 1 },
       uHasPhoto: { value: 0 },
@@ -375,6 +394,9 @@ export class SkySystem {
       const az = this.sunAz();
       u.uRotA.value = pa.sunAz - az;
       u.uRotB.value = pb.sunAz - az;
+      // where each photo's own sun lands in the game's sky: the game sun's bearing, the photo's height
+      (u.uPSunA.value as THREE.Vector3).set(Math.cos(pa.sunEl) * Math.cos(az), Math.sin(pa.sunEl), Math.cos(pa.sunEl) * Math.sin(az));
+      (u.uPSunB.value as THREE.Vector3).set(Math.cos(pb.sunEl) * Math.cos(az), Math.sin(pb.sunEl), Math.cos(pb.sunEl) * Math.sin(az));
       u.uMix.value = m;
       u.uLevel.value = target / Math.max(1e-4, pl);
       const k = u.uLevel.value as number;
