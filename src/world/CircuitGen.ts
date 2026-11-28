@@ -124,6 +124,9 @@ export interface TracksideDef {
   art?: WallArt;
   runoffPaint?: RunoffPaint;
   kerb?: [string, string];
+  /** 'flag' run-off: band colours (1–3 sRGB hex, cycled; default the kerb's two) and band width in m (default 1.4) */
+  runoffColors?: string[];
+  runoffBand?: number;
   armcoBoards?: boolean;
   runs?: BarrierRun[];
   lights?: LightRun[];

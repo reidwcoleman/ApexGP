@@ -52,6 +52,11 @@ export const MONZA: CircuitDef = {
   trackside: {
     barrier: 'armco',
     armcoBoards: true,
+    // the tarmac run-off painted in the tricolore, green, white and red bands two metres wide (the
+    // 2024 resurfacing: Rettifilo, Roggia, Lesmo and Parabolica in every onboard since)
+    runoffPaint: 'flag',
+    runoffColors: ['#1f8a3f', '#ecece8', '#c8261e'],
+    runoffBand: 1.9,
     runs: [
       // the main straight, grandstand side: concrete wall with a tall fence (the Tribuna Centrale is behind it)
       { from: 5670, to: 1150, side: -1, kind: 'concrete', fence: 2 },

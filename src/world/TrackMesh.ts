@@ -216,7 +216,7 @@ export function* tracksideBuilder(track: Track, gfx: Renderer): Generator<void, 
 
   const defs: Record<string, MatDef> = {
     // the road draws after the other opaques so its wet reflections can see them (ssr.ts)
-    asphalt: { material: asphaltMaterial(tex, { kerb: track.def.trackside?.kerb, runoffPaint: track.def.trackside?.runoffPaint }), spec: { uv: true, a0: true, a1: true, a2: true }, cast: false, receive: true, renderOrder: 1 },
+    asphalt: { material: asphaltMaterial(tex, { kerb: track.def.trackside?.kerb, runoffPaint: track.def.trackside?.runoffPaint, runoffColors: track.def.trackside?.runoffColors, runoffBand: track.def.trackside?.runoffBand }), spec: { uv: true, a0: true, a1: true, a2: true }, cast: false, receive: true, renderOrder: 1 },
     gravel: { material: gravelMaterial(tex), spec: { uv: true, a0: true, a1: true }, cast: false, receive: true },
     grass: { material: grassMaterial(tex, { desert: track.def.trackside?.ground === 'desert', dry: VERGE_DRY[track.def.id] }), spec: { uv: true, a0: true, a1: true }, cast: false, receive: true },
     decal: { material: decalMaterial(decals.texture), spec: { uv: true, color: true, pbr: true }, cast: false, receive: true, renderOrder: 2 },

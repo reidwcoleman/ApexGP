@@ -844,14 +844,16 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
         tsDetail = mix(tsDetail, 0.3, amt);
         porous = mix(porous, 0.25, amt);
       } else if (uRunoffStyle > 3.5) {
-        // wide bands along the track in the kerb's two colours (Spa's yellow and red, 1.4 m each, four of
-        // them): a white edge line, then the flag colours out to 5.7 m — as wide as a car is long, the
-        // stripes every onboard there shows sweeping past the sidepods
-        float band = tsBand(d, 0.12, 5.72);
-        float k4 = floor((d - 0.12) / 1.4);
-        vec3 paint = mod(k4, 2.0) < 0.5 ? uKerbB : uKerbA * 1.05;
+        // wide bands along the track in the circuit's colours (Spa's yellow and red, 1.4 m each, four of
+        // them; Monza's green, white and red): a white edge line, then the flag colours out to ~5.7 m — as
+        // wide as a car is long, the stripes every onboard there shows sweeping past the sidepods
+        // (the colours and the band width are the circuit's: uFlagA/B/C cycled over uFlag.y bands of uFlag.x m)
+        float bw = uFlag.x;
+        float band = tsBand(d, 0.12, 0.12 + bw * uFlag.z);
+        float k4 = mod(floor((d - 0.12) / bw), uFlag.y);
+        vec3 paint = k4 < 0.5 ? uFlagA : k4 < 1.5 ? uFlagB : uFlagC;
         // (a seam of bare tarmac between bands where the masking tape was)
-        float seamD = abs(fract((d - 0.12) / 1.4 + 0.5) - 0.5) * 1.4;
+        float seamD = abs(fract((d - 0.12) / bw + 0.5) - 0.5) * bw;
         paint = mix(paint * 0.9, paint, smoothstep(0.02, 0.04 + px, seamD));
         paint = mix(paint, paint * vec3(0.8, 0.8, 0.76), smoothstep(0.45, 0.85, m24.b * 0.7 + m3.r * 0.4) * 0.5);
         paint *= 0.88 + 0.3 * albDev + 0.08 * (m3.b - 0.5);
@@ -1076,6 +1078,9 @@ export interface AsphaltOptions {
   /** kerb block colours (sRGB hex), e.g. ['#c8261e', '#ecece8'] */
   kerb?: [string, string];
   runoffPaint?: RunoffPaint;
+  /** 'flag' run-off: its band colours (1–3, cycled; default the kerb's two) and band width (m) */
+  runoffColors?: string[];
+  runoffBand?: number;
 }
 
 /** the dry road's share of the sun's specular (see the lights_fragment_end patch) */
@@ -1092,7 +1097,7 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     roughness: 1,
     metalness: 0,
   });
-  patchGround(m, 'apex-ts-asphalt-19', t, ASPHALT_FRAG, (sh) => {
+  patchGround(m, 'apex-ts-asphalt-20', t, ASPHALT_FRAG, (sh) => {
     sh.uniforms.uAsph = { value: t.asphalt };
     // the aggregate's anisotropic filtering ratio (what the driver grants: 16 on desktop GPUs)
     sh.uniforms.uAniso = { value: Math.max(1, t.asphalt.anisotropy) };
@@ -1100,6 +1105,15 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
     sh.uniforms.uKerbA = { value: kerbA };
     sh.uniforms.uKerbB = { value: kerbB };
     sh.uniforms.uRunoffStyle = { value: RUNOFF_STYLE[opts.runoffPaint ?? 'bands'] };
+    {
+      const fc = opts.runoffColors?.length ? opts.runoffColors.map((h) => kerbColor(h, kerbA)) : [kerbB, kerbA.clone().multiplyScalar(1.05)];
+      const bw = opts.runoffBand ?? 1.4;
+      sh.uniforms.uFlagA = { value: fc[0] };
+      sh.uniforms.uFlagB = { value: fc[1] ?? fc[0] };
+      sh.uniforms.uFlagC = { value: fc[2] ?? fc[0] };
+      // (band width, colours in the cycle, bands painted: as many as fit in ~5.7 m)
+      sh.uniforms.uFlag = { value: new THREE.Vector3(bw, fc.length, Math.max(1, Math.round(5.6 / bw))) };
+    }
     sh.uniforms.uRaceRubber = roadUniforms.uRaceRubber;
     sh.uniforms.uCanopy = roadUniforms.uCanopy;
     sh.uniforms.uCanopyB = roadUniforms.uCanopyB;
@@ -1111,7 +1125,7 @@ export function asphaltMaterial(t: GroundTextures, opts: AsphaltOptions = {}): T
       .replace('vA1 = aA1;', 'vA1 = aA1;\nvA2 = aA2;');
     sh.fragmentShader = sh.fragmentShader
       .replace('varying vec4 vA1;', 'varying vec4 vA1;\nvarying vec4 vA2;\nuniform sampler2D uCanopy;\nuniform vec4 uCanopyB;')
-      .replace('uniform sampler2D uMacro;', 'uniform sampler2D uMacro;\nuniform sampler2D uAsph;\nuniform float uAniso;\nuniform vec2 uAsphMean;\nuniform vec3 uKerbA;\nuniform vec3 uKerbB;\nuniform float uRunoffStyle;\nuniform float uRaceRubber;')
+      .replace('uniform sampler2D uMacro;', 'uniform sampler2D uMacro;\nuniform sampler2D uAsph;\nuniform float uAniso;\nuniform vec2 uAsphMean;\nuniform vec3 uKerbA;\nuniform vec3 uKerbB;\nuniform vec3 uFlagA;\nuniform vec3 uFlagB;\nuniform vec3 uFlagC;\nuniform vec3 uFlag;\nuniform float uRunoffStyle;\nuniform float uRaceRubber;')
       .replace('void main() {', SSR + '\nvoid main() {')
       .replace('#include <normal_fragment_maps>', ASPHALT_NORMAL)
       // dry asphalt's chips shadow and mask each other at grazing angles, which the smooth GGX lobe doesn't
