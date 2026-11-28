@@ -161,6 +161,11 @@ export function glowTexture(): THREE.CanvasTexture {
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 64, 64);
   const t = tex(c, false);
+  // no mipmaps: seen at a glancing angle (a lamp's pool along the street) the small mips average the
+  // round glow to a flat wash over the whole square, and the pool showed as a lit square with a hard
+  // straight edge. A smooth gradient doesn't alias without them.
+  t.generateMipmaps = false;
+  t.minFilter = THREE.LinearFilter;
   return t;
 }
 
@@ -183,4 +188,30 @@ export function decalTexture(): THREE.CanvasTexture {
     ctx.stroke();
   }
   return tex(c, false);
+}
+
+/**
+ * A street lamp's pool of light on the ground: bright under the head with a long soft tail that is
+ * fully gone well inside the square (at the high night exposure even a few percent of light left at
+ * the edge of the quad drew a hard straight line on the road, worst where pools meet a junction).
+ */
+export function lampPoolTexture(): THREE.CanvasTexture {
+  const N = 128;
+  const [c, ctx] = canvas(N, N);
+  const img = ctx.createImageData(N, N);
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      const dx = (x + 0.5) / N * 2 - 1, dy = (y + 0.5) / N * 2 - 1;
+      const r = Math.hypot(dx, dy);
+      const e = Math.min(1, Math.max(0, (r - 0.62) / 0.3));
+      const a = Math.exp(-r * r * 3.2) * (1 - e * e * (3 - 2 * e));
+      const o = (y * N + x) * 4;
+      img.data[o] = img.data[o + 1] = img.data[o + 2] = 255;
+      img.data[o + 3] = Math.round(a * 255);
+    }
+  ctx.putImageData(img, 0, 0);
+  const t = tex(c, false);
+  t.generateMipmaps = false;
+  t.minFilter = THREE.LinearFilter;
+  return t;
 }
