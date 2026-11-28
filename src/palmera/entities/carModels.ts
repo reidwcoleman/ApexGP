@@ -499,9 +499,29 @@ float grime = 0.0;`)
     }
   }`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(mix(roughnessFactor, 0.75, grime * 0.7), 0.62, trim);')
-      .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n  material.clearcoat *= (1.0 - grime * 0.75) * (1.0 - trim);');
+      .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n  material.clearcoat *= (1.0 - grime * 0.75) * (1.0 - trim);')
+      .replace(
+        '#include <lights_fragment_maps>',
+        `#include <lights_fragment_maps>
+#if defined( USE_CLEARCOAT ) && defined( USE_ENVMAP ) && defined( RE_IndirectSpecular )
+  {
+    // the clear coat mirrors the world, not just the sky dome: below the horizon the dark street,
+    // just above it a darker band of distant buildings and trees, then the sky. The IBL's lower half is
+    // a flat warm bounce, so the sides of every car showed one even colour - no horizon line along
+    // the flanks, which is most of what makes paint read as glossy
+    vec3 ccR = inverseTransformDirection(reflect(-geometryViewDir, geometryClearcoatNormal), viewMatrix);
+    vec3 hz = normalize(vec3(ccR.x, 0.05, ccR.z) + 1e-5);
+    vec3 hzCol = textureCubeUV(envMap, envMapRotation * hz, 0.2).rgb * envMapIntensity;
+    float below = 1.0 - smoothstep(-0.06, 0.0, ccR.y);
+    float band = smoothstep(-0.01, 0.015, ccR.y) * (1.0 - smoothstep(0.04, 0.2, ccR.y));
+    clearcoatRadiance = mix(clearcoatRadiance, hzCol * 0.32, band * 0.75);
+    clearcoatRadiance = mix(clearcoatRadiance, hzCol * 0.05, below);
+    radiance = mix(radiance, radiance * 0.45, below * 0.8);
+  }
+#endif`,
+      );
   };
-  m.customProgramCacheKey = () => 'palmera-paint-grime-v3';
+  m.customProgramCacheKey = () => 'palmera-paint-grime-v4';
 }
 
 // shared materials
