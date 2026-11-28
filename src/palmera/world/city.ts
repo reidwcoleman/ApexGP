@@ -700,6 +700,10 @@ if (bn.y > 0.5) {
     float storey = floor(v / 4.0), fv = fract(v / 4.0);
     float nb = floor(2.0 * halfW / 4.0);
     float door = (storey < 0.5 && halfW > 4.0 && bay > 0.5 && bay < nb - 0.5 && fract(sin(bay * 12.9898 + vStyle.y * 78.233) * 43758.5453) < 0.55) ? 1.0 : 0.0;
+    // a small shed (a swamp shack, a plant room on a roof) gets a door in its first bay on about half
+    // its walls - they had none at all, a closed box of siding
+    float sFace = sideX ? sign(bn.x) : 2.0 * sign(bn.z);
+    if (storey < 0.5 && halfW <= 4.0 && bay < 0.5 && fract(sin(sFace * 41.7 + vStyle.y * 91.3) * 43758.5453) < 0.55) door = 1.0;
     vec3 t = texture2D(uShed, vec2((clamp(fu, 0.004, 0.996) + door) * 0.5, clamp(fv, 0.004, 0.996))).rgb;
     // the ribs catch the light a little
     float rib = 0.94 + 0.06 * cos(u / 0.15 * 6.2832);
@@ -788,7 +792,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v22';
+  mat.customProgramCacheKey = () => 'palmera-building-v23';
   return mat;
 }
 
