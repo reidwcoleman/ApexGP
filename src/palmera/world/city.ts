@@ -6,7 +6,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { box, cyl, merge, prep } from '../core/geo';
 import { Rng, clamp } from '../core/math';
 import {
-  BEACH, BRIDGE, CityMap, ISLAND, MAIN, ROAD_HALF, SIDEWALK, WATER_Y, bridgeDeckY, groundAt, groundBase, pondShape,
+  BEACH, BRIDGE, CityMap, ISLAND, MAIN, ROAD_HALF, SIDEWALK, WATER_Y, bridgeDeckY, groundAt, groundBase, pondShape, regionAt,
   type BuildingSpec, type PropSpec,
 } from './map';
 import * as T from './textures';
@@ -1105,7 +1105,7 @@ export class City {
       sw.push(box(0.12, 0.08, b - a, MAIN.x1 - 0.3, 1.0, (a + b) / 2, 0xffffff));
       this.map.colliders.add(MAIN.x1 - 0.5, a, MAIN.x1 - 0.1, b, -0.5, 1.1);
     }
-    this.add(merge(sw), D(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }), 'coral_stone_wall', { scale: 2.5, albedo: 0.8, normal: 1 }));
+    this.add(merge(sw), D(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }), 'coral_stone_wall', { aligned: true, scale: 2.5, albedo: 0.8, normal: 1 }));
   }
 
   private buildRoads() {
@@ -1191,7 +1191,7 @@ export class City {
       pond: { mb: new MB(), mat: pondMaterial(), y: 0.04, rep: 8 },
       court: { mb: new MB(), mat: new THREE.MeshStandardMaterial({ map: T.courtTexture(), roughness: 0.9 }), y: 0.04, rep: 1 },
       lot: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.lotTexture(), roughness: 0.92  }), 'asphalt_02', { scale: 6, albedo: 0.7, normal: 0.9, rough: [0.55, 0.95] }), y: 0.03, rep: 10 },
-      plaza: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.concreteTexture(), color: 0xf7e2c8, roughness: 0.85 }), 'terrazzo_tiles', { scale: 3, albedo: 0.8, normal: 0.6, rough: [0.3, 0.7] }), y: 0.04, rep: 3 },
+      plaza: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.concreteTexture(), color: 0xf7e2c8, roughness: 0.85 }), 'terrazzo_tiles', { aligned: true, scale: 3, albedo: 0.8, normal: 0.6, rough: [0.3, 0.7] }), y: 0.04, rep: 3 },
       grass: { mb: new MB(), mat: D(new THREE.MeshStandardMaterial({ map: T.grassTexture(), roughness: 0.95 }), 'leafy_grass', { scale: 2.5, albedo: 0.9, normal: 0.9, rough: [0.75, 1] }), y: 0.035, rep: 20 },
     };
     for (const f of this.map.flats) {
@@ -1580,6 +1580,47 @@ export class City {
     const palms = groups.get('palm') ?? [];
     // near and far LOD share instance buffers
     const pk = palmKit();
+    // what a palm stands in: on a plaza a low round stone planter with mulch in it, on a downtown
+    // sidewalk a square cast-iron tree grate (they rose straight out of the paving)
+    {
+      const rings: Inst[] = [], grates: Inst[] = [];
+      for (const p of this.map.props) {
+        if (p.kind !== 'palm') continue;
+        const y = groundAt(p.x, p.z);
+        const onPlaza = this.map.flats.some((f) => f.kind === 'plaza' && Math.abs(p.x - f.x) < f.w / 2 && Math.abs(p.z - f.z) < f.d / 2);
+        const m = new THREE.Matrix4().compose(new THREE.Vector3(p.x, y, p.z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.r), new THREE.Vector3(1, 1, 1));
+        if (onPlaza) { rings.push({ m }); continue; }
+        // a sidewalk palm: within the sidewalk of some road (the sidewalk's 0.12 m isn't in groundAt)
+        let best = 1e9;
+        for (const e of this.map.edges) {
+          const A = this.map.nodes[e.a], B = this.map.nodes[e.b];
+          const dx = B.x - A.x, dz = B.z - A.z, l2 = dx * dx + dz * dz || 1;
+          const t = Math.max(0, Math.min(1, ((p.x - A.x) * dx + (p.z - A.z) * dz) / l2));
+          best = Math.min(best, Math.hypot(p.x - A.x - dx * t, p.z - A.z - dz * t));
+        }
+        const reg = regionAt(p.x, p.z);
+        if (best > ROAD_HALF && best < ROAD_HALF + SIDEWALK + 0.3 && (reg === 'downtown' || reg === 'harbor' || reg === 'marina')) {
+          m.elements[13] = y + 0.12;
+          grates.push({ m });
+        }
+      }
+      const paint = (g: THREE.BufferGeometry, c: number) => {
+        const col = new THREE.Color(c), n = g.getAttribute('position').count, a = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) a.set([col.r, col.g, col.b], i * 3);
+        g.setAttribute('color', new THREE.BufferAttribute(a, 3));
+        if (g.getAttribute('uv')) g.deleteAttribute('uv');
+        return g.index ? g.toNonIndexed() : g;
+      };
+      const lip = new THREE.LatheGeometry([new THREE.Vector2(0.8, 0), new THREE.Vector2(0.97, 0), new THREE.Vector2(0.97, 0.31), new THREE.Vector2(0.94, 0.36), new THREE.Vector2(0.83, 0.36), new THREE.Vector2(0.8, 0.31), new THREE.Vector2(0.8, 0)], 22);
+      const soil = new THREE.CircleGeometry(0.81, 22).rotateX(-Math.PI / 2).translate(0, 0.27, 0);
+      const ring = mergeGeometries([paint(lip, 0xd9d1c2), paint(soil, 0x3b2b1d)])!;
+      ring.computeVertexNormals();
+      if (rings.length) chunked(this.scene, this.chunks, rings, ring, addLampLight(std({ roughness: 0.85 })), { far: 260, shadow: true });
+      if (grates.length) {
+        const gm = new THREE.MeshStandardMaterial({ map: T.treeGrateTexture(), roughness: 0.62, metalness: 0.3, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+        chunked(this.scene, this.chunks, grates, new THREE.PlaneGeometry(1.4, 1.4).rotateX(-Math.PI / 2).translate(0, 0.008, 0), addLampLight(gm), { far: 200, shadow: false });
+      }
+    }
     // a signalled junction is lit from its corners: a pool over the middle of the crossing too. Without it
     // the lamps' pools all ended at the junction's edge and the crossing sat in a dark square, its edge
     // reading as a hard line down the road at night

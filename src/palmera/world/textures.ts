@@ -218,3 +218,34 @@ export function lampPoolTexture(): THREE.CanvasTexture {
   t.minFilter = THREE.LinearFilter;
   return t;
 }
+
+/** a square cast-iron tree grate: radiating slots round a soil-filled ring where the trunk comes up */
+export function treeGrateTexture(): THREE.CanvasTexture {
+  const N = 256;
+  const [c, ctx] = canvas(N, N);
+  ctx.fillStyle = '#5a5550';
+  ctx.fillRect(0, 0, N, N);
+  // soil showing through the middle
+  ctx.fillStyle = '#3a2a1d';
+  ctx.beginPath(); ctx.arc(N / 2, N / 2, N * 0.17, 0, Math.PI * 2); ctx.fill();
+  // slots: concentric rings of short radial cuts, dark (the pit below)
+  ctx.strokeStyle = '#0d0c0b';
+  ctx.lineCap = 'round';
+  for (let ring = 0; ring < 4; ring++) {
+    const r0 = N * (0.22 + ring * 0.065), r1 = r0 + N * 0.04, k = 24 + ring * 8;
+    ctx.lineWidth = 4;
+    for (let i = 0; i < k; i++) {
+      const a = (i / k) * Math.PI * 2 + ring * 0.1;
+      ctx.beginPath();
+      ctx.moveTo(N / 2 + Math.cos(a) * r0, N / 2 + Math.sin(a) * r0);
+      ctx.lineTo(N / 2 + Math.cos(a) * r1, N / 2 + Math.sin(a) * r1);
+      ctx.stroke();
+    }
+  }
+  // the frame, a little rust bleeding into the edge
+  ctx.strokeStyle = '#6a5040';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(3, 3, N - 6, N - 6);
+  const t = tex(c, false);
+  return t;
+}
