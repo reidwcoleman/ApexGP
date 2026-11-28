@@ -7,12 +7,14 @@ import * as THREE from 'three';
 import { box, merge } from '../core/geo';
 import { groundBase, type CityMap } from './map';
 import { glowTexture } from './textures';
+import { propGeometry } from './furniture';
 
 const DOORS = [0x6b4a32, 0x2f4f6f, 0x8a2e2e, 0x2e5d4b, 0xf2efe6, 0x3a3a3a];
 
 const CELL = 120;
 
 export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
+  const mailboxGeo = propGeometry('mailbox');
   const cells = new Map<string, { x: number; z: number; list: THREE.BufferGeometry[]; pickets: number[]; slabs: number[]; lamps: THREE.BufferGeometry[]; pools: number[]; washes: number[] }>();
   // each house's wall height, from its building (the houses list only has the footprint)
   const wallH = new Map<string, number>();
@@ -93,8 +95,21 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
     }
     // mailbox at the curb, by the driveway (or the path)
     const mAl = h.drive ? dAl - 2.1 : doorAl + 1.0;
-    hb(mAl, 0.55, front + setback - 0.4, 0.08, 1.1, 0.08, 0x3a3a3a);
-    hb(mAl, 1.15, front + setback - 0.4, 0.22, 0.22, 0.42, rnd() < 0.5 ? 0x2a2a2a : 0xf2efe6);
+    const black = rnd() < 0.5;
+    if (mailboxGeo) {
+      // the modelled mailbox, door to the street, its white body painted black on half of them
+      const g = mailboxGeo.clone();
+      if (black) {
+        const c = g.getAttribute('color');
+        for (let i = 0; i < c.count; i++) if (c.getX(i) > 0.9 && c.getY(i) > 0.9 && c.getZ(i) > 0.9) c.setXYZ(i, 0.06, 0.06, 0.065);
+      }
+      const mo = front + setback - 0.4;
+      g.applyMatrix4(new THREE.Matrix4().makeRotationY(Math.atan2(h.nx, h.nz)).setPosition(h.x + h.ax * mAl + h.nx * mo, y0, h.z + h.az * mAl + h.nz * mo));
+      out.push(g);
+    } else {
+      hb(mAl, 0.55, front + setback - 0.4, 0.08, 1.1, 0.08, 0x3a3a3a);
+      hb(mAl, 1.15, front + setback - 0.4, 0.22, 0.22, 0.42, black ? 0x2a2a2a : 0xf2efe6);
+    }
     // a white picket fence along the front, with gaps for the path and the drive
     if (rnd() < 0.35) {
       const fo = front + setback - 1.0;

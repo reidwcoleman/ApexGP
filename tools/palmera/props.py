@@ -354,6 +354,27 @@ def lounger():
         box((0.58, 0.022, 0.065), (0, y + 0.02, zz), W, bevel=0.008, rot=(th, 0, 0))
 
 
+def mailbox():
+    """a kerbside mailbox, door toward +z (the street): a round-topped steel box on a mounting board on a
+    square wooden post, a door with a pull, and a red flag on the side. The body is pure white so the
+    game can paint some of them black."""
+    WOOD, BODY, DARK, RED = 0x7a6248, 0xffffff, 0x2a2a2a, 0xc0392b
+    box((0.09, 1.02, 0.09), (0, 0.51, -0.06), WOOD, bevel=0.008)
+    box((0.13, 0.03, 0.42), (0, 1.035, 0), WOOD, bevel=0.006)
+    box((0.04, 0.16, 0.04), (0, 0.95, 0.1), WOOD, bevel=0.004, rot=(0.7, 0, 0))
+    # the body: a box below, a half-round roof along its length
+    box((0.17, 0.1, 0.46), (0, 1.1, 0), BODY, bevel=0.01)
+    cyl(0.085, 0.085, 0.46, (0, 1.15, 0), BODY, seg=20, axis='z', bevel=0.004)
+    # the door: a slightly proud plate following the profile, a pull, hinge pins
+    box((0.18, 0.11, 0.014), (0, 1.1, 0.236), BODY, bevel=0.004)
+    cyl(0.09, 0.09, 0.014, (0, 1.15, 0.236), BODY, seg=20, axis='z', bevel=0.003)
+    box((0.03, 0.025, 0.03), (0, 1.2, 0.252), DARK, bevel=0.006)
+    # the flag on its pivot
+    cyl(0.012, 0.012, 0.02, (0.092, 1.12, -0.12), DARK, seg=8, axis='x', bevel=0)
+    box((0.01, 0.2, 0.025), (0.1, 1.2, -0.12), RED, bevel=0.003)
+    box((0.01, 0.07, 0.11), (0.1, 1.27, -0.07), RED, bevel=0.003)
+
+
 def lifeguard():
     """a beach lifeguard tower, ramp toward +z: square stilts with X bracing, a deck with a railed
     front porch, a hut with framed dark windows and a door, an overhanging hip roof with a fascia
@@ -447,7 +468,7 @@ sc.world.light_settings.distance = 0.5
 made = []
 for name, fn in (('bench', bench), ('bin', bin_), ('hydrant', hydrant), ('news', news), ('meter', meter), ('sign', sign),
                  ('shelter', shelter), ('lamp', lamp), ('signal', signal), ('planter', planter),
-                 ('umbrella', umbrella), ('lounger', lounger), ('lifeguard', lifeguard)):
+                 ('umbrella', umbrella), ('lounger', lounger), ('lifeguard', lifeguard), ('mailbox', mailbox)):
     fn()
     o = build(name)
     # AO over a ground plane into the colours (floor 0.45: soft contact shading, not soot)
@@ -474,7 +495,7 @@ for name, fn in (('bench', bench), ('bin', bin_), ('hydrant', hydrant), ('news',
     # triangles (the bevels and round sections are where the count went; the silhouettes stay)
     me.calc_loop_triangles()
     before = len(me.loop_triangles)
-    target = {'shelter': 420, 'signal': 380, 'lamp': 300, 'umbrella': 1500, 'lounger': 700, 'lifeguard': 2600}.get(name, 260)
+    target = {'shelter': 420, 'signal': 380, 'lamp': 300, 'umbrella': 1500, 'lounger': 700, 'lifeguard': 2600, 'mailbox': 420}.get(name, 260)
     if before > target:
         m = o.modifiers.new('d', 'DECIMATE')
         m.ratio = target / before
