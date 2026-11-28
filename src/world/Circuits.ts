@@ -167,6 +167,10 @@ export const SPA: CircuitDef = {
   trackside: {
     barrier: 'armco',
     armcoBoards: true,
+    // red and yellow kerbs, and the run-off beyond them painted in wide yellow and red bands (the 2022
+    // rebuild; every onboard from there shows them)
+    kerb: ['#c8261e', '#e8b20c'],
+    runoffPaint: 'flag',
     runs: [{ from: 330, to: 800, side: 1, kind: 'concrete', fence: 2 }],
   },
 };

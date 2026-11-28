@@ -78,7 +78,7 @@ export interface CornerDef {
  *     barrier: 'armco',            // default barrier: 'armco' (parkland) | 'concrete' (street / modern)
  *     fence: 1,                    // default debris fence: 0 none, 1 standard 4 m, 2 tall 6 m
  *     art: 'ads',                  // what concrete walls wear: 'ads' | 'plain' | 'stripes' | 'champions'
- *     runoffPaint: 'bands',        // painted tarmac run-off: 'bands' (white+blue) | 'astroturf' | 'stripes' | 'plain'
+ *     runoffPaint: 'bands',        // painted tarmac run-off: 'bands' (white+blue) | 'astroturf' | 'stripes' | 'plain' | 'flag' (wide bands in the kerb colours)
  *     kerb: ['#c8261e', '#ecece8'],// kerb block colours
  *     armcoBoards: true,           // sponsor boards bolted to the armco along the straights
  *     runs: [                      // per-segment overrides, applied in order (later wins)
@@ -96,7 +96,7 @@ export interface CornerDef {
 export type BarrierKind = 'armco' | 'concrete' | 'none';
 export type ImpactLayer = 'none' | 'tyres' | 'tecpro';
 export type WallArt = 'ads' | 'plain' | 'stripes' | 'champions';
-export type RunoffPaint = 'bands' | 'astroturf' | 'stripes' | 'plain';
+export type RunoffPaint = 'bands' | 'astroturf' | 'stripes' | 'plain' | 'flag';
 
 export interface BarrierRun {
   from: number;

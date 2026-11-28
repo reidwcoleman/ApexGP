@@ -798,7 +798,7 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
     }
     if (vA1.z > 0.5) {
       // painted run-off next to the verge (per circuit, uRunoffStyle):
-      //   0 white gap + blue band · 1 astroturf strip · 2 red/white diagonal stripes · 3 none
+      //   0 white gap + blue band · 1 astroturf strip · 2 red/white diagonal stripes · 3 none · 4 wide bands in the kerb colours
       float d = alat - vA1.y;
       float gap = tsBand(d, 0.0, 0.12);
       if (uRunoffStyle < 0.5) {
@@ -843,6 +843,25 @@ float tsRub = 0.0;       // rubber on the line (it sheds water: a smoother sheen
         rough = mix(rough, 0.42, amt);
         tsDetail = mix(tsDetail, 0.3, amt);
         porous = mix(porous, 0.25, amt);
+      } else if (uRunoffStyle > 3.5) {
+        // wide bands along the track in the kerb's two colours (Spa's yellow and red, 1.4 m each, four of
+        // them): a white edge line, then the flag colours out to 5.7 m — as wide as a car is long, the
+        // stripes every onboard there shows sweeping past the sidepods
+        float band = tsBand(d, 0.12, 5.72);
+        float k4 = floor((d - 0.12) / 1.4);
+        vec3 paint = mod(k4, 2.0) < 0.5 ? uKerbB : uKerbA * 1.05;
+        // (a seam of bare tarmac between bands where the masking tape was)
+        float seamD = abs(fract((d - 0.12) / 1.4 + 0.5) - 0.5) * 1.4;
+        paint = mix(paint * 0.9, paint, smoothstep(0.02, 0.04 + px, seamD));
+        paint = mix(paint, paint * vec3(0.8, 0.8, 0.76), smoothstep(0.45, 0.85, m24.b * 0.7 + m3.r * 0.4) * 0.5);
+        paint *= 0.88 + 0.3 * albDev + 0.08 * (m3.b - 0.5);
+        float specks = smoothstep(0.55, 0.95, stone) * (1.0 - farK) * 0.4;
+        col = mix(col, vec3(0.6, 0.595, 0.575), gap);
+        float amt = band * (0.97 + 0.03 * m24.b) * (1.0 - 0.3 * smoothstep(0.62, 0.8, texture2D(uMacro, vTrk * vec2(1.0 / 1.6, 1.0 / 4.3) + vec2(0.71, 0.27)).r)) * (1.0 - specks);
+        col = mix(col, paint, amt);
+        rough = mix(rough, 0.5, max(gap, amt));
+        tsDetail = mix(tsDetail, 0.45, amt);
+        porous = mix(porous, 0.28, amt);
       }
     }
     // (the tracks show on the paint as well: rubber and dirt from the tyres)
@@ -1040,7 +1059,7 @@ function patchGround(m: THREE.MeshStandardMaterial, key: string, t: GroundTextur
   m.customProgramCacheKey = () => key;
 }
 
-const RUNOFF_STYLE: Record<RunoffPaint, number> = { bands: 0, astroturf: 1, stripes: 2, plain: 3 };
+const RUNOFF_STYLE: Record<RunoffPaint, number> = { bands: 0, astroturf: 1, stripes: 2, plain: 3, flag: 4 };
 
 /** kerb paint (linear albedo) from sRGB hex; the defaults keep the classic red/white */
 function kerbColor(hex: string | undefined, fallback: THREE.Color): THREE.Color {
