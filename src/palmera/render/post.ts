@@ -67,12 +67,15 @@ class ShaftsEffect extends Effect {
       void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
         if (uStrength <= 0.001) { outputColor = inputColor; return; }
         vec2 d = uSun - uv;
-        // far from the sun the shafts fade to nothing: skip the 28-tap march there (most of the screen)
+        // far from the sun the shafts fade to nothing: skip the 36-tap march there (most of the screen)
         float fall = exp(-length(d * vec2(1.0, 0.6)) * 1.6);
         if (fall * uStrength < 0.012) { outputColor = inputColor; return; }
-        const int N = 28;
+        const int N = 36;
         vec2 st = d / float(N) * 0.9;
-        float j = fract(sin(dot(uv * 931.7, vec2(12.9898, 78.233))) * 43758.5453);
+        // interleaved gradient noise, not white noise: its error spreads into a fine even dither instead
+        // of the sparkling grain white noise left in the shafts (TAA runs before this pass, so nothing
+        // averages it away)
+        float j = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
         vec2 p = uv + st * j;
         vec3 acc = vec3(0.0);
         float w = 1.0, wsum = 0.0;
@@ -85,7 +88,7 @@ class ShaftsEffect extends Effect {
           float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
           acc += (c * smoothstep(0.0, 1.0, lum) + uSunCol * 1.6) * sky * w;
           wsum += w;
-          w *= 0.955;
+          w *= 0.965;
         }
         acc /= wsum;
         vec3 add = acc * mix(vec3(1.0), uSunCol, 0.6) * fall * uStrength;
