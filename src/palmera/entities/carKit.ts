@@ -91,7 +91,7 @@ export async function loadCarKit(): Promise<void> {
   kit.set('bike', bikeParts());
   // vehicles modelled whole in Blender (tools/palmera/bike.py, bus.py): bodywork, trim, lamps, glass
   // and a wheel of their own; the built versions above stay as the fallback
-  await Promise.all([...['bike', 'bus'].map((id) => loadOwnModel(id)), loadInterior()]);
+  await Promise.all([...['bike', 'bus'].map((id) => loadOwnModel(id)), loadInterior(), loadBoat()]);
 }
 
 /** the cabin kit from Blender (tools/palmera/interior.py): seats, bench, dash, wheel, console */
@@ -156,6 +156,56 @@ async function loadOwnModel(id: string) {
 }
 
 const ownWheel = new Map<string, THREE.BufferGeometry>();
+
+let boatGeo: THREE.BufferGeometry | null = null;
+/**
+ * The runabout modelled in Blender (tools/palmera/boat.py): one geometry in the vehicle's material
+ * groups - the topsides in group 0 (the paint), everything else in group 1 (the vertex-coloured detail)
+ */
+async function loadBoat() {
+  try {
+    const gl = await new GLTFLoader().loadAsync(BASE + 'boat.glb');
+    gl.scene.updateMatrixWorld(true);
+    const got: Record<string, THREE.BufferGeometry> = {};
+    gl.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      const r = /^boat_(paint|rest)$/.exec(o.name);
+      if (!m.isMesh || !r) return;
+      const g = m.geometry.clone();
+      g.applyMatrix4(m.matrixWorld);
+      got[r[1]] = withColor(g, null);
+    });
+    if (!got.paint || !got.rest) return;
+    const geo = new THREE.BufferGeometry();
+    // red and green running lights either side of the console (group 2, the lamp material: they glow at night)
+    const lamp = (x: number, rgb: [number, number, number]) => withColor(new THREE.BoxGeometry(0.1, 0.1, 0.16).translate(x, 1.0, 0.9), rgb);
+    const lamps = [lamp(1.0, [0.19, 1, 0.38]), lamp(-1.0, [1, 0.19, 0.19])];
+    const parts = [got.paint, got.rest, ...lamps];
+    for (const name of ['position', 'normal', 'color']) {
+      const arrs = parts.map((g) => g.getAttribute(name).array as Float32Array);
+      const out = new Float32Array(arrs.reduce((t, a) => t + a.length, 0));
+      let o = 0;
+      for (const a of arrs) {
+        out.set(a, o);
+        o += a.length;
+      }
+      geo.setAttribute(name, new THREE.BufferAttribute(out, 3));
+    }
+    const n0 = got.paint.getAttribute('position').count, n1 = got.rest.getAttribute('position').count;
+    geo.addGroup(0, n0, 0);
+    geo.addGroup(n0, n1, 1);
+    geo.addGroup(n0 + n1, lamps.reduce((t, g) => t + g.getAttribute('position').count, 0), 2);
+    geo.computeBoundingSphere();
+    boatGeo = geo;
+  } catch (e) {
+    console.warn('palmera: boat.glb failed, using the built boat', e);
+  }
+}
+
+/** the modelled runabout (groups 0 paint, 1 detail), once loaded */
+export function ownBoat(): THREE.BufferGeometry | null {
+  return boatGeo;
+}
 
 /** a sport bike, built here: tank, fairing and tail in paint; frame, forks, engine, seat in trim */
 function bikeParts(): Parts {

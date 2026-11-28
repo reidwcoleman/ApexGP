@@ -3,7 +3,7 @@ import { clamp, damp, pick } from '../core/math';
 import { WATER_Y, groundAt, groundBase, isWater, type Box, type ColliderGrid } from '../world/map';
 import { waveHeight } from '../world/water';
 import { SPECS, carMats, carModel, paintMat, type CarSpec, type CarType } from './carModels';
-import { alloyWheel, kitModel } from './carKit';
+import { alloyWheel, kitModel, ownBoat } from './carKit';
 
 const wheelCache = new Map<string, THREE.BufferGeometry>();
 const lowWheels = new Map<number, THREE.BufferGeometry>();
@@ -142,7 +142,8 @@ export class Vehicle {
     this.paint = paintMat(this.color);
     const kitM = kitModel(type, this.spec, Math.floor(Math.random() * 16));
     const model = carModel(type);
-    this.body = new THREE.Mesh(kitM ? kitM.geo : model.geo, [this.paint, carMats.detail, carMats.lamps, type === 'bus' ? carMats.busGlass : carMats.glass]);
+    const own = type === 'boat' ? ownBoat() : null;
+    this.body = new THREE.Mesh(own ?? (kitM ? kitM.geo : model.geo), [this.paint, carMats.detail, carMats.lamps, type === 'bus' ? carMats.busGlass : carMats.glass]);
     this.body.castShadow = true;
     this.body.receiveShadow = true;
     this.root.add(this.body);
