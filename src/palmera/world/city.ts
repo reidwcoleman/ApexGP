@@ -1562,6 +1562,10 @@ export class City {
       return mergeGeometries(parts)!;
     };
     chunked(this.scene, this.chunks, cyp, cypCrown(), cLeaf, { far: 420, shadow: true });
+    // Spanish moss hanging in grey-green curtains from under the cypress crowns
+    const mossMat = addLampLight(swayMaterial(std({ map: mossTexture(), alphaTest: 0.38, side: THREE.DoubleSide, roughness: 0.95, vertexColors: false }), 6));
+    this.palmMats.push(mossMat);
+    chunked(this.scene, this.chunks, cyp, mossGeometry(), mossMat, { far: 260, shadow: false });
     void treeGeometry;
     void cypressGeometry;
     const cardMat = foliageMaterial();
@@ -2077,4 +2081,72 @@ float pkN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f)
   };
   m.customProgramCacheKey = () => 'palmera-planks3-' + walk;
   return m;
+}
+
+/** Spanish moss: clumps of two crossed cards hanging from under a cypress crown (local, trunk at origin) */
+function mossGeometry(): THREE.BufferGeometry {
+  let r = 7;
+  const rnd = () => ((r = (r * 16807) % 2147483647) / 2147483647);
+  const pos: number[] = [], uv: number[] = [], nor: number[] = [];
+  const card = (x: number, z: number, top: number, len: number, w: number, a: number) => {
+    const dx = Math.cos(a) * w / 2, dz = Math.sin(a) * w / 2;
+    const P = [[x - dx, top, z - dz], [x + dx, top, z + dz], [x + dx, top - len, z + dz], [x - dx, top - len, z - dz]];
+    const U = [[0, 1], [1, 1], [1, 0], [0, 0]];
+    for (const i of [0, 1, 2, 0, 2, 3]) {
+      pos.push(...P[i]);
+      uv.push(...U[i]);
+      nor.push(-Math.sin(a), 0.3, Math.cos(a));
+    }
+  };
+  // under the lower and upper crown tiers and the side branch (see cypCrown)
+  const tiers: [number, number, number, number, number][] = [[0, 0, 5.4, 1.5, 9], [0, 0, 7.6, 1.1, 5], [1.3, 0.4, 5.3, 0.8, 3]];
+  for (const [cx, cz, y, rad, n] of tiers) {
+    for (let i = 0; i < n; i++) {
+      const ang = rnd() * Math.PI * 2, rr = rad * (0.45 + 0.55 * rnd());
+      const x = cx + Math.cos(ang) * rr, z = cz + Math.sin(ang) * rr;
+      const len = 1.1 + rnd() * 1.6, w = 0.55 + rnd() * 0.4, top = y + rnd() * 0.5;
+      const a = rnd() * Math.PI;
+      card(x, z, top, len, w, a);
+      card(x, z, top, len * 0.9, w * 0.9, a + Math.PI / 2);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.normalizeNormals();
+  // vertex colour for chunked's instance tint path: plain white
+  g.setAttribute('color', new THREE.Float32BufferAttribute(new Array(pos.length).fill(1), 3));
+  return g;
+}
+
+/** drooping strands, denser and shorter at the top where the clump hangs from the branch */
+function mossTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 256;
+  const x = c.getContext('2d')!;
+  x.clearRect(0, 0, 128, 256);
+  let r = 11;
+  const rnd = () => ((r = (r * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 70; i++) {
+    let px = 14 + rnd() * 100, py = rnd() * 18;
+    const len = 60 + rnd() * 190 * (1 - Math.abs(px - 64) / 90);
+    const shade = 150 + Math.floor(rnd() * 55);
+    x.strokeStyle = `rgba(${shade + 8},${shade + 18},${shade - 6},${0.75 + rnd() * 0.25})`;
+    x.lineWidth = 1 + rnd() * 1.8;
+    x.beginPath();
+    x.moveTo(px, py);
+    const steps = 14;
+    for (let k = 0; k < steps; k++) {
+      px += (rnd() - 0.5) * 5;
+      py += len / steps;
+      x.lineTo(px, Math.min(254, py));
+    }
+    x.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
 }
