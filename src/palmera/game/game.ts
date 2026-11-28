@@ -13,7 +13,6 @@ import { City } from '../world/city';
 import { BEACH, CityMap, WATER_Y, groundAt, groundBase, isWater, regionAt, type Box } from '../world/map';
 import { SkySystem } from '../world/sky';
 import { Water } from '../world/water';
-import { glowTexture } from '../world/textures';
 import { Effects } from './effects';
 import { Marker, Missions } from './missions';
 import { Peds } from './peds';
@@ -254,8 +253,10 @@ export class Game {
     this.headLight = new THREE.SpotLight(0xfff1d6, 0, 70, 0.55, 0.6, 1.2);
     this.headLight.castShadow = false;
     this.scene.add(this.headLight, this.headLight.target);
-    this.beamMat = new THREE.MeshBasicMaterial({ map: glowTexture(), color: 0xfff0c8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
-    this.beamGeo = new THREE.PlaneGeometry(5, 13);
+    // headlights on the road: a low-beam fan that lights what it falls on (dst x (1 + light)), so pale
+    // paint brightens more than dark asphalt; added light washed the road out in a flat white blob
+    this.beamMat = new THREE.MeshBasicMaterial({ map: beamTexture(), color: 0x000000, transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.DstColorFactor, blendDst: THREE.OneFactor, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    this.beamGeo = new THREE.PlaneGeometry(7, 22);
     this.beamGeo.rotateX(-Math.PI / 2);
 
     // the player's boat at Pelican Marina + moored boats
@@ -998,14 +999,17 @@ export class Game {
       const beamOn = night > 0.15 && !v.wrecked && v.driver !== null && d < 160 && !v.isBoat;
       if (beamOn && !v.beam) {
         v.beam = new THREE.Mesh(this.beamGeo, this.beamMat);
-        v.beam.position.set(0, 0.08, v.spec.len / 2 + 6.5);
+        v.beam.position.set(0, 0.08, v.spec.len / 2 + 10.6);
         v.beam.renderOrder = 3;
         v.root.add(v.beam);
       }
       if (v.beam) v.beam.visible = beamOn;
     }
     collideVehicles(this.vehicles, this.events);
-    this.beamMat.opacity = clamp(night * 0.5, 0, 0.5);
+    {
+      const k = clamp((night - 0.1) / 0.6, 0, 1) * 5.5;
+      this.beamMat.color.setRGB(k, k * 0.95, k * 0.82);
+    }
     setCarNight(night);
     setCarEnv(this.sky.refl, this.scene.environmentIntensity);
     // the player's headlights
@@ -1281,4 +1285,37 @@ export class Game {
     }
   }
 
+}
+
+/**
+ * A low-beam pattern on the road, seen from above: v = 1 at the bumper, 0 at 22 m. Two lamp lobes
+ * 1.5 m apart merge into a fan that widens to ~7 m, brightest 3-8 m out and falling away with distance,
+ * soft at the sides.
+ */
+function beamTexture(): THREE.Texture {
+  const W = 64, H = 192;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const x = c.getContext('2d')!;
+  const img = x.createImageData(W, H);
+  for (let j = 0; j < H; j++) {
+    const d = ((j + 0.5) / H) * 22; // metres ahead of the bumper (canvas top = v 1 = the car)
+    const along = Math.min(1, d / 2.2) ** 1.5 / (1 + (d / 9) ** 2);
+    const half = 0.9 + d * 0.28; // half-width of the fan
+    for (let i = 0; i < W; i++) {
+      const xm = ((i + 0.5) / W - 0.5) * 7;
+      const lobe = Math.max(Math.exp(-(((xm - 0.75) / (0.5 + d * 0.16)) ** 2)), Math.exp(-(((xm + 0.75) / (0.5 + d * 0.16)) ** 2)));
+      const fan = Math.max(0, 1 - Math.max(0, Math.abs(xm) - half * 0.55) / (half * 0.45));
+      const v = along * (0.55 * lobe + 0.45 * fan * fan) * (1 - Math.max(0, (d - 18) / 4));
+      const o = (j * W + i) * 4;
+      const b = Math.round(255 * Math.min(1, v));
+      img.data[o] = img.data[o + 1] = img.data[o + 2] = b;
+      img.data[o + 3] = 255;
+    }
+  }
+  x.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
