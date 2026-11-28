@@ -6,6 +6,7 @@ import type { CarType } from '../entities/carModels';
 import { Vehicle, type CarAI } from '../entities/vehicle';
 import { LANE_OFF, ROAD_HALF, type CityMap, type RNode } from '../world/map';
 import { propGeometry } from '../world/furniture';
+import { addLampLight } from '../world/lamplight';
 import type { Game } from './game';
 
 export const LIGHT_CYCLE = 22;
@@ -309,8 +310,9 @@ export class Traffic {
   private lampCols = { g: new THREE.Color(0.2, 3, 0.6), y: new THREE.Color(3, 2, 0.2), r: new THREE.Color(3, 0.2, 0.15) };
 
   constructor(private game: Game) {
-    const pole = propGeometry('signal') ?? merge([cyl(0.09, 0.11, 4.4, 6, 0, 2.2, 0, 0x3b4046), box(0.36, 1.05, 0.3, 0, 4.75, 0, 0x22262a), box(0.5, 1.2, 0.04, 0, 4.75, -0.17, 0x22262a)]);
-    this.poles = new THREE.InstancedMesh(pole, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 }), 120);
+    const pole = propGeometry('signal') ?? merge([cyl(0.09, 0.11, 4.4, 6, 0, 2.2, 0, 0x8e9599), box(0.36, 1.05, 0.3, 0, 4.75, 0, 0x22262a), box(0.5, 1.2, 0.04, 0, 4.75, -0.17, 0x22262a)]);
+    // lit by the street lamps after dark like everything else at street level (it stood out pure black)
+    this.poles = new THREE.InstancedMesh(pole, addLampLight(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 })), 120);
     this.poles.count = 0;
     this.poles.castShadow = true;
     this.poles.frustumCulled = false;

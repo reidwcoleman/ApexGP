@@ -1818,7 +1818,7 @@ float mhF(vec2 p) { return mhN(p) * 0.55 + mhN(p * 2.07 + 3.1) * 0.3 + mhN(p * 4
     chunked(this.scene, this.chunks, pl.mounds, moundGeometry(), cardMat ?? std({ roughness: 0.9 }), { far: 90, shadow: false, lodGeo: cardMat ? foliageGeometry('mound_lod')! : undefined, lodDist: 30 });
     chunked(this.scene, this.chunks, pl.blossoms, blossomGeometry(), new THREE.MeshStandardMaterial({ roughness: 0.7 }), { far: 90, shadow: false });
     this.grass = new Grass(this.scene, this.map);
-    chunked(this.scene, this.chunks, groups.get('lamp') ?? [], lampGeometry(), std({ roughness: 0.5, metalness: 0.5 }), { far: 380, shadow: true, shadowGeo: lampGeometry(false) });
+    chunked(this.scene, this.chunks, groups.get('lamp') ?? [], lampGeometry(), addLampLight(std({ roughness: 0.5, metalness: 0.5 })), { far: 380, shadow: true, shadowGeo: lampGeometry(false) });
     chunked(this.scene, this.chunks, lampHeads, new THREE.BoxGeometry(1, 1, 1), this.lampHeadMat, { far: 600, shadow: false, receive: false });
     const poolGeo = new THREE.PlaneGeometry(1, 1);
     const pm = chunked(this.scene, this.chunks, pools, poolGeo, this.poolMat, { far: 260, shadow: false, receive: false });

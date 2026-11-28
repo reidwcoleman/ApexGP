@@ -268,8 +268,10 @@ def lamp():
 
 def signal():
     D = 0x22262a
-    smooth_cyl(cyl(0.11, 0.085, 4.3, (0, 2.15, 0), 0x3b4046, seg=16))
-    box((0.3, 0.06, 0.3), (0, 0.03, 0), 0x3b4046, bevel=0.01)
+    # a galvanized steel pole (dull zinc grey) - it was dark slate, and read pure black after dark
+    GALV = 0x8e9599
+    smooth_cyl(cyl(0.11, 0.085, 4.3, (0, 2.15, 0), GALV, seg=16))
+    box((0.3, 0.06, 0.3), (0, 0.03, 0), GALV, bevel=0.01)
     box((0.36, 1.05, 0.28), (0, 4.75, 0), D, bevel=0.03)
     # backplate with a reflective yellow border
     box((0.56, 1.24, 0.03), (0, 4.75, -0.16), 0xe8c21c, bevel=0.01)
