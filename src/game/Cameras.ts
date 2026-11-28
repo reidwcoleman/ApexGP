@@ -908,10 +908,13 @@ export class Cameras {
       const blocked = !this.sight.clear(this.camPos, this.aim, 5, 0);
       this.heliLift = Math.max(0, Math.min(1, this.heliLift + (blocked ? dt * 1.5 : -dt * 0.25)));
     } else if (!this.initialized) this.heliLift = 0;
+    // (2026-11-27: was 30 m back, 9 m out, 46 m up, closing in to 12 m back at 86 m up when blocked — a
+    // look straight down on the car, a drone's shot. The broadcast's helicopter stands off ~100 m on a
+    // long lens, 30–40° down, and climbs rather than closes in: the car small in a wide sweep of land)
     const side = this.v3.set(fwdCar.z, 0, -fwdCar.x);
-    const back = 30 * (1 - this.heliLift * 0.6);
-    const want = this.v4.copy(carPos).addScaledVector(fwdCar, -back).addScaledVector(side, 9 * (1 - this.heliLift * 0.6));
-    want.y = carPos.y + 46 + this.heliLift * 40;
+    const back = 78 * (1 - this.heliLift * 0.25);
+    const want = this.v4.copy(carPos).addScaledVector(fwdCar, -back).addScaledVector(side, 46 * (1 - this.heliLift * 0.25));
+    want.y = carPos.y + 62 + this.heliLift * 70;
     if (car) this.feedForward(want, car, 0.6);
     if (!this.initialized) {
       this.camPos.copy(want);
