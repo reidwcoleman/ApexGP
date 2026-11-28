@@ -17,6 +17,8 @@ const PHOTOS = ['kloofendal_48d_partly_cloudy_puresky', 'qwantani_late_afternoon
 interface Photo {
   tex: THREE.DataTexture;
   env: THREE.Texture;
+  /** what shiny things (car paint, glass) see: the photo's sky, a skyline of buildings, a crisp horizon over dark ground */
+  refl: THREE.Texture;
   /** the photo's own sun azimuth (rad, in the equirect's frame) */
   sunAz: number;
   /** mean luminance of the upper hemisphere (sun clamped) — photos are levelled by it */
@@ -169,14 +171,76 @@ async function loadPhoto(renderer: THREE.WebGLRenderer, name: string): Promise<P
   ibl.colorSpace = tex.colorSpace;
   ibl.flipY = tex.flipY;
   ibl.needsUpdate = true;
+  // the reflection map: the sky as photographed (more of its colour), over a skyline of building
+  // blocks up to ~20 degrees - lighter or darker faces, rows of windows (lit after dark) - and below the
+  // horizon dark ground, a little lighter toward it. Without these a car's flank mirrored one even
+  // haze and read as matte plastic
+  const night = /dusk/.test(name);
+  const rout = new Uint16Array(data.length);
+  const skyline = new Float32Array(w), shade = new Float32Array(w), seedA = new Float32Array(w);
+  {
+    let x = 0, k = 0;
+    while (x < w) {
+      const bw = Math.max(3, Math.floor(w * (0.006 + 0.028 * frac(k * 0.618 + 0.13))));
+      const top = (2 + 18 * frac(k * 0.4142 + 0.7) ** 1.6) * (Math.PI / 180) * (frac(k * 0.271) < 0.12 ? 0.25 : 1);
+      const sh = 0.5 + 0.35 * frac(k * 0.7321 + 0.29);
+      for (let i = x; i < Math.min(w, x + bw); i++) {
+        skyline[i] = top;
+        shade[i] = sh;
+        seedA[i] = k;
+      }
+      x += bw;
+      k++;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    const el = (0.5 - (y + 0.5) / h) * Math.PI;
+    for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 4;
+      let rgb: number[];
+      if (el < 0) {
+        // ground: dark, a little lighter and warmer toward the horizon
+        const t = Math.min(1, -el / 0.5);
+        const g = (0.16 - 0.08 * t) * (night ? 0.5 : 1);
+        rgb = [hor.r * g * 1.05, hor.g * g, hor.b * g * 0.92];
+      } else if (el < skyline[x]) {
+        // a building: its face shade, floors and windows
+        const L = 0.2126 * hor.r + 0.7152 * hor.g + 0.0722 * hor.b;
+        const fl = Math.floor(el / 0.012), col = Math.floor(x / 2);
+        const win = (fl % 2 === 0 ? 1 : 0) * (col % 3 !== 0 ? 1 : 0);
+        const lit = night && win && frac(Math.sin(fl * 12.9898 + col * 78.233 + seedA[x]) * 43758.5453) < 0.3;
+        const f = shade[x] * (win ? 0.75 : 1);
+        rgb = lit ? [L * 3.2, L * 2.5, L * 1.6] : [L * f * 1.04, L * f, L * f * 0.95];
+      } else {
+        const r = Math.min(6, half(data[o])), g = Math.min(6, half(data[o + 1])), b = Math.min(6, half(data[o + 2]));
+        const L = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        rgb = [r, g, b].map((v) => L + (v - L) * 0.75);
+      }
+      for (let c = 0; c < 3; c++) rout[o + c] = toH(rgb[c]);
+      rout[o + 3] = toH(1);
+    }
+  }
+  const rt = new THREE.DataTexture(rout, w, h, THREE.RGBAFormat, THREE.HalfFloatType);
+  rt.mapping = THREE.EquirectangularReflectionMapping;
+  rt.colorSpace = tex.colorSpace;
+  rt.flipY = tex.flipY;
+  rt.needsUpdate = true;
   const pm = new THREE.PMREMGenerator(renderer);
   const env = pm.fromEquirectangular(ibl).texture;
+  const refl = pm.fromEquirectangular(rt).texture;
   pm.dispose();
   ibl.dispose();
-  return { tex, env, sunAz, lum: lum(all), horizon: hor, zenith: zen };
+  rt.dispose();
+  return { tex, env, refl, sunAz, lum: lum(all), horizon: hor, zenith: zen };
+}
+
+function frac(v: number) {
+  return v - Math.floor(v);
 }
 
 export class SkySystem {
+  /** the reflection map for shiny things (see loadPhoto) and how bright to take it: scene.environmentIntensity, read after update */
+  refl: THREE.Texture | null = null;
   time = 10.5;
   /** game hours advanced per real second */
   rate = 1 / 45;
@@ -323,6 +387,7 @@ export class SkySystem {
       }
       // never fully dark: the city's glow and the moon keep a little light in the reflections
       this.scene.environmentIntensity = Math.max(target / Math.max(1e-4, (m < 0.5 ? pa.lum : pb.lum) / base), 0.08 * this.night);
+      this.refl = m < 0.5 ? pa.refl : pb.refl;
     } else {
       const dayZ = new THREE.Color(0.1, 0.32, 0.78), dayH = new THREE.Color(0.6, 0.76, 0.9);
       this.zenith.copy(dayZ).multiplyScalar(target);

@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { AudioSys } from '../audio/audio';
 import { Input } from '../core/input';
 import { clamp, damp } from '../core/math';
-import { setCarNight, type CarType } from '../entities/carModels';
+import { setCarEnv, setCarNight, type CarType } from '../entities/carModels';
 import { Human, HumanRenderer } from '../entities/humans';
 import { Vehicle, collideVehicles, type VehicleEvents } from '../entities/vehicle';
 import { carModel } from '../entities/carModels';
@@ -1007,6 +1007,7 @@ export class Game {
     collideVehicles(this.vehicles, this.events);
     this.beamMat.opacity = clamp(night * 0.5, 0, 0.5);
     setCarNight(night);
+    setCarEnv(this.sky.refl, this.scene.environmentIntensity);
     // the player's headlights
     const pv = this.player.vehicle;
     if (pv && night > 0.1 && !pv.isBoat && !pv.wrecked) {

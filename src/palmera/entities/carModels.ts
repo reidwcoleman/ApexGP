@@ -578,6 +578,22 @@ function busGlassMaterial() {
   return m;
 }
 
+/**
+ * Car paint and glass reflect the sky's own reflection map (a skyline and a crisp horizon), not the
+ * flattened lighting environment; they're scaled the way the scene's environment is
+ */
+export function setCarEnv(env: THREE.Texture | null, k: number) {
+  const mats: THREE.MeshStandardMaterial[] = [...paintCache.values(), carMats.glass, carMats.busGlass];
+  for (const m of mats) {
+    if (m.envMap !== env) {
+      m.envMap = env;
+      m.needsUpdate = true;
+    }
+    const base = (m.userData.envBase ??= m.envMapIntensity) as number;
+    m.envMapIntensity = base * k;
+  }
+}
+
 export function setCarNight(night: number) {
   lampGlow.value = 0.35 + night * 2.6;
   carMats.busGlass.emissiveIntensity = Math.max(0, night - 0.15) * 0.75;
