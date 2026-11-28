@@ -248,19 +248,39 @@ float bvn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(bhash(vec3(i, 0.0)), bhash(vec3(i + vec2(1.0, 0.0), 0.0)), f.x), mix(bhash(vec3(i + vec2(0.0, 1.0), 0.0)), bhash(vec3(i + vec2(1.0, 1.0), 0.0)), f.x), f.y); }
 // a person in a room: a cut-out figure standing at depth zp, centred on x = px, scale sc, legs
 // scissoring by amp*sin(w). 0 = missed, 1 = top/arms, 2 = legs, 3 = head
-float bPerson(vec3 ro, vec3 rd, float zp, float px, float sc, float w, float amp, float tLim) {
+// a figure seen through the window: which part the ray hits (1 top, 2 legs, 3 skin, 4 hair, 5 shoes) and
+// a rounded shading for it, lighter in the middle of each limb than at its edge (they were flat cut-outs)
+float bPerson(vec3 ro, vec3 rd, float zp, float px, float sc, float w, float amp, float tLim, out float shd) {
+  shd = 1.0;
   if (abs(rd.z) < 1e-3) return 0.0;
   float tp = (zp - ro.z) / rd.z;
   if (tp <= 0.0 || tp >= tLim) return 0.0;
   vec3 hp = ro + rd * tp;
   float x = (hp.x - px) / sc, y = hp.y / sc;
   float dx = abs(x);
-  if (length(vec2(x, (y - 1.6) * 0.9)) < 0.105) return 3.0;
-  if (y > 1.45 && y < 1.52 && dx < 0.05) return 3.0;
-  if (y > 0.86 && y < 1.47 && dx < 0.17 - max(0.0, y - 1.36) * 1.1) return 1.0;
-  if (y > 0.9 && y < 1.4 && abs(dx - 0.2) < 0.04) return 1.0;
+  float e = length(vec2(x, (y - 1.6) * 0.9)) / 0.105;
+  if (e < 1.0) {
+    shd = 0.68 + 0.4 * sqrt(1.0 - e * e);
+    return (y > 1.615 + dx * dx || (dx > 0.075 && y > 1.57)) ? 4.0 : 3.0;
+  }
+  if (y > 1.45 && y < 1.53 && dx < 0.045) { shd = 0.75; return 3.0; }
+  // torso with sloping shoulders
+  float tw = 0.165 - max(0.0, y - 1.34) * 1.25 - max(0.0, 0.95 - y) * 0.3;
+  if (y > 0.84 && y < 1.47 && dx < tw) {
+    shd = (0.6 + 0.48 * sqrt(max(0.0, 1.0 - (dx / tw) * (dx / tw)))) * (0.88 + 0.2 * (y - 0.84) / 0.63);
+    return y < 0.9 ? 2.0 : 1.0;
+  }
+  // arms hanging a little out from the hips, hands at the end
+  float ax = 0.19 + (1.38 - y) * 0.03;
+  float ad = abs(dx - ax);
+  if (y > 0.82 && y < 1.38 && ad < 0.038) { shd = 0.62 + 0.4 * sqrt(1.0 - (ad / 0.038) * (ad / 0.038)); return y < 0.9 ? 3.0 : 1.0; }
   float sw = sin(w) * amp * (1.0 - y / 0.88);
-  if (y > 0.0 && y <= 0.88 && (abs(x - sw) < 0.065 || abs(x + sw) < 0.065)) return 2.0;
+  float l1 = abs(x - sw), l2 = abs(x + sw);
+  float ld = min(l1, l2);
+  if (y > 0.0 && y <= 0.88 && ld < 0.062) {
+    shd = 0.6 + 0.45 * sqrt(1.0 - (ld / 0.062) * (ld / 0.062));
+    return y < 0.06 ? 5.0 : 2.0;
+  }
   return 0.0;
 }
 // a room behind the glass: the ray from the eye carried into a box the size of the window's cell
@@ -317,11 +337,12 @@ vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office
       float u = office > 0.5 ? 0.0 : clamp(sin(ph) * 1.3, -1.0, 1.0);
       float px = cellSz.x * (office > 0.5 ? 0.25 + 0.5 * k : 0.5 + 0.3 * u);
       float sc = min(1.0, cellSz.y / 2.4) * (0.92 + 0.16 * k);
-      float hit = bPerson(ro, rd, depth * (0.3 + 0.35 * k), px, sc, ph * 9.0, office > 0.5 ? 0.0 : 0.15 * smoothstep(0.0, 0.4, 1.0 - abs(u)), t);
+      float pshd;
+      float hit = bPerson(ro, rd, depth * (0.3 + 0.35 * k), px, sc, ph * 9.0, office > 0.5 ? 0.0 : 0.15 * smoothstep(0.0, 0.4, 1.0 - abs(u)), t, pshd);
       if (hit > 0.5) {
         vec3 topC = office > 0.5 ? mix(vec3(0.85, 0.86, 0.88), vec3(0.2, 0.24, 0.32), step(0.5, fract(k * 5.3))) : 0.35 + 0.4 * cos(6.2832 * (fract(k * 7.7) + vec3(0.0, 0.33, 0.67)));
-        col = hit > 2.5 ? mix(vec3(0.8, 0.58, 0.45), vec3(0.34, 0.23, 0.16), fract(k * 3.9)) : hit > 1.5 ? vec3(0.14, 0.15, 0.2) : topC;
-        col *= 0.8;
+        col = hit > 4.5 ? vec3(0.08) : hit > 3.5 ? mix(vec3(0.06, 0.045, 0.035), vec3(0.4, 0.28, 0.15), fract(k * 2.7)) : hit > 2.5 ? mix(vec3(0.8, 0.58, 0.45), vec3(0.34, 0.23, 0.16), fract(k * 3.9)) : hit > 1.5 ? vec3(0.14, 0.15, 0.2) : topC;
+        col *= 0.8 * pshd;
       }
     }
   }
@@ -407,10 +428,12 @@ vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office
       float u = clamp(sin(ph) * 1.5, -1.0, 1.0);
       float mv = 1.0 - abs(u);
       float px = cellSz.x * (0.5 + 0.36 * u);
-      float hit = sh < 0.3 ? 0.0 : bPerson(ro, rd, depth * (0.62 + 0.1 * sh), px, 0.92 + 0.14 * sh, ph * 9.0, 0.16 * smoothstep(0.0, 0.4, mv), t);
+      float pshd;
+      float hit = sh < 0.3 ? 0.0 : bPerson(ro, rd, depth * (0.62 + 0.1 * sh), px, 0.92 + 0.14 * sh, ph * 9.0, 0.16 * smoothstep(0.0, 0.4, mv), t, pshd);
       if (hit > 0.5) {
-        vec3 topC = 0.4 + 0.45 * cos(6.2832 * (fract(sh * 7.3) + vec3(0.0, 0.33, 0.67)));
-        col = hit > 2.5 ? mix(vec3(0.85, 0.62, 0.48), vec3(0.36, 0.24, 0.17), fract(sh * 5.1)) : hit > 1.5 ? mix(vec3(0.12, 0.15, 0.24), vec3(0.32, 0.28, 0.22), step(0.5, fract(sh * 3.7))) : topC;
+        vec3 topC = 0.35 + 0.4 * cos(6.2832 * (fract(sh * 7.3) + vec3(0.0, 0.33, 0.67)));
+        col = hit > 4.5 ? vec3(0.08) : hit > 3.5 ? mix(vec3(0.06, 0.045, 0.035), vec3(0.42, 0.3, 0.16), fract(sh * 2.3)) : hit > 2.5 ? mix(vec3(0.85, 0.62, 0.48), vec3(0.36, 0.24, 0.17), fract(sh * 5.1)) : hit > 1.5 ? mix(vec3(0.12, 0.15, 0.24), vec3(0.32, 0.28, 0.22), step(0.5, fract(sh * 3.7))) : topC;
+        col *= pshd;
       }
     }
     // cut-outs standing in the room, in front of whatever the ray reached: a mannequin in the boutique
@@ -446,10 +469,12 @@ vec3 bRoom(vec2 pin, vec2 cellSz, float depth, vec3 rd, float seed, float office
         float u = clamp(sin(ph) * 1.4, -1.0, 1.0);
         float mv = 1.0 - abs(u);
         float px = cellSz.x * (0.5 + 0.32 * u);
-        float hit = bPerson(ro, rd, depth * (0.3 + 0.06 * sh), px, 0.9 + 0.16 * sh, ph * 9.0, 0.16 * smoothstep(0.0, 0.4, mv), tCut);
+        float pshd;
+        float hit = bPerson(ro, rd, depth * (0.3 + 0.06 * sh), px, 0.9 + 0.16 * sh, ph * 9.0, 0.16 * smoothstep(0.0, 0.4, mv), tCut, pshd);
         if (hit > 0.5) {
-          vec3 topC = 0.4 + 0.45 * cos(6.2832 * (fract(sh * 4.9) + vec3(0.0, 0.33, 0.67)));
-          col = hit > 2.5 ? mix(vec3(0.85, 0.62, 0.48), vec3(0.36, 0.24, 0.17), fract(sh * 6.3)) : hit > 1.5 ? mix(vec3(0.12, 0.15, 0.24), vec3(0.55, 0.5, 0.42), step(0.6, fract(sh * 2.9))) : topC;
+          vec3 topC = 0.35 + 0.4 * cos(6.2832 * (fract(sh * 4.9) + vec3(0.0, 0.33, 0.67)));
+          col = hit > 4.5 ? vec3(0.08) : hit > 3.5 ? mix(vec3(0.06, 0.045, 0.035), vec3(0.42, 0.3, 0.16), fract(sh * 3.1)) : hit > 2.5 ? mix(vec3(0.85, 0.62, 0.48), vec3(0.36, 0.24, 0.17), fract(sh * 6.3)) : hit > 1.5 ? mix(vec3(0.12, 0.15, 0.24), vec3(0.55, 0.5, 0.42), step(0.6, fract(sh * 2.9))) : topC;
+          col *= pshd;
         }
       }
     }
@@ -700,7 +725,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v17';
+  mat.customProgramCacheKey = () => 'palmera-building-v18';
   return mat;
 }
 
