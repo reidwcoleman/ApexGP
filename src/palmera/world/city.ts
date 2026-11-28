@@ -509,7 +509,7 @@ if (bn.y > 0.5) {
   vec2 cell = vec2(3.6, 3.2); vec2 fr = vec2(0.55, 0.5); float y0 = 0.8;
   if (bStyle < 0.5) { cell = vec2(3.0, 3.6); fr = vec2(0.9, 0.8); y0 = 0.3; }
   else if (bStyle < 1.5) { cell = vec2(3.4, 3.3); fr = vec2(0.5, 0.56); y0 = 1.2; }
-  else if (bStyle < 2.5) { cell = vec2(3.6, 3.0); fr = vec2(0.36, 0.44); y0 = 0.3; }
+  else if (bStyle < 2.5) { cell = vec2(3.6, 3.0); fr = vec2(0.4, 0.48); y0 = 0.3; }
   // the street floor of shops and hotels: tall shopfronts
   bool shop = (bStyle > 0.5 && bStyle < 1.5 || bStyle > 2.5) && v < 4.2;
   if (shop) { cell = vec2(4.6, 4.4); fr = vec2(0.82, 0.66); y0 = -0.75; }
@@ -526,6 +526,34 @@ if (bn.y > 0.5) {
   // frame: a band just inside the opening; sill: a ledge under it
   float fw = bStyle < 0.5 ? 0.012 : 0.03;
   bFrame = inside * (1.0 - step(d.x, hw.x - fw) * step(d.y, hw.y - fw * 1.3));
+  // houses: casing trim round each opening, glazing bars (a cross, or six panes; a few picture
+  // windows), and on about half the houses louvred shutters in the house's own colour
+  float hTrim = 0.0, hShut = 0.0; vec3 shutCol = vec3(0.0);
+  if (bStyle > 1.5 && bStyle < 2.5) {
+    vec2 wq0 = (f - (0.5 - hw)) / (2.0 * hw);
+    float hk = fract(vStyle.y * 4.13);
+    float fwq = fwidth(wq0.x);
+    float bw = 0.016;
+    float mx = 1.0 - step(bw, abs(wq0.x - 0.5));
+    float my = hk < 0.55 ? 1.0 - step(bw, abs(wq0.y - 0.5)) : max(1.0 - step(bw, abs(wq0.y - 0.3333)), 1.0 - step(bw, abs(wq0.y - 0.6667)));
+    float mun = max(mx, my) * step(0.14, hk) * inside * (1.0 - smoothstep(0.012, 0.03, fwq));
+    bFrame = max(bFrame, mun);
+    float out0 = (1.0 - inside) * inCols;
+    hTrim = out0 * step(d.x, hw.x + 0.024) * step(d.y, hw.y + 0.026);
+    float sk = fract(vStyle.y * 2.71);
+    if (sk < 0.55) {
+      float sw = hw.x * 0.5;
+      float sm = out0 * step(hw.x + 0.03, d.x) * step(d.x, hw.x + 0.03 + sw) * step(d.y, hw.y);
+      // slats every 6 cm, a stile round the edge, fading to the average at range
+      float slat = 0.8 + 0.2 * step(0.45, fract(f.y * cell.y / 0.06));
+      slat = mix(slat, 0.9, smoothstep(0.3, 0.8, fwidth(f.y * cell.y / 0.06)));
+      float stile = step(d.x, hw.x + 0.03 + 0.012) + step(hw.x + 0.03 + sw - 0.012, d.x) + step(hw.y - 0.02, d.y);
+      int ci = int(floor(fract(vStyle.y * 9.7) * 6.0));
+      shutCol = ci == 0 ? vec3(0.13, 0.25, 0.18) : ci == 1 ? vec3(0.12, 0.17, 0.3) : ci == 2 ? vec3(0.1, 0.36, 0.38) : ci == 3 ? vec3(0.9, 0.9, 0.87) : ci == 4 ? vec3(0.62, 0.3, 0.26) : vec3(0.2, 0.21, 0.22);
+      shutCol *= stile > 0.5 ? 1.05 : slat;
+      hShut = sm;
+    }
+  }
   float sill = (1.0 - inside) * inCols * step(d.x, hw.x + 0.03) * step(f.y, 0.5 - hw.y) * step(0.5 - hw.y - 0.035, f.y) * step(0.5, bStyle) * (shop ? 0.0 : 1.0);
   wmask = inside * (1.0 - bFrame);
   float r = bhash(vec3(id, face * 7.0 + vStyle.y * 91.0));
@@ -579,6 +607,8 @@ if (bn.y > 0.5) {
   dOn *= 1.0 - step(0.5, wmask);
   #endif
   diffuseColor.rgb = mix(diffuseColor.rgb, frameCol, bFrame);
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95, 0.94, 0.9), hTrim);
+  diffuseColor.rgb = mix(diffuseColor.rgb, shutCol, hShut);
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93, 0.92, 0.88), sill);
   // the opening's reveal: a shadow along the top and one side of each window
   float reveal = inside * (smoothstep(hw.y - 0.07, hw.y, f.y - 0.5) * 0.5 + smoothstep(hw.x - 0.05, hw.x, f.x - 0.5) * 0.3);
@@ -669,7 +699,7 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v16';
+  mat.customProgramCacheKey = () => 'palmera-building-v17';
   return mat;
 }
 
@@ -901,7 +931,9 @@ if (rOn > 0.5) {
         '#include <color_fragment>',
         `#include <color_fragment>
 // the triangular gable ends are wall, in the building's colour (after the roof's instance colour is applied)
-if (rN.y < 0.2 && dot(vWall, vec3(1.0)) > 0.0) diffuseColor.rgb = vWall * 0.92;`,
+if (rN.y < 0.2 && dot(vWall, vec3(1.0)) > 0.0) diffuseColor.rgb = vWall * 0.92;
+// the soffit (the only flat face): painted board, a little shaded
+if (rN.y > 0.985) diffuseColor.rgb = vec3(0.8, 0.79, 0.76);`,
       )
       .replace(
         '#include <normal_fragment_maps>',
@@ -915,7 +947,7 @@ if (rOn > 0.5) {
 }`,
       );
   };
-  m.customProgramCacheKey = () => 'palmera-roof-v5';
+  m.customProgramCacheKey = () => 'palmera-roof-v6';
   return m;
 }
 
@@ -929,6 +961,8 @@ function roofGeometry(): THREE.BufferGeometry {
     // gables
     -0.5, 0, -0.5, -0.5, 0, 0.5, -0.5, 1, 0,
     0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 1, 0,
+    // soffit: the underside, so the eaves are closed (you saw sky and trees through them from the street)
+    -0.5, 0, -0.5, 0.5, 0, -0.5, 0.5, 0, 0.5, -0.5, 0, -0.5, 0.5, 0, 0.5, -0.5, 0, 0.5,
   ];
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
