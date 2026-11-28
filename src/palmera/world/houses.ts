@@ -12,14 +12,15 @@ const DOORS = [0x6b4a32, 0x2f4f6f, 0x8a2e2e, 0x2e5d4b, 0xf2efe6, 0x3a3a3a];
 const CELL = 120;
 
 export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
-  const cells = new Map<string, { x: number; z: number; list: THREE.BufferGeometry[] }>();
+  const cells = new Map<string, { x: number; z: number; list: THREE.BufferGeometry[]; pickets: number[] }>();
   // each house's wall height, from its building (the houses list only has the footprint)
   const wallH = new Map<string, number>();
   for (const b of map.buildings) if (b.style === 2 && b.y0 === 0) wallH.set(Math.round(b.x * 10) + ',' + Math.round(b.z * 10), b.h);
   for (const h of map.houses) {
     const cx = Math.floor(h.x / CELL), cz = Math.floor(h.z / CELL), key = cx + ',' + cz;
     let cell = cells.get(key);
-    if (!cell) cells.set(key, (cell = { x: (cx + 0.5) * CELL, z: (cz + 0.5) * CELL, list: [] }));
+    if (!cell) cells.set(key, (cell = { x: (cx + 0.5) * CELL, z: (cz + 0.5) * CELL, list: [], pickets: [] }));
+    const pk = cell.pickets;
     const out = cell.list;
     const y0 = groundBase(h.x, h.z);
     let r = h.seed * 9973;
@@ -69,10 +70,15 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
       const segs: [number, number][] = [[-h.hw - 0.5, doorAl - 0.8], [doorAl + 0.8, h.drive ? dAl - 1.9 : h.hw + 0.5]];
       for (const [a, b] of segs) {
         if (b - a < 0.5) continue;
-        // a low board fence: one panel, a cap rail and posts (not one box a picket - that was ~40k boxes)
-        hb((a + b) / 2, 0.42, fo, b - a, 0.62, 0.03, 0xf7f5f0);
-        hb((a + b) / 2, 0.76, fo, b - a, 0.05, 0.07, 0xf7f5f0);
-        for (let p = a; p <= b + 0.01; p += Math.max(1.2, (b - a) / Math.ceil((b - a) / 1.6))) hb(p, 0.45, fo, 0.09, 0.9, 0.09, 0xf7f5f0);
+        // a picket fence: two rails on the posts, and the pickets as one alpha-cut panel in front of them
+        // (not one box a picket - that was ~40k boxes)
+        for (const ry of [0.22, 0.68]) hb((a + b) / 2, ry, fo - 0.035, b - a, 0.07, 0.035, 0xeeebe4);
+        for (let p = a; p <= b + 0.01; p += Math.max(1.2, (b - a) / Math.ceil((b - a) / 1.6))) hb(p, 0.5, fo - 0.035, 0.09, 1.0, 0.09, 0xf7f5f0);
+        // the panel: a quad from a to b, 0.03..0.98 m, u in pickets (0.15 m each)
+        const P = (al: number, up: number) => [h.x + h.ax * al + h.nx * fo, y0 + up, h.z + h.az * al + h.nz * fo];
+        const q = [P(a, 0.03), P(b, 0.03), P(b, 0.98), P(a, 0.98)];
+        const u1 = (b - a) / 0.15;
+        pk.push(...q[0], 0, 0, ...q[1], u1, 0, ...q[2], u1, 1, ...q[0], 0, 0, ...q[2], u1, 1, ...q[3], 0, 1);
       }
     }
     // gutters under the front and back eaves, a downpipe at each end of them
@@ -88,6 +94,7 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
     hb(-h.hw - 0.4, 0.45, -h.hd * 0.3, 0.7, 0.8, 0.8, 0xc9ccce);
   }
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 });
+  const picketMat = new THREE.MeshStandardMaterial({ map: picketTexture(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.75 });
   const chunks: { m: THREE.Mesh; x: number; z: number }[] = [];
   for (const c of cells.values()) {
     const m = new THREE.Mesh(merge(c.list), mat);
@@ -97,6 +104,23 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
     m.castShadow = false;
     m.receiveShadow = true;
     scene.add(m);
+    if (c.pickets.length) {
+      const g = new THREE.BufferGeometry();
+      const n = c.pickets.length / 5;
+      const pos = new Float32Array(n * 3), uv = new Float32Array(n * 2);
+      for (let i = 0; i < n; i++) {
+        pos.set(c.pickets.slice(i * 5, i * 5 + 3), i * 3);
+        uv.set(c.pickets.slice(i * 5 + 3, i * 5 + 5), i * 2);
+      }
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+      g.computeVertexNormals();
+      const pm = new THREE.Mesh(g, picketMat);
+      pm.castShadow = true;
+      pm.receiveShadow = true;
+      scene.add(pm);
+      chunks.push({ m: pm, x: c.x, z: c.z });
+    }
   }
   /** small stuff: each 120 m cell only within 240 m of the camera */
   return {
@@ -104,4 +128,45 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
       for (const c of chunks) c.m.visible = Math.hypot(c.x - cam.x, c.z - cam.z) < 240 + CELL * 0.7;
     },
   };
+}
+
+/** one picket per tile (0.15 m): a 9 cm painted board with a pointed top, a gap either side */
+function picketTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 256;
+  const x = c.getContext('2d')!;
+  x.clearRect(0, 0, 64, 256);
+  // board 0.09 of 0.15 m -> 38 px of 64, centred; point over the top 10% ; slight grain and an edge shade
+  const l = 13, r = 51;
+  const g = x.createLinearGradient(l, 0, r, 0);
+  g.addColorStop(0, '#e4e0d8');
+  g.addColorStop(0.15, '#f6f4ef');
+  g.addColorStop(0.85, '#f3f1ea');
+  g.addColorStop(1, '#d9d5cc');
+  x.fillStyle = g;
+  x.beginPath();
+  x.moveTo(l, 256);
+  x.lineTo(l, 28);
+  x.lineTo(32, 2);
+  x.lineTo(r, 28);
+  x.lineTo(r, 256);
+  x.closePath();
+  x.fill();
+  x.globalAlpha = 0.07;
+  x.fillStyle = '#6b6152';
+  for (let i = 0; i < 26; i++) x.fillRect(l + 2 + Math.random() * (r - l - 4), 30 + Math.random() * 200, 1, 10 + Math.random() * 40);
+  // a little dirt splashed up the bottom
+  const d = x.createLinearGradient(0, 256, 0, 200);
+  d.addColorStop(0, 'rgba(110,96,70,0.9)');
+  d.addColorStop(1, 'rgba(110,96,70,0)');
+  x.globalAlpha = 0.25;
+  x.globalCompositeOperation = 'source-atop';
+  x.fillStyle = d;
+  x.fillRect(0, 200, 64, 56);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = THREE.RepeatWrapping;
+  t.anisotropy = 4;
+  return t;
 }
