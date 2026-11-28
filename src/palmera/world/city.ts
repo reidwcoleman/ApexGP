@@ -1627,20 +1627,24 @@ export class City {
   }
 
   private buildDocks() {
-    const parts: THREE.BufferGeometry[] = [];
+    // two meshes: decks you walk along z (the boardwalk) and along x (the piers), so the boards can
+    // run across each; the piles under them go with the first
+    const byAxis: [THREE.BufferGeometry[], THREE.BufferGeometry[]] = [[], []];
     for (const d of this.map.docks) {
-      parts.push(box(d.x1 - d.x0, 0.35, d.z1 - d.z0, (d.x0 + d.x1) / 2, d.y - 0.175, (d.z0 + d.z1) / 2, 0xa98b67));
       const long = d.x1 - d.x0 > d.z1 - d.z0;
+      byAxis[long ? 1 : 0].push(box(d.x1 - d.x0, 0.35, d.z1 - d.z0, (d.x0 + d.x1) / 2, d.y - 0.175, (d.z0 + d.z1) / 2, 0xa98b67));
       const len = long ? d.x1 - d.x0 : d.z1 - d.z0;
       for (let t = 2; t < len; t += 6) {
         for (const s of [0, 1]) {
           const x = long ? d.x0 + t : s ? d.x1 - 0.2 : d.x0 + 0.2;
           const z = long ? (s ? d.z1 - 0.2 : d.z0 + 0.2) : d.z0 + t;
-          parts.push(cyl(0.16, 0.16, 3.6, 5, x, -1.3, z, 0x6f5a43));
+          byAxis[0].push(cyl(0.16, 0.16, 3.6, 5, x, -1.3, z, 0x6f5a43));
         }
       }
     }
-    this.add(merge(parts), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }), true);
+    byAxis.forEach((parts, axis) => {
+      if (parts.length) this.add(merge(parts), plankMaterial(axis === 0 ? 'z' : 'x'), true);
+    });
   }
 
   private buildLandmarks() {
@@ -1926,4 +1930,54 @@ function spillTexture(): THREE.CanvasTexture {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
+}
+
+/**
+ * Weathered deck boards on a dock's walking surface, laid across the way you walk ('z' = a deck you
+ * walk along z): 16 cm boards with dark gaps, staggered butt joints, each board its own shade from
+ * warm wood to sun-greyed, a running grain and the odd nail pair. Sides and piles keep their colour.
+ */
+function plankMaterial(walk: 'x' | 'z'): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vPW;')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvPW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vPW;
+float pkH(float n) { return fract(sin(n * 127.1) * 43758.5453); }
+float pkN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  float a = pkH(i.x + i.y * 57.0), b = pkH(i.x + 1.0 + i.y * 57.0), c = pkH(i.x + (i.y + 1.0) * 57.0), d = pkH(i.x + 1.0 + (i.y + 1.0) * 57.0);
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y); }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+{
+  vec3 fn = normalize(cross(dFdx(vPW), dFdy(vPW)));
+  if (abs(fn.y) > 0.7) {
+    float along = ${walk === 'z' ? 'vPW.z' : 'vPW.x'}, across = ${walk === 'z' ? 'vPW.x' : 'vPW.z'};
+    float w = 0.16;
+    float idx = floor(along / w), f = fract(along / w);
+    float h = pkH(idx);
+    float run = (across + h * 3.6) / 3.6;
+    float seg = floor(run), fs = fract(run);
+    float h2 = pkH(idx * 7.13 + seg * 13.7);
+    // gaps and joints drawn only while they're wider than a pixel; past that, their average darkening
+    float fa = fwidth(along / w), fc = fwidth(run);
+    float gapA = smoothstep(0.0, 0.07, f) * smoothstep(1.0, 0.93, f);
+    float gapJ = smoothstep(0.0, 0.004, fs) * smoothstep(1.0, 0.996, fs);
+    float gap = mix(gapA, 0.88, smoothstep(0.05, 0.25, fa)) * mix(gapJ, 0.995, smoothstep(0.002, 0.01, fc));
+    vec3 warm = mix(vec3(0.34, 0.23, 0.14), vec3(0.5, 0.37, 0.24), h2);
+    vec3 grey = vec3(0.42, 0.39, 0.35) * (0.85 + 0.3 * h);
+    vec3 wood = mix(warm, grey, smoothstep(0.35, 0.8, pkN(vec2(across * 0.3, idx * 0.37)) * 0.7 + h2 * 0.3));
+    // grain runs the length of the board: it varies across the board's width, wandering slowly along it
+    float grain = 0.92 + 0.08 * sin(f * 26.0 + pkN(vec2(across * 0.7, idx * 3.1)) * 5.0 + h * 40.0) * (1.0 - smoothstep(0.08, 0.3, fa));
+    // a pair of nails where each board crosses a joist (every 0.6 m)
+    float jx = fract((across + 0.3) / 0.6);
+    float nail = (step(abs(jx - 0.5), 0.012) * step(abs(f - 0.28), 0.06) + step(abs(jx - 0.5), 0.012) * step(abs(f - 0.72), 0.06)) * (1.0 - smoothstep(0.004, 0.012, fwidth(across)));
+    diffuseColor.rgb = wood * grain * mix(0.18, 1.0, gap) * (1.0 - 0.45 * nail);
+  }
+}`);
+  };
+  m.customProgramCacheKey = () => 'palmera-planks3-' + walk;
+  return m;
 }
