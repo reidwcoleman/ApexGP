@@ -76,7 +76,9 @@ const FILM = {
    *  (yt KPf7CXQ33j8) sits at mean 0.15 with blacks at 0.07, where ours read 0.70 / 0.31 — white murk */
   wetExposure: 0.56,
   /** how much hotter a sunny daytime sky is let run (the camera exposes for the land) */
-  skyHot: 0.3,
+  // (0.3 → 0.5, 2026-11-27: the real 2025 Monza pole onboard's sunny sky measures L 0.51–0.73 (mean 0.64), ours
+  // 0.39–0.59 (0.49) — still a blue sky, as Reid asked in October, but a broadcast's brighter one)
+  skyHot: 0.5,
   /** the milky haze over a sunny day's sky (sky.ts uMilk) */
   dayMilk: 0.2,
   /** extra saturation on a dry overcast day (×(1 + greySat · overcast)) */
