@@ -8,6 +8,7 @@ import { box, merge } from '../core/geo';
 import { groundBase, type CityMap } from './map';
 import { glowTexture } from './textures';
 import { propGeometry } from './furniture';
+import { addLampLight } from './lamplight';
 
 const DOORS = [0x6b4a32, 0x2f4f6f, 0x8a2e2e, 0x2e5d4b, 0xf2efe6, 0x3a3a3a];
 
@@ -139,7 +140,7 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
     // an AC unit against the side wall away from the drive
     hb(-h.hw - 0.4, 0.45, -h.hd * 0.3, 0.7, 0.8, 0.8, 0xc9ccce);
   }
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 });
+  const mat = addLampLight(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }));
   const slabMat = concreteSlabMaterial();
   // the lantern glass: warm and bright after dark, a dull pale shade by day
   const lanternMat = new THREE.MeshStandardMaterial({ color: 0xd8d2c2, roughness: 0.4, emissive: 0xffb866, emissiveIntensity: 0 });
@@ -147,7 +148,7 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
   const washGeo = new THREE.PlaneGeometry(1.4, 1.4);
   const poolMat = new THREE.MeshBasicMaterial({ map: glowTexture(), color: 0xffa860, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
   const washMat = poolMat.clone();
-  const picketMat = new THREE.MeshStandardMaterial({ map: picketTexture(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.75 });
+  const picketMat = addLampLight(new THREE.MeshStandardMaterial({ map: picketTexture(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.75 }));
   const chunks: { m: THREE.Mesh; x: number; z: number }[] = [];
   for (const c of cells.values()) {
     const m = new THREE.Mesh(merge(c.list), mat);

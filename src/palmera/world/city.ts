@@ -1475,7 +1475,7 @@ export class City {
       }
     }
     const box1 = new THREE.BoxGeometry(1, 1, 1);
-    const stucco = D(new THREE.MeshStandardMaterial({ roughness: 0.85 }), 'white_stucco_02', { scale: 3, albedo: 0.5, normal: 0.7 });
+    const stucco = addLampLight(D(new THREE.MeshStandardMaterial({ roughness: 0.85 }), 'white_stucco_02', { scale: 3, albedo: 0.5, normal: 0.7 }));
     chunked(this.scene, this.chunks, trim, box1, stucco, { far: 1400, shadow: true });
     chunked(this.scene, this.chunks, balc, box1, stucco, { far: 600, shadow: true });
     chunked(this.scene, this.chunks, rail, box1, stucco, { far: 450, shadow: true });
@@ -1611,7 +1611,7 @@ export class City {
       if (!l) by.set(it.kind, (l = []));
       l.push({ m: it.m });
     }
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.15 });
+    const mat = addLampLight(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.15 }));
     const glassy = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.9 });
     // solid street furniture: you bump into planters, bins, hydrants and news boxes (and can vault them)
     const SOLID: Partial<Record<FurnitureKind, [number, number]>> = { planter: [0.5, 1.0], bin: [0.3, 0.95], hydrant: [0.2, 0.75], news: [0.3, 1.15] };

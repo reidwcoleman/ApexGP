@@ -1,5 +1,6 @@
 // Procedural low-poly vehicle models. Front of every model points to +z, ground at y = 0.
 import * as THREE from 'three';
+import { addLampLight } from '../world/lamplight';
 import { box, cyl, merge, mergeGroups, prep } from '../core/geo';
 
 export type CarType = 'sedan' | 'sports' | 'suv' | 'pickup' | 'taxi' | 'police' | 'van' | 'bus' | 'bike' | 'bicycle' | 'ambulance' | 'boat' | 'jetski' | 'airboat';
@@ -505,12 +506,12 @@ float grime = 0.0;`)
 
 // shared materials
 export const carMats = {
-  detail: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.32, metalness: 0.35 }),
+  detail: addLampLight(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.32, metalness: 0.35 })),
   glass: new THREE.MeshPhysicalMaterial({ vertexColors: true, color: 0xffffff, roughness: 0.04, metalness: 0.0, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.8, transparent: true, opacity: 0.55, depthWrite: false }),
   lamps: lampMaterial(),
   /** a bus's windows: its strip lights glow through them after dark (setCarNight) */
   busGlass: busGlassMaterial(),
-  wheel: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.3, side: THREE.DoubleSide }),
+  wheel: addLampLight(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.3, side: THREE.DoubleSide })),
   burnt: new THREE.MeshStandardMaterial({ color: 0x1e1b19, roughness: 1, metalness: 0 }),
   sirenRed: new THREE.MeshBasicMaterial({ color: 0xff2020 }),
   sirenBlue: new THREE.MeshBasicMaterial({ color: 0x2050ff }),
@@ -534,6 +535,7 @@ export function paintMat(color: number): THREE.MeshStandardMaterial {
         : { color, vertexColors: true, roughness: 0.42, metalness: 0.0, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.2 },
     );
     addGrime(pm);
+    addLampLight(pm);
     m = pm;
     paintCache.set(color, m);
   }
