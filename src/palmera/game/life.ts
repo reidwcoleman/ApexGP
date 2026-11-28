@@ -277,6 +277,20 @@ export class Life {
         g.setDesired(h, 0, 0);
         if (h.injured) h.fall = 1;
         return true;
+      case 'vendor':
+        // behind the cart's counter all day
+        g.setDesired(h, 0, 0);
+        return true;
+      case 'queue':
+        h.stateT -= dt;
+        g.setDesired(h, 0, 0);
+        if (h.stateT <= 0) {
+          h.state = 'walk';
+          h.clip = '';
+          h.texting = false;
+          return false;
+        }
+        return true;
       case 'bench': {
         h.stateT -= dt;
         g.setDesired(h, 0, 0);
