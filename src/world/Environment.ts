@@ -45,7 +45,11 @@ const FILM = {
   nightExposure: 1.1,
   saturation: 0.86,
   contrast: 1.03,
-  tint: [1.05, 1.0, 0.9],
+  // (2026-11-27: [1.05, 1, 0.9] → [1.02, 1, 0.96]. Sampled across the real 2025 Monza and Spa pole
+  // onboards, sunlit tarmac sits at R−B 0 ± 0.04 — a broadcast camera is white-balanced to the sun — and
+  // the glare off it is a near-white 0.84/0.83/0.80; with this, the afternoon and LOOK_HIGH warmth on
+  // top, ours came out beige: R−B +0.06 near, +0.15 in the T-cam's glare)
+  tint: [1.02, 1.0, 0.96],
   shadowTint: [1.0, 0.99, 1.0],
   /** the sky held back from the brighter exposure (the camera's knee) */
   skyExposure: 0.55,

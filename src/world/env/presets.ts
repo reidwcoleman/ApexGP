@@ -135,7 +135,9 @@ export const TIME_PRESETS: Record<TimeOfDay, TimePreset> = {
     exposure: 1.12,
     saturation: 1.07,
     contrast: 1.15,
-    tint: [1.03, 0.98, 0.92],
+    // (2026-11-27: [1.03, 0.98, 0.92] → [1.01, 0.995, 0.97]: a 4 pm September session at Monza on the
+    // broadcast is grey tarmac, not beige — the warmth of the hour is in the low sun's own colour)
+    tint: [1.01, 0.995, 0.97],
     shadowTint: [0.92, 0.97, 1.09],
     bloom: 0.7,
     bloomThreshold: 1.15,
@@ -287,7 +289,8 @@ export const OVER = { dim: 0.08, contrast: 0.13, sat: 0.12, warm: 0.045 };
 const OVER_DIM = OVER.dim, OVER_CONTRAST = OVER.contrast, OVER_SAT = OVER.sat, OVER_WARM = OVER.warm;
 const LOOK_FILL = 0.9;
 const LOOK_SHADOW: [number, number, number] = [1.0, 1.0, 0.95];
-const LOOK_HIGH: [number, number, number] = [1.04, 1.0, 0.95];
+// (2026-11-27: [1.04, 1, 0.95] → [1.02, 1, 0.98]: see FILM.tint in Environment.ts — sunlit grey reads grey)
+const LOOK_HIGH: [number, number, number] = [1.02, 1.0, 0.98];
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smooth = (a: number, b: number, x: number) => {
