@@ -64,12 +64,15 @@ export function addLampLight<M extends THREE.Material>(m: M): M {
         '#include <opaque_fragment>',
         `if (uLampOn > 0.001) {
   vec2 luv = (vLampW.xz - uLampBox.xy) / uLampBox.zw;
-  float lf = texture2D(uLampMap, luv).r * (1.0 - smoothstep(6.5, 11.0, vLampW.y));
-  outgoingLight += diffuseColor.rgb * vec3(1.0, 0.7, 0.42) * uLampOn * lf * 2.4;
+  // strongest at street level, falling off up the wall toward the lamp head and gone above it, and in
+  // pools round each lamp rather than one even wash (a whole facade used to glow to the roof)
+  float lv = 1.0 - smoothstep(0.0, 7.5, vLampW.y);
+  float lf = pow(texture2D(uLampMap, luv).r, 1.35) * lv * sqrt(lv);
+  outgoingLight += diffuseColor.rgb * vec3(1.0, 0.7, 0.42) * uLampOn * lf * 2.6;
 }
 #include <opaque_fragment>`,
       );
   };
-  m.customProgramCacheKey = () => prevKey() + '|lamp1';
+  m.customProgramCacheKey = () => prevKey() + '|lamp2';
   return m;
 }
