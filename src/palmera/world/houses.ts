@@ -12,15 +12,26 @@ const DOORS = [0x6b4a32, 0x2f4f6f, 0x8a2e2e, 0x2e5d4b, 0xf2efe6, 0x3a3a3a];
 const CELL = 120;
 
 export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
-  const cells = new Map<string, { x: number; z: number; list: THREE.BufferGeometry[]; pickets: number[] }>();
+  const cells = new Map<string, { x: number; z: number; list: THREE.BufferGeometry[]; pickets: number[]; slabs: number[] }>();
   // each house's wall height, from its building (the houses list only has the footprint)
   const wallH = new Map<string, number>();
   for (const b of map.buildings) if (b.style === 2 && b.y0 === 0) wallH.set(Math.round(b.x * 10) + ',' + Math.round(b.z * 10), b.h);
   for (const h of map.houses) {
     const cx = Math.floor(h.x / CELL), cz = Math.floor(h.z / CELL), key = cx + ',' + cz;
     let cell = cells.get(key);
-    if (!cell) cells.set(key, (cell = { x: (cx + 0.5) * CELL, z: (cz + 0.5) * CELL, list: [], pickets: [] }));
+    if (!cell) cells.set(key, (cell = { x: (cx + 0.5) * CELL, z: (cz + 0.5) * CELL, list: [], pickets: [], slabs: [] }));
     const pk = cell.pickets;
+    const sl = cell.slabs;
+    // a concrete top on a slab: al0..al1 across, o0..o1 along, at height up; per vertex x y z, u (m along), v (m across from the middle), kind
+    const slab = (al0: number, al1: number, o0: number, o1: number, up: number, kind: number) => {
+      const P = (al: number, o: number) => [h.x + h.ax * al + h.nx * o, y0 + up, h.z + h.az * al + h.nz * o];
+      const mid = (al0 + al1) / 2;
+      const V = (al: number, o: number) => [...P(al, o), o - o0, al - mid, kind];
+      const A = V(al0, o0), B = V(al1, o0), C = V(al1, o1), D = V(al0, o1);
+      const up_ = (B[2] - A[2]) * (C[0] - A[0]) - (B[0] - A[0]) * (C[2] - A[2]);
+      if (up_ > 0) sl.push(...A, ...B, ...C, ...A, ...C, ...D);
+      else sl.push(...A, ...C, ...B, ...A, ...D, ...C);
+    };
     const out = cell.list;
     const y0 = groundBase(h.x, h.z);
     let r = h.seed * 9973;
@@ -51,10 +62,15 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
     }
     // a paved path to the sidewalk
     hb(doorAl, 0.025, front + (setback + 1.4) / 2, 1.2, 0.05, setback - 1.4, 0xd8d2c6, true);
+    slab(doorAl - 0.6, doorAl + 0.6, front + 1.4, front + setback, 0.052, 1);
     // driveway beside the house, maybe under a carport
     const dAl = h.hw + 2.2;
     if (h.drive) {
       hb(dAl, 0.03, front - h.hd + (setback + 2 * h.hd) / 2 - 0.5, 3.4, 0.06, setback + 2 * h.hd - 1, 0xbdb8ae, true);
+      {
+        const oc = front - h.hd + (setback + 2 * h.hd) / 2 - 0.5, L = setback + 2 * h.hd - 1;
+        slab(dAl - 1.7, dAl + 1.7, oc - L / 2, oc + L / 2, 0.062, 0);
+      }
       if (rnd() < 0.4) {
         hb(dAl, 2.5, front - 1.5, 3.8, 0.12, 6.5, 0xf4f1ea);
         for (const sa of [-1.75, 1.75]) for (const so of [-4.5, 1.5]) hb(dAl + sa, 1.25, front + so, 0.12, 2.5, 0.12, 0xf4f1ea);
@@ -94,6 +110,7 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
     hb(-h.hw - 0.4, 0.45, -h.hd * 0.3, 0.7, 0.8, 0.8, 0xc9ccce);
   }
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 });
+  const slabMat = concreteSlabMaterial();
   const picketMat = new THREE.MeshStandardMaterial({ map: picketTexture(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.75 });
   const chunks: { m: THREE.Mesh; x: number; z: number }[] = [];
   for (const c of cells.values()) {
@@ -104,6 +121,23 @@ export function buildHouseFronts(scene: THREE.Scene, map: CityMap) {
     m.castShadow = false;
     m.receiveShadow = true;
     scene.add(m);
+    if (c.slabs.length) {
+      const n = c.slabs.length / 6;
+      const pos = new Float32Array(n * 3), drv = new Float32Array(n * 3), nor = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        pos.set(c.slabs.slice(i * 6, i * 6 + 3), i * 3);
+        drv.set(c.slabs.slice(i * 6 + 3, i * 6 + 6), i * 3);
+        nor[i * 3 + 1] = 1;
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+      g.setAttribute('aDrv', new THREE.BufferAttribute(drv, 3));
+      const sm = new THREE.Mesh(g, slabMat);
+      sm.receiveShadow = true;
+      scene.add(sm);
+      chunks.push({ m: sm, x: c.x, z: c.z });
+    }
     if (c.pickets.length) {
       const g = new THREE.BufferGeometry();
       const n = c.pickets.length / 5;
@@ -169,4 +203,55 @@ function picketTexture(): THREE.Texture {
   t.wrapS = THREE.RepeatWrapping;
   t.anisotropy = 4;
   return t;
+}
+
+/**
+ * Poured concrete on drives (kind 0) and paths (kind 1), in the slab's own metres: a mottled pale
+ * grey with fine aggregate, saw-cut joints (every 3 m and down the middle of a drive, every 1.2 m on a
+ * path), and on drives two worn tyre tracks and oil stains down the middle where the car stands, with
+ * grime along the edges. Detail fades to its average once it's sub-pixel.
+ */
+function concreteSlabMaterial(): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec3 aDrv; varying vec3 vDrv;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvDrv = aDrv;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vDrv;
+float csH(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float csN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(csH(i), csH(i + vec2(1.0, 0.0)), f.x), mix(csH(i + vec2(0.0, 1.0)), csH(i + vec2(1.0, 1.0)), f.x), f.y); }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+{
+  float u = vDrv.x, v = vDrv.y;
+  bool path = vDrv.z > 0.5;
+  vec2 p = vec2(u, v);
+  float fw = fwidth(u) + fwidth(v);
+  float fine = 1.0 - smoothstep(0.01, 0.05, fw);
+  vec3 c = vec3(0.63, 0.62, 0.59) * (0.86 + 0.22 * csN(p * 0.6 + 3.0)) * (0.93 + 0.1 * csN(p * 2.3)) * mix(vec3(1.0), vec3(1.03, 1.0, 0.95), csN(p * 0.25 + 9.0));
+  c *= mix(1.0, 0.9 + 0.2 * csH(floor(p * 90.0)), fine * 0.6);
+  // saw-cut joints
+  float step_ = path ? 1.2 : 3.0;
+  float jw = 0.01;
+  float ju = 1.0 - smoothstep(jw, jw + fw * 0.7, abs(fract(u / step_ + 0.5) - 0.5) * step_);
+  float jv = path ? 0.0 : 1.0 - smoothstep(jw, jw + fw * 0.7, abs(v));
+  float joint = max(ju, jv) * (1.0 - smoothstep(0.02, 0.08, fw));
+  c *= 1.0 - 0.45 * joint;
+  if (!path) {
+    // tyre tracks, and oil dripped down the middle
+    float track = smoothstep(0.35, 0.0, abs(abs(v) - 0.8));
+    c *= 1.0 - 0.14 * track * (0.6 + 0.4 * csN(p * vec2(0.3, 3.0)));
+    float oil = smoothstep(0.58, 0.78, csN(p * vec2(0.55, 1.6) + 11.0) * 0.75 + csN(p * 2.7) * 0.25) * (1.0 - smoothstep(0.25, 0.6, abs(v)));
+    c = mix(c, vec3(0.25, 0.23, 0.2), oil * 0.55);
+  }
+  // grime along the edges
+  float e = (path ? 0.6 : 1.7) - abs(v);
+  c *= 1.0 - 0.12 * (1.0 - smoothstep(0.0, 0.25, e));
+  diffuseColor.rgb = c;
+}`);
+  };
+  m.customProgramCacheKey = () => 'palmera-slab-v2';
+  return m;
 }
