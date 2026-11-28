@@ -223,9 +223,12 @@ void main() {
     // where it deepens into the sea, the sea's own sandy-turquoise edge colour, so the two meet without a seam
     float sea = smoothstep(730.5, 734.0, x);
     wcol = mix(wcol, mix(vec3(0.6, 0.58, 0.42), vec3(0.16, 0.5, 0.48), 0.25) * light + sky * 0.05, sea * 0.75);
-    a = mix(a, 0.55, sea);
+    a = mix(a, 0.32, sea);
     float fm = clamp(foam, 0.0, 1.0);
-    c = vec4(mix(wcol, vec3(0.96, 0.98, 0.98) * light, fm), max(a, fm * 0.95));
+    // past the waterline the sea itself takes over: fade the film out over 6 m (the strip runs to x = 741,
+    // and its end drew a straight pale edge on the water out to the horizon)
+    float out_ = 1.0 - smoothstep(733.2, 737.5, x);
+    c = vec4(mix(wcol, vec3(0.96, 0.98, 0.98) * light, fm), max(a, fm * 0.95) * out_);
   } else if (x > reach) {
     // wet sand where the last waves reached, drying toward the top
     float w = smoothstep(reach, reach + 1.2, x) * (0.55 + 0.45 * smoothstep(edge - 4.0, edge, x));
