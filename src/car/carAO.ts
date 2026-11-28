@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { CarGeoLevel } from './carGeometry.ts';
-import { FLAP_PIVOT, FW_FLAP_PIVOT } from './carGeometry.ts';
+import { FLAP_PIVOT, FW_FLAP_PIVOT, NECK_PIVOT } from './carGeometry.ts';
 import { TRACK_F, TRACK_R, TYRE_W_F, TYRE_W_R, WHEEL_R, Z_FRONT_AXLE, Z_REAR_AXLE } from './carLayout.ts';
 
 /**
@@ -79,7 +79,10 @@ export function bakeCarAO(L: CarGeoLevel): number {
   add(B.pillar);
   add(B.trim);
   add(B.driver);
-  add(B.head);
+  // (the helmet is built pivot-local round the neck, for the head's animation: baked where it was built
+  // it sat 10 cm off the ground under the floor and came out all but fully occluded — a dark helmet in
+  // any skylight, the overcast T-cam's crown a dull maroon under a bright sky)
+  add(B.head, true, new THREE.Matrix4().makeTranslation(NECK_PIVOT[0], NECK_PIVOT[1], NECK_PIVOT[2]));
   for (const k of Object.keys(L.parts) as (keyof typeof L.parts)[]) {
     add(L.parts[k].paint);
     add(L.parts[k].carbon);
