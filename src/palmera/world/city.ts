@@ -718,14 +718,33 @@ metalnessFactor = mix(metalnessFactor, bStyle < 0.5 ? 0.8 : 0.0, bFrame);`,
         `#include <emissivemap_fragment>
 {
   float dayLight = 1.0 - uNight;
+  // plate glass mirrors the street: the facades across the way (rows of windows under a ragged roofline),
+  // the road below, the sky above, by Fresnel - faint looking straight in, strong along the street.
+  // The towers' metallic glass already mirrors the sky map; this is for the shops and flats, whose plain
+  // glass showed the room as an open hole
+  float bF = 0.0;
+  if (wmask > 0.5 && bStyle > 0.5) {
+    vec3 bV = normalize(vBW - cameraPosition);
+    vec3 bR = reflect(bV, bn);
+    float cosT = clamp(dot(-bV, bn), 0.0, 1.0);
+    bF = 0.06 + 0.94 * pow(1.0 - cosT, 4.0);
+    float az = atan(bR.z, bR.x);
+    float roofE = 0.1 + 0.16 * fract(sin(floor(az * 7.0) * 91.7) * 4375.85);
+    vec3 skyR = mix(vec3(0.62, 0.7, 0.8), vec3(0.42, 0.55, 0.75), clamp(bR.y * 1.6, 0.0, 1.0));
+    float rows = step(0.5, fract(bR.y * 34.0)) * step(0.35, fract(az * 22.0));
+    vec3 facR = mix(vec3(0.5, 0.47, 0.42), vec3(0.16, 0.18, 0.2), rows * 0.8);
+    vec3 refl = bR.y < -0.02 ? vec3(0.17, 0.17, 0.18) : bR.y < roofE ? facR : skyR;
+    refl *= dayLight * 0.9;
+    totalEmissiveRadiance += refl * bF * 0.85;
+  }
   // the room as the daylight shows it, and lamps on in some rooms at night
-  totalEmissiveRadiance += bInterior * wmask * (dayLight * (bStyle < 0.5 ? 0.22 : 0.32) + uNight * 0.04);
+  totalEmissiveRadiance += bInterior * wmask * (1.0 - bF * 0.85 * dayLight) * (dayLight * (bStyle < 0.5 ? 0.22 : 0.32) + uNight * 0.04);
   // lit rooms at night: the lamp falls off across walls, floor and furniture, so it reads as a room
   totalEmissiveRadiance += bInterior * litCol * wlit * uNight * (0.28 + bLamp * 1.35);
 }`,
       );
   };
-  mat.customProgramCacheKey = () => 'palmera-building-v18';
+  mat.customProgramCacheKey = () => 'palmera-building-v19';
   return mat;
 }
 
