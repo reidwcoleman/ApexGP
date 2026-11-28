@@ -49,6 +49,10 @@ export interface DetailOpts {
   rough?: [number, number];
   /** only patch surfaces facing this way: 'all' | 'up' (ground) | 'side' (walls) */
   faces?: 'all' | 'up' | 'side';
+  /** a scan with a laid pattern (paving joints, block courses): one sample, kept square to the world.
+   *  The second, rotated sample that hides tiling on random textures laid a second set of joints across
+   *  the first at an angle - broad dark diagonal bands over the plazas */
+  aligned?: boolean;
 }
 
 let nextId = 0;
@@ -111,7 +115,7 @@ else { dUv = vec2(-vDW.x * sign(vDN.z), vDW.y); dT = vec3(-sign(vDN.z), 0.0, 0.0
 float dOn = ${faces === 'up' ? 'dUp ? 1.0 : 0.0' : faces === 'side' ? 'dUp ? 0.0 : 1.0' : '1.0'};
 dUv /= dScale;
 vec2 dUv2 = mat2(0.8, -0.6, 0.6, 0.8) * dUv * 0.63 + vec2(0.37, 0.71);
-float dW = smoothstep(0.32, 0.68, dNoise(dUv * 0.21 + 3.1));
+float dW = ${o.aligned ? '0.0' : 'smoothstep(0.32, 0.68, dNoise(dUv * 0.21 + 3.1))'};
 vec3 dMean = textureLod(dDiff, vec2(0.5), 14.0).rgb;
 vec3 dCol = mix(texture2D(dDiff, dUv).rgb, texture2D(dDiff, dUv2).rgb, dW) / max(dMean, vec3(0.02));
 float dRo = mix(texture2D(dRough, dUv).g, texture2D(dRough, dUv2).g, dW);

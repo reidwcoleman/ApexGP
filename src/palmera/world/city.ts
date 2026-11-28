@@ -1064,7 +1064,7 @@ export class City {
     const g2 = new MB();
     g2.flat(80, MAIN.z0, MAIN.x1, MAIN.z1, 0, 8);
     g2.flat(ISLAND.x0, ISLAND.z0, BEACH.x0, ISLAND.z1, 0, 8);
-    this.add(g2.geo(), D(new THREE.MeshStandardMaterial({ map: conc, roughness: 0.9, color: 0xf2ece2 }), 'concrete_pavement', { scale: 4, albedo: 0.8, normal: 0.8, rough: [0.6, 0.95] }));
+    this.add(g2.geo(), D(new THREE.MeshStandardMaterial({ map: conc, roughness: 0.9, color: 0xf2ece2 }), 'concrete_pavement', { aligned: true, scale: 2, albedo: 0.5, normal: 0.8, rough: [0.6, 0.95] }));
     const g3 = new MB();
     g3.flat(MAIN.x0, MAIN.z0, -480, MAIN.z1, 0, 20);
     // the marsh: wet olive-brown, not lawn

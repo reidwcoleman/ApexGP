@@ -69,15 +69,16 @@ export function crosswalkTexture(): THREE.CanvasTexture {
 
 export function concreteTexture(): THREE.CanvasTexture {
   const rng = new Rng(11);
-  const [c, ctx] = canvas(128, 128);
+  // 256 px with 1 px joints: at 128 px and 1.5 px the joints were ~9 cm wide on the plazas and blurred
+  // into broad dark bands down every paving line
+  const [c, ctx] = canvas(256, 256);
   ctx.fillStyle = '#c9c2b5';
-  ctx.fillRect(0, 0, 128, 128);
-  speckle(ctx, 128, 128, 3000, rng, ['#bfb8aa', '#d2cbbe', '#c4bdb0', '#b8b1a3']);
-  ctx.strokeStyle = 'rgba(120,112,100,0.45)';
-  ctx.lineWidth = 1.5;
-  for (let i = 0; i <= 128; i += 32) {
-    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 128); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(128, i); ctx.stroke();
+  ctx.fillRect(0, 0, 256, 256);
+  speckle(ctx, 256, 256, 12000, rng, ['#bfb8aa', '#d2cbbe', '#c4bdb0', '#b8b1a3']);
+  ctx.fillStyle = 'rgba(120,112,100,0.38)';
+  for (let i = 0; i < 256; i += 64) {
+    ctx.fillRect(i, 0, 1, 256);
+    ctx.fillRect(0, i, 256, 1);
   }
   return tex(c);
 }
