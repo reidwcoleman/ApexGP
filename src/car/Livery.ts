@@ -18,7 +18,7 @@ import {
   profileAt, profileAtS, profileAtParam, cockpitWeight, podWeight, sAtParam, HULL_ROW0, HULL_RHO, HULL_PX_PER_M,
   hullAtlasX, HULL_FRONT, HULL_REAR, type Profile,
 } from './hull.ts';
-import { FONT, canvas, ctx2d, paintWithFonts, contrastOn, fontsAreReady } from './carTextures.ts';
+import { FONT, canvas, ctx2d, paintWithFonts, contrastOn, fontsAreReady, haloPaintOf } from './carTextures.ts';
 import { clamp, smooth } from './carMath.ts';
 import { restorePixels, keepPixels, pixelKey } from '../core/pixelCache.ts';
 
@@ -654,7 +654,7 @@ function paintLivery(teamIn: Team, g: CanvasRenderingContext2D, m: CanvasRenderi
     [PC.white]: '#ececec',
     [PC.inlet]: '#050506',
     [PC.carbon]: '#1b1c1f',
-    [PC.halo]: team.halo ?? (team.pattern === 'split' || team.pattern === 'block' ? team.secondary : team.primary),
+    [PC.halo]: haloPaintOf(team),
     [PC.mirror]: team.primary,
     [PC.airbox]: team.primary,
     [PC.fwFlap]: team.wing ?? team.accent,

@@ -1155,6 +1155,18 @@ function luminance(hex: string) {
 export function contrastOn(hex: string) {
   return luminance(hex) > 0.35 ? '#0d0f12' : '#ececec';
 }
+/**
+ * the halo's aero fairing: the team's paint-shop choice, else its darker livery colour, else black
+ * (2026-11-27: nearly every car on the real grid runs a black or carbon halo with the partners' names in
+ * white — the dark ring across every T-cam shot, as in the real Spa pole onboard and AC's own Spa
+ * T-cam; ours wore the body colour, a thick red hoop that read as a toy)
+ */
+export function haloPaintOf(team: Pick<Team, 'halo' | 'primary' | 'secondary'>) {
+  if (team.halo) return team.halo;
+  if (luminance(team.secondary) < 0.06) return team.secondary;
+  if (luminance(team.primary) < 0.06) return team.primary;
+  return '#16171a';
+}
 /** cap albedo so whites/brights don't read as emissive under a hard sun */
 export function capHex(hex: string, max = 238) {
   const c = new THREE.Color(hex);
@@ -1225,7 +1237,7 @@ export function driverTexture(teamIn: Team, driverIn: Driver): THREE.Texture {
     drawInRect(g, R_CODE_R, code, contrastOn(team.primary), null, 0.85, 1.4, 900, false);
     // the title sponsor on the halo's front arc, in the ink that reads on the hoop's fairing (PC.halo)
     // (the strip is ~16:1 on the car, as the cell)
-    const haloPaint = team.halo ?? (team.pattern === 'split' || team.pattern === 'block' ? team.secondary : team.primary);
+    const haloPaint = haloPaintOf(team);
     drawInRect(g, R_HALO_SPON, team.sponsor, contrastOn(haloPaint), null, 0.94, 1.05, 900, false);
     drawInRect(g, R_DECK_SPON, team.sponsor, contrastOn(team.primary), null, 0.8, 1.25, 900, false);
     // the side arms: the two principal partners (TeamPartners); the arm strip is ~8:1 on the car against the
