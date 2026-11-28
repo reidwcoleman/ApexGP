@@ -1825,7 +1825,28 @@ float mhF(vec2 p) { return mhN(p) * 0.55 + mhN(p * 2.07 + 3.1) * 0.3 + mhN(p * 4
     this.buildSpill();
     chunked(this.scene, this.chunks, groups.get('umbrella') ?? [], propGeometry('umbrella') ?? umbrellaGeometry(), std({ side: THREE.DoubleSide, roughness: 0.85 }), { far: 300, shadow: true, lodGeo: umbrellaGeometry(), lodDist: 70, shadowGeo: umbrellaGeometry() });
     chunked(this.scene, this.chunks, groups.get('lounger') ?? [], propGeometry('lounger') ?? loungerGeometry(), std({ roughness: 0.5 }), { far: 160, shadow: false, lodGeo: loungerGeometry(), lodDist: 50 });
-    chunked(this.scene, this.chunks, groups.get('tower') ?? [], propGeometry('lifeguard') ?? lifeguardGeometry(), std({ roughness: 0.6 }), { far: 600, shadow: true, lodGeo: lifeguardGeometry(), lodDist: 110 });
+    // the hut's windows (its near-black parts) are glass, glossy, mirroring the sky and the sea - they
+    // were matte black panels with the grain showing
+    const towerMat = std({ roughness: 0.6 });
+    towerMat.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+#if defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
+if (max(vColor.r, max(vColor.g, vColor.b)) < 0.08) { roughnessFactor = 0.04; diffuseColor.rgb = vec3(0.012, 0.016, 0.02); }
+#endif`,
+      ).replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+#if defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
+// the hut has windows all round: by day the sky shows through from the far side
+if (max(vColor.r, max(vColor.g, vColor.b)) < 0.08) totalEmissiveRadiance += vec3(0.36, 0.42, 0.48) * (1.0 - uNight) * 0.32;
+#endif`,
+      ).replace('#include <common>', '#include <common>\nuniform float uNight;');
+      sh.uniforms.uNight = cityUniforms.uNight;
+    };
+    towerMat.customProgramCacheKey = () => 'palmera-tower-glass-v2';
+    chunked(this.scene, this.chunks, groups.get('tower') ?? [], propGeometry('lifeguard') ?? lifeguardGeometry(), towerMat, { far: 600, shadow: true, lodGeo: lifeguardGeometry(), lodDist: 110 });
   }
 
   /** manholes, drains, patches and oil on the roads (world/decals.ts; atlas from Blender) */
